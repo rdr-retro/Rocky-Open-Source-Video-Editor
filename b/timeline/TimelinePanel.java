@@ -61,6 +61,7 @@ public class TimelinePanel extends JPanel {
     public void setMediaPool(egine.media.MediaPool pool) { this.mediaPool = pool; }
     public void clearClips() { synchronized(clips) { clips.clear(); } repaint(); }
     public void addClip(TimelineClip clip) { synchronized(clips) { clips.add(clip); } repaint(); }
+    public void removeClip(TimelineClip clip) { synchronized(clips) { clips.remove(clip); } repaint(); }
     
     // --- ACCESSORS FOR SCROLLBAR ---
     public long getContentDurationFrames() {
@@ -136,6 +137,19 @@ public class TimelinePanel extends JPanel {
         blueline.stopPlayback();
         // Restore playhead to start position
         updatePlayheadFromFrame(start);
+    }
+
+    public void pausePlayback() {
+        blueline.stopPlayback();
+        repaint();
+    }
+
+    public double getPlaybackRate() {
+        return blueline.getPlaybackRate();
+    }
+
+    public void setPlaybackRate(double rate) {
+        blueline.setPlaybackRate(rate);
     }
 
     public TimelinePanel() {
@@ -282,18 +296,44 @@ public class TimelinePanel extends JPanel {
                 long deltaFrames = (long) (deltaSecs * FPS);
                 
                 if (interactionMode == 1) { 
-                    activeClip.setStartFrame(Math.max(0, originalStart + deltaFrames));
+                    long newStart = originalStart + deltaFrames;
+                    long snappedStart = findSnapFrame(newStart, activeClip);
+                    long snappedEnd = findSnapFrame(newStart + originalDuration, activeClip);
+                    
+                    if (snappedStart != -1 && snappedEnd != -1) {
+                        // Both snap, pick the closer one
+                        long deltaStart = Math.abs(snappedStart - newStart);
+                        long deltaEnd = Math.abs(snappedEnd - (newStart + originalDuration));
+                        if (deltaStart <= deltaEnd) {
+                            activeClip.setStartFrame(Math.max(0, snappedStart));
+                        } else {
+                            activeClip.setStartFrame(Math.max(0, snappedEnd - originalDuration));
+                        }
+                    } else if (snappedStart != -1) {
+                        activeClip.setStartFrame(Math.max(0, snappedStart));
+                    } else if (snappedEnd != -1) {
+                        activeClip.setStartFrame(Math.max(0, snappedEnd - originalDuration));
+                    } else {
+                        activeClip.setStartFrame(Math.max(0, newStart));
+                    }
                     if (timeListener != null) timeListener.onTimelineUpdated();
                 } else if (interactionMode == 2) { 
-                    long newStart = Math.max(0, originalStart + deltaFrames);
+                    long newStart = originalStart + deltaFrames;
+                    long snappedStart = findSnapFrame(newStart, activeClip);
+                    long finalStart = Math.max(0, snappedStart != -1 ? snappedStart : newStart);
+                    
                     long endFrame = originalStart + originalDuration;
-                    if (newStart < endFrame - 5) {
-                        activeClip.setStartFrame(newStart);
-                        activeClip.setDurationFrames(endFrame - newStart);
+                    if (finalStart < endFrame - 5) {
+                        activeClip.setStartFrame(finalStart);
+                        activeClip.setDurationFrames(endFrame - finalStart);
                     }
                     if (timeListener != null) timeListener.onTimelineUpdated();
                 } else if (interactionMode == 3) { 
-                    long newDuration = Math.max(5, originalDuration + deltaFrames);
+                    long newEnd = originalStart + originalDuration + deltaFrames;
+                    long snappedEnd = findSnapFrame(newEnd, activeClip);
+                    long finalEnd = snappedEnd != -1 ? snappedEnd : newEnd;
+                    
+                    long newDuration = Math.max(5, finalEnd - originalStart);
                     activeClip.setDurationFrames(newDuration);
                     if (timeListener != null) timeListener.onTimelineUpdated();
                 } else if (interactionMode == 4) { // FADE OUT
@@ -346,18 +386,23 @@ public class TimelinePanel extends JPanel {
                             int bodyTopY = currentY + headerH;
                             
                             if (mouseY >= currentY && mouseY < currentY + trackH) {
-                                // Check if click is in Fade In Area
-                                // Simple approximate check: left side of clip within fade width
-                                int fadeInW = (int)(clip.getFadeInFrames() / (double)FPS * pixelsPerSecond);
-                                if (fadeInW > 5 && mouseX >= clipX && mouseX <= clipX + fadeInW && mouseY >= bodyTopY) {
-                                    showFadeMenu(e, clip, true);
-                                    return;
-                                }
-                                
-                                // Check Fade Out Area
-                                int fadeOutW = (int)(clip.getFadeOutFrames() / (double)FPS * pixelsPerSecond);
-                                if (fadeOutW > 5 && mouseX >= clipX + clipW - fadeOutW && mouseX <= clipX + clipW && mouseY >= bodyTopY) {
-                                    showFadeMenu(e, clip, false);
+                                if (mouseX >= clipX && mouseX <= clipX + clipW) {
+                                    // Check if click is in Fade In Area
+                                    int fadeInW = (int)(clip.getFadeInFrames() / (double)FPS * pixelsPerSecond);
+                                    if (fadeInW > 5 && mouseX >= clipX && mouseX <= clipX + fadeInW && mouseY >= bodyTopY) {
+                                        showFadeMenu(e, clip, true);
+                                        return;
+                                    }
+                                    
+                                    // Check Fade Out Area
+                                    int fadeOutW = (int)(clip.getFadeOutFrames() / (double)FPS * pixelsPerSecond);
+                                    if (fadeOutW > 5 && mouseX >= clipX + clipW - fadeOutW && mouseX <= clipX + clipW && mouseY >= bodyTopY) {
+                                        showFadeMenu(e, clip, false);
+                                        return;
+                                    }
+
+                                    // If not in fade area but within clip, show general clip menu
+                                    showClipMenu(e, clip);
                                     return;
                                 }
                             }
@@ -365,6 +410,19 @@ public class TimelinePanel extends JPanel {
                     }
                     currentY += trackH;
                 }
+            }
+
+            private void showClipMenu(MouseEvent e, TimelineClip clip) {
+                JPopupMenu menu = new JPopupMenu();
+                
+                JMenuItem deleteItem = new JMenuItem("Eliminar");
+                deleteItem.addActionListener(ev -> {
+                    removeClip(clip);
+                    if (timeListener != null) timeListener.onTimelineUpdated();
+                });
+                menu.add(deleteItem);
+
+                menu.show(e.getComponent(), e.getX(), e.getY());
             }
 
             private void showFadeMenu(MouseEvent e, TimelineClip clip, boolean isFadeIn) {
@@ -485,7 +543,7 @@ public class TimelinePanel extends JPanel {
                                     mediaPool.addSource(source);
                                 }
 
-                                long duration = (source.getTotalFrames() > 0) ? source.getTotalFrames() : 3 * FPS;
+                                long duration = (source.getTotalFrames() > 0) ? source.getTotalFrames() : 5 * FPS; // Images default 5s
                                 TrackControlPanel.TrackType trackType = (sidebar != null) ? sidebar.getTrackType(targetTrackIndex) : null;
                                 
                                 boolean isMediaVideo = source.isVideo() || (!source.isVideo() && !source.isAudio()); 
@@ -501,6 +559,21 @@ public class TimelinePanel extends JPanel {
                                     dtde.dropComplete(false);
                                     return;
                                 }
+
+                                // Calculate Snap for Drop
+                                long snappedStart = findSnapFrame(startFrame, null);
+                                long snappedEnd = findSnapFrame(startFrame + duration, null);
+                                if (snappedStart != -1 && snappedEnd != -1) {
+                                    long deltaStart = Math.abs(snappedStart - startFrame);
+                                    long deltaEnd = Math.abs(snappedEnd - (startFrame + duration));
+                                    if (deltaStart <= deltaEnd) startFrame = snappedStart;
+                                    else startFrame = snappedEnd - duration;
+                                } else if (snappedStart != -1) {
+                                    startFrame = snappedStart;
+                                } else if (snappedEnd != -1) {
+                                    startFrame = snappedEnd - duration;
+                                }
+                                if (startFrame < 0) startFrame = 0;
 
                                 TimelineClip clip = new TimelineClip(name, startFrame, duration, targetTrackIndex);
                                 clip.setMediaSourceId(mediaId);
@@ -630,6 +703,56 @@ public class TimelinePanel extends JPanel {
             clips.removeAll(toRemove);
         }
         repaint();
+    }
+
+    private long findSnapFrame(long targetFrame, TimelineClip excludeClip) {
+        // Dynamic Threshold: proportional to screen distance (e.g. 12 pixels)
+        double pixelThreshold = 12.0; 
+        long thresholdFrames = (long) ((pixelThreshold / pixelsPerSecond) * FPS);
+        if (thresholdFrames < 5) thresholdFrames = 5; // Minimum safety
+        
+        long closestSnap = -1;
+        long minDelta = thresholdFrames + 1;
+
+        // Candidate 1: Start 0
+        long delta0 = Math.abs(targetFrame - 0);
+        if (delta0 < minDelta) {
+            minDelta = delta0;
+            closestSnap = 0;
+        }
+
+        // Candidate 2: Playhead
+        long ph = blueline.getPlayheadFrame();
+        long deltaPH = Math.abs(targetFrame - ph);
+        if (deltaPH < minDelta) {
+            minDelta = deltaPH;
+            closestSnap = ph;
+        }
+
+        // Candidates: Other clip boundaries
+        synchronized(clips) {
+            for (TimelineClip clip : clips) {
+                if (clip == excludeClip) continue;
+                
+                // Other clip's start
+                long s = clip.getStartFrame();
+                long ds = Math.abs(targetFrame - s);
+                if (ds < minDelta) {
+                    minDelta = ds;
+                    closestSnap = s;
+                }
+                
+                // Other clip's end
+                long e = clip.getStartFrame() + clip.getDurationFrames();
+                long de = Math.abs(targetFrame - e);
+                if (de < minDelta) {
+                    minDelta = de;
+                    closestSnap = e;
+                }
+            }
+        }
+
+        return (minDelta <= thresholdFrames) ? closestSnap : -1;
     }
     
     public interface TimelineListener {

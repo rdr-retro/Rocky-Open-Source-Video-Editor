@@ -5,10 +5,11 @@ package egine.engine;
  * Aligning with Sony Vegas "Audio as Master Clock" principle.
  */
 public class AudioClock {
-    private long startFrameOffset = 0;
-    private long baseDeviceFramePos = 0;
+    private long baseTimelineFrame = 0;
+    private long baseDevicePos = 0;
     private int sampleRate = 48000;
     private int fps = 30;
+    private double playbackRate = 1.0;
 
     public AudioClock(int sampleRate, int fps) {
         this.sampleRate = sampleRate;
@@ -21,8 +22,19 @@ public class AudioClock {
      * @param currentDevicePos The current absolute position of the audio line.
      */
     public void reset(long timelineFrame, long currentDevicePos) {
-        this.startFrameOffset = timelineFrame;
-        this.baseDeviceFramePos = currentDevicePos;
+        this.baseTimelineFrame = timelineFrame;
+        this.baseDevicePos = currentDevicePos;
+    }
+
+    public void setPlaybackRate(double rate, long currentDevicePos) {
+        // Update checkpoint before changing rate
+        this.baseTimelineFrame = getCurrentTimelineFrame(currentDevicePos);
+        this.baseDevicePos = currentDevicePos;
+        this.playbackRate = rate;
+    }
+
+    public double getPlaybackRate() {
+        return playbackRate;
     }
 
     /**
@@ -31,15 +43,15 @@ public class AudioClock {
      * @return Current frame on the timeline.
      */
     public long getCurrentTimelineFrame(long audioFramesPlayed) {
-        long relativeFrames = audioFramesPlayed - baseDeviceFramePos;
+        long relativeFrames = audioFramesPlayed - baseDevicePos;
         double seconds = (double) relativeFrames / sampleRate;
-        return startFrameOffset + (long)(seconds * fps);
+        return baseTimelineFrame + (long)(seconds * fps * playbackRate);
     }
 
     /**
      * Calculates the current time in seconds.
      */
     public double getCurrentTimeInSeconds(long audioFramesPlayed) {
-        return (double) startFrameOffset / fps + (double) audioFramesPlayed / sampleRate;
+        return (double) getCurrentTimelineFrame(audioFramesPlayed) / fps;
     }
 }

@@ -29,6 +29,7 @@ public class FrameServer {
     }
 
     public TimelinePanel getTimeline() { return timeline; }
+    public MediaPool getMediaPool() { return pool; }
 
     public void processFrame(double timeInSeconds) {
         long targetFrame = (long) (timeInSeconds * 30); // Assuming 30 FPS

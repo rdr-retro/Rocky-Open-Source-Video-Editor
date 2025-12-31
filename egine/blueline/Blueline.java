@@ -12,6 +12,7 @@ public class Blueline {
     private boolean isPlaying = false;
     private final int FPS = 30;
     private final Color PLAYHEAD_COLOR = Color.decode("#54a0ff");
+    private double playbackRate = 1.0; // 1.0 = Normal, 2.0 = 2x, -1.0 = Reverse
 
     public long getPlayheadFrame() {
         return playheadFrame;
@@ -27,6 +28,14 @@ public class Blueline {
 
     public void setPlaying(boolean playing) {
         this.isPlaying = playing;
+    }
+
+    public double getPlaybackRate() {
+        return playbackRate;
+    }
+
+    public void setPlaybackRate(double rate) {
+        this.playbackRate = rate;
     }
 
     public void startPlayback() {

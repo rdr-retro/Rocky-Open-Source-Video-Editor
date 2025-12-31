@@ -6,6 +6,11 @@ import java.awt.*;
 public class BottomBarPanel extends JPanel {
     private final Color BG_COLOR = Color.decode("#2d2d2d"); // Dark gray background
     private final Color TEXT_COLOR = Color.decode("#b0b0b0");
+
+    private JLabel speedLabel;
+    private JSlider speedSlider;
+    private java.util.function.Consumer<Double> onRateChange;
+    private TimelinePanel timeline;
     
     public BottomBarPanel() {
         setLayout(new BorderLayout());
@@ -17,13 +22,47 @@ public class BottomBarPanel extends JPanel {
         JPanel leftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
         leftPanel.setOpaque(false);
         
-        JLabel speedLabel = new JLabel("Velocidad: 0,00");
+        speedLabel = new JLabel("Velocidad: 1,00");
         speedLabel.setForeground(TEXT_COLOR);
         speedLabel.setFont(new Font("SansSerif", Font.PLAIN, 10));
         
-        JSlider speedSlider = new JSlider(0, 100, 0);
-        speedSlider.setPreferredSize(new Dimension(80, 20));
+        // Range: -4.00 to 4.00 (x100 for integer resolution)
+        speedSlider = new JSlider(-400, 400, 100);
+        speedSlider.setPreferredSize(new Dimension(100, 20));
         speedSlider.setOpaque(false);
+        
+        speedSlider.addChangeListener(e -> {
+            double rate = speedSlider.getValue() / 100.0;
+            speedLabel.setText(String.format("Velocidad: %.2f", rate));
+            if (onRateChange != null) onRateChange.accept(rate);
+        });
+
+        speedSlider.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    speedSlider.setValue(100); // Snap to 1.00 on double click
+                }
+            }
+            @Override
+            public void mouseReleased(java.awt.event.MouseEvent e) {
+                // Return to 1.00x (Normal Speed) on release
+                speedSlider.setValue(100); 
+            }
+        });
+
+        // Precision Dragging Logic
+        speedSlider.addMouseMotionListener(new java.awt.event.MouseAdapter() {
+            private int lastX = -1;
+            @Override
+            public void mouseDragged(java.awt.event.MouseEvent e) {
+                if (e.isControlDown() || e.isMetaDown()) {
+                    // Logic for high precision skipped here as JSlider is hard to override 
+                    // without a custom UI, but we can potentially "slow down" the value change 
+                    // or just leave the default feel for now. Standard JSlider is already granular.
+                }
+            }
+        });
         
         leftPanel.add(speedLabel);
         leftPanel.add(speedSlider);
@@ -50,7 +89,7 @@ public class BottomBarPanel extends JPanel {
         JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 15, 5));
         rightPanel.setOpaque(false);
         
-        JLabel timeLabel = new JLabel("00:00:07;10");
+        JLabel timeLabel = new JLabel("00:00:00;00");
         timeLabel.setForeground(TEXT_COLOR);
         timeLabel.setFont(new Font("SansSerif", Font.PLAIN, 10));
         
@@ -64,5 +103,16 @@ public class BottomBarPanel extends JPanel {
         add(leftPanel, BorderLayout.WEST);
         add(centerPanel, BorderLayout.CENTER);
         add(rightPanel, BorderLayout.EAST);
+    }
+
+    public void setOnRateChange(java.util.function.Consumer<Double> callback) {
+        this.onRateChange = callback;
+    }
+
+    public void setRate(double rate) {
+        int val = (int)(rate * 100);
+        if (val < -400) val = -400;
+        if (val > 400) val = 400;
+        speedSlider.setValue(val);
     }
 }

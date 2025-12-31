@@ -84,6 +84,13 @@ public class MediaSource {
         return null;
     }
 
+    public short[] getAudioSampleAt(long sampleIndex) {
+        if (audioDecoder != null) {
+            return audioDecoder.getAudioSampleAt(sampleIndex);
+        }
+        return new short[]{0, 0};
+    }
+
     public BufferedImage getFrame(long index) {
         if (isVideo && videoDecoder != null) {
             return videoDecoder.getFrame(index);

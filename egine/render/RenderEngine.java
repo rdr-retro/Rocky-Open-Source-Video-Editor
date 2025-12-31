@@ -28,23 +28,32 @@ public class RenderEngine {
     public void render(File outputFile, RenderProgressListener listener) {
         new Thread(() -> {
             Process process = null;
+            File tempAudioFile = new File(outputFile.getParent(), "temp_audio_" + System.currentTimeMillis() + ".wav");
             try {
                 // Determine duration from timeline based on actual content
                 long totalFrames = frameServer.getTimeline().getContentDurationFrames();
                 if (totalFrames <= 0) totalFrames = fps; // Default 1 second if empty
                 
-                // FFmpeg command: pipe from stdin (raw video) to mp4
+                // 1. RENDER AUDIO TO TEMP WAV
+                renderAudioToWav(tempAudioFile, totalFrames);
+
+                // 2. RENDER VIDEO AND MUX WITH TEMP AUDIO
+                // FFmpeg command: pipe from stdin (raw video) and temp audio file to mp4
                 String[] ffmpegCmd = {
                     "ffmpeg",
                     "-y",                 // Overwrite
-                    "-f", "rawvideo",     // Input format
+                    "-f", "rawvideo",     // Input video format from pipe
                     "-pixel_format", "bgra", 
                     "-video_size", width + "x" + height,
                     "-r", String.valueOf(fps),
-                    "-i", "-",            // Input from pipe
+                    "-i", "-",            // Input video from pipe
+                    "-i", tempAudioFile.getAbsolutePath(), // Input audio from file
                     "-c:v", "libx264",    // Video codec
                     "-pix_fmt", "yuv420p",// Compatibility
                     "-crf", "18",         // High quality
+                    "-c:a", "aac",        // Audio codec
+                    "-b:a", "192k",       // Audio bitrate
+                    "-shortest",          // End when the shortest stream ends
                     outputFile.getAbsolutePath()
                 };
 
@@ -53,14 +62,13 @@ public class RenderEngine {
                 process = pb.start();
                 
                 OutputStream os = process.getOutputStream();
-                
                 BufferedImage blackFrame = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
                 
                 for (long f = 0; f < totalFrames; f++) {
                     BufferedImage frame = frameServer.getFrameAt(f);
                     if (frame == null) frame = blackFrame;
                     
-                    // We need to ensure the frame is the right size and type
+                    // Ensure the frame is the right size
                     BufferedImage resizedFrame = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
                     java.awt.Graphics2D g = resizedFrame.createGraphics();
                     g.drawImage(frame, 0, 0, width, height, null);
@@ -93,8 +101,76 @@ public class RenderEngine {
                 if (listener != null) listener.onError(e.getMessage());
             } finally {
                 if (process != null) process.destroy();
+                if (tempAudioFile.exists()) tempAudioFile.delete();
             }
         }).start();
+    }
+
+    private void renderAudioToWav(File wavFile, long totalFrames) throws Exception {
+        int sampleRate = 48000;
+        int framesPerProjectFrame = sampleRate / fps;
+        javax.sound.sampled.AudioFormat format = new javax.sound.sampled.AudioFormat(sampleRate, 16, 2, true, true);
+        
+        long totalSamples = totalFrames * framesPerProjectFrame;
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        
+        for (long f = 0; f < totalFrames; f++) {
+            float[] mixed = mixFrameAudio(f);
+            for (float val : mixed) {
+                // Clipping
+                if (val > 1.0f) val = 1.0f;
+                else if (val < -1.0f) val = -1.0f;
+                
+                short s = (short) (val * 32767);
+                baos.write((byte) (s >> 8));
+                baos.write((byte) (s & 0xFF));
+            }
+        }
+        
+        byte[] audioData = baos.toByteArray();
+        java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(audioData);
+        javax.sound.sampled.AudioInputStream ais = new javax.sound.sampled.AudioInputStream(bais, format, audioData.length / 4);
+        javax.sound.sampled.AudioSystem.write(ais, javax.sound.sampled.AudioFileFormat.Type.WAVE, wavFile);
+    }
+
+    private float[] mixFrameAudio(long frameIndex) {
+        TimelinePanel timeline = frameServer.getTimeline();
+        java.util.List<b.timeline.TimelineClip> allClips = timeline.getClips();
+        int samplesPerFrame = (48000 / fps) * 2;
+        float[] mixedBuffer = new float[samplesPerFrame];
+
+        for (b.timeline.TimelineClip clip : allClips) {
+            if (frameIndex >= clip.getStartFrame() && frameIndex < (clip.getStartFrame() + clip.getDurationFrames())) {
+                if (timeline.getTrackType(clip.getTrackIndex()) != b.timeline.TrackControlPanel.TrackType.AUDIO) {
+                    continue;
+                }
+                
+                egine.media.MediaSource source = frameServer.getMediaPool().getSource(clip.getMediaSourceId());
+                if (source != null && source.hasAudio()) {
+                    long sourceFrame = clip.getSourceOffsetFrames() + (frameIndex - clip.getStartFrame());
+                    short[] samples = source.getAudioSamples(sourceFrame);
+                    if (samples != null) {
+                        double trackVolume = 1.0;
+                        long clipLocalFrame = frameIndex - clip.getStartFrame();
+                        
+                        // Fades
+                        if (clipLocalFrame < clip.getFadeInFrames()) {
+                            double t = (double)clipLocalFrame / clip.getFadeInFrames();
+                            trackVolume = b.timeline.TimelineClip.getOpacity(clip.getFadeInType(), t, true);
+                        } else if (clipLocalFrame > clip.getDurationFrames() - clip.getFadeOutFrames()) {
+                            long fadeOutStart = clip.getDurationFrames() - clip.getFadeOutFrames();
+                            double t = (double)(clipLocalFrame - fadeOutStart) / clip.getFadeOutFrames();
+                            trackVolume = b.timeline.TimelineClip.getOpacity(clip.getFadeOutType(), t, false);
+                        }
+
+                        for (int i = 0; i < samples.length && i < mixedBuffer.length; i++) {
+                            mixedBuffer[i] += (float)((samples[i] / 32768f) * trackVolume);
+                        }
+                    }
+                }
+            }
+        }
+        return mixedBuffer;
     }
 
     public interface RenderProgressListener {

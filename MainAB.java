@@ -21,6 +21,16 @@ import java.io.File;
  * RUN:     java -cp "lib/*:." MainAB
  */
 public class MainAB {
+    private static void updatePlaybackRate(double rate, b.timeline.TimelinePanel timeline, b.timeline.BottomBarPanel bottomBar) {
+        timeline.setPlaybackRate(rate);
+        bottomBar.setRate(rate);
+        if (rate != 0 && !timeline.isPlaying()) {
+            timeline.startPlayback();
+        } else if (rate == 0 && timeline.isPlaying()) {
+            timeline.pausePlayback();
+        }
+    }
+
     public static void main(String[] args) {
         // --- PLATFORM AUTO-DETECTION ---
         String os = System.getProperty("os.name");
@@ -139,17 +149,16 @@ public class MainAB {
             });
 
             // --- PART A: Top Section (Visualizer & MasterSound) ---
-            JPanel topPanel = new JPanel(new BorderLayout());
+            JPanel topPanel = new JPanel(new GridBagLayout());
             topPanel.setBackground(Color.decode("#1e1e1e"));
             
-            // Left placeholder
-            JPanel leftPlaceholder = new JPanel();
-            leftPlaceholder.setBackground(Color.decode("#161616"));
-            leftPlaceholder.setPreferredSize(new Dimension(300, 0));
-            topPanel.add(leftPlaceholder, BorderLayout.WEST);
-            
-            // Center Visualizer
-            topPanel.add(visualizer, BorderLayout.CENTER);
+            GridBagConstraints gbcTop = new GridBagConstraints();
+            gbcTop.fill = GridBagConstraints.BOTH;
+            gbcTop.weighty = 1.0;
+
+            // Visualizer (Main center content)
+            gbcTop.gridx = 0; gbcTop.weightx = 1.0;
+            topPanel.add(visualizer, gbcTop);
             visualizer.setOnPlay(() -> timeline.startPlayback());
             visualizer.setOnPause(() -> timeline.stopPlayback());
             visualizer.setOnStop(() -> {
@@ -157,8 +166,9 @@ public class MainAB {
                 timeline.updatePlayheadFromFrame(0);
             });
 
-            // Right Master Sound
-            topPanel.add(masterSound, BorderLayout.EAST);
+            // Master Sound (Attached to the right of visualizer, but they together are "centered" or occupy the top area)
+            gbcTop.gridx = 1; gbcTop.weightx = 0.0;
+            topPanel.add(masterSound, gbcTop);
 
             // --- TOP TOOLBAR ---
             TopToolbar toolbar = new TopToolbar();
@@ -289,6 +299,46 @@ public class MainAB {
             
             BottomBarPanel bottomBar = new BottomBarPanel();
             frame.add(bottomBar, BorderLayout.SOUTH);
+
+            // Wire Bottom Bar Rate
+            bottomBar.setOnRateChange(rate -> {
+                timeline.setPlaybackRate(rate);
+                if (rate != 0 && !timeline.isPlaying()) {
+                    timeline.startPlayback();
+                } else if (rate == 0 && timeline.isPlaying()) {
+                    timeline.pausePlayback();
+                }
+            });
+
+            // J-K-L Shortcuts and Global Keyboard Listener
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
+                if (e.getID() == KeyEvent.KEY_PRESSED) {
+                    int code = e.getKeyCode();
+                    double currentRate = timeline.getPlaybackRate();
+                    
+                    if (code == KeyEvent.VK_L) {
+                        if (currentRate <= 0) currentRate = 1.0;
+                        else if (currentRate < 1.0) currentRate = 1.0;
+                        else currentRate *= 2.0;
+                        
+                        if (currentRate > 4.0) currentRate = 4.0; // Limit to slider range
+                        updatePlaybackRate(currentRate, timeline, bottomBar);
+                        return true;
+                    } else if (code == KeyEvent.VK_J) {
+                        if (currentRate >= 0) currentRate = -1.0;
+                        else if (currentRate > -1.0) currentRate = -1.0;
+                        else currentRate *= 2.0;
+                        
+                        if (currentRate < -4.0) currentRate = -4.0;
+                        updatePlaybackRate(currentRate, timeline, bottomBar);
+                        return true;
+                    } else if (code == KeyEvent.VK_K) {
+                        updatePlaybackRate(0.0, timeline, bottomBar);
+                        return true;
+                    }
+                }
+                return false;
+            });
 
             // --- KEY BINDINGS ---
             frame.getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke("SPACE"), "togglePlayback");

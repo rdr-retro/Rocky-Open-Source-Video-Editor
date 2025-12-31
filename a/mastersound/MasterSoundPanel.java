@@ -28,7 +28,7 @@ public class MasterSoundPanel extends JPanel {
         setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
 
         // --- Header Section ---
-        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 0));
+        JPanel header = new JPanel(new FlowLayout(FlowLayout.CENTER, 2, 0));
         header.setBackground(BG_COLOR);
         JLabel iconL = new JLabel("▣");
         iconL.setForeground(Color.WHITE);
@@ -40,7 +40,7 @@ public class MasterSoundPanel extends JPanel {
         header.add(title);
 
         // --- Toolbar Section ---
-        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.CENTER, 4, 0));
         toolbar.setBackground(BG_COLOR);
         JLabel fxLabel = new JLabel("fx");
         fxLabel.setForeground(TEXT_COLOR);
@@ -60,8 +60,8 @@ public class MasterSoundPanel extends JPanel {
         mainArea.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
 
         // 1. Fader track
-        FaderPanel faderTrack = new FaderPanel();
-        mainArea.add(faderTrack, BorderLayout.WEST);
+        faderPanel = new FaderPanel();
+        // mainArea.add(faderTrack, BorderLayout.WEST); // Removed to bundle with meters
 
         // 2 & 3. dB scale and meters combined
         JPanel meterContainer = new JPanel(new GridBagLayout());
@@ -108,7 +108,18 @@ public class MasterSoundPanel extends JPanel {
         metersAndScale.add(rightBar, gbc);
 
         centerWrapper.add(metersAndScale, BorderLayout.CENTER);
-        mainArea.add(centerWrapper, BorderLayout.CENTER);
+        
+        // --- Bundle Fader and Meters Together ---
+        JPanel bundledControls = new JPanel(new BorderLayout());
+        bundledControls.setBackground(BG_COLOR);
+        bundledControls.add(faderPanel, BorderLayout.WEST);
+        bundledControls.add(centerWrapper, BorderLayout.CENTER);
+
+        JPanel centeringWrapper = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
+        centeringWrapper.setBackground(BG_COLOR);
+        centeringWrapper.add(bundledControls);
+
+        mainArea.add(centeringWrapper, BorderLayout.CENTER);
         
         add(mainArea, BorderLayout.CENTER);
 
@@ -145,6 +156,21 @@ public class MasterSoundPanel extends JPanel {
         
         repaint();
     }
+
+    /**
+     * Returns the current master gain multiplier.
+     * Uses a logarithmic curve for natural volume feeling.
+     * 0.0 at bottom, 1.0 at Roughly 66%, and up to 1.5x at top for headroom.
+     */
+    public float getVolume() {
+        if (faderPanel == null) return 1.0f;
+        float val = 1.0f - faderPanel.faderValue; // Inverted: 1.0 at top
+        if (val < 0.01f) return 0.0f;
+        // Exponential curve for more natural response
+        return (float) (Math.pow(val, 2) * 1.5);
+    }
+
+    private FaderPanel faderPanel;
 
     private class MeterBar extends JPanel {
         private boolean isLeft;

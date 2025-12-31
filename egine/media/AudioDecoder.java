@@ -42,6 +42,54 @@ public class AudioDecoder {
     private short[] residualBuffer = null;
     private int residualOffset = 0;
 
+    // Sliding Window Cache (approx 2 seconds of audio)
+    private short[] slidingWindow = null;
+    private long windowStartSample = -1;
+    private final int WINDOW_SIZE_SAMPLES = 48000 * 2; 
+
+    public short[] getAudioSampleAt(long sampleIndex) {
+        try {
+            if (grabber == null) return null;
+            
+            // 1. Check if sample is in sliding window
+            if (slidingWindow != null && sampleIndex >= windowStartSample && 
+                sampleIndex < windowStartSample + (slidingWindow.length / channels)) {
+                int offset = (int)(sampleIndex - windowStartSample) * channels;
+                return new short[]{slidingWindow[offset], slidingWindow[offset+1]};
+            }
+            
+            // 2. Cache miss: Fetch a large block (Sliding Window)
+            // We seek slightly before the sample to allow some reverse scrubbing buffer
+            long seekTarget = Math.max(0, sampleIndex - (48000 / 2)); // 0.5s before
+            long targetTimestamp = (long)((seekTarget / (double)sampleRate) * 1000000);
+            grabber.setTimestamp(targetTimestamp);
+            
+            short[] buffer = new short[WINDOW_SIZE_SAMPLES * channels];
+            int filled = 0;
+            while (filled < buffer.length) {
+                Frame frame = grabber.grabFrame(true, true, true, false);
+                if (frame == null || frame.samples == null) break;
+                
+                ShortBuffer sb = (ShortBuffer) frame.samples[0];
+                int toCopy = Math.min(sb.remaining(), buffer.length - filled);
+                sb.get(buffer, filled, toCopy);
+                filled += toCopy;
+            }
+            
+            slidingWindow = buffer;
+            windowStartSample = seekTarget;
+            
+            // Return requested sample from new buffer
+            if (sampleIndex >= windowStartSample && sampleIndex < windowStartSample + (filled / channels)) {
+                int offset = (int)(sampleIndex - windowStartSample) * channels;
+                return new short[]{slidingWindow[offset], slidingWindow[offset+1]};
+            }
+        } catch (Exception e) {
+            // e.printStackTrace();
+        }
+        return new short[]{0, 0}; 
+    }
+
     public short[] getAudioSamples(long frameNumber, int durationFrames) {
         try {
             if (grabber == null) return null;
