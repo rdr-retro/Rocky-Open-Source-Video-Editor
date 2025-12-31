@@ -57,8 +57,8 @@ public class MediaSource {
         }
 
         if (!isVideo && !isAudio) {
-            // Image handling
-            this.totalFrames = 900; 
+            // Image handling (Default 3 seconds @ 30 FPS)
+            this.totalFrames = 90; 
             this.width = 1920;
             this.height = 1080;
         }

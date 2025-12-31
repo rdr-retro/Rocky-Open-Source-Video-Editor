@@ -20,7 +20,7 @@ for %%u in (%LIBS%) do (
 )
 
 echo Compilando proyecto...
-javac -cp "lib/*;." a/visor/*.java a/mastersound/*.java b/timeline/*.java c/toolbar/*.java egine/media/*.java egine/engine/*.java egine/render/*.java egine/persistence/*.java MainAB.java
+javac -cp "lib/*;." a/visor/*.java a/mastersound/*.java b/timeline/*.java c/toolbar/*.java egine/media/*.java egine/engine/*.java egine/render/*.java egine/persistence/*.java egine/blueline/*.java MainAB.java
 
 if %errorlevel% equ 0 (
     echo Compilación exitosa.

@@ -105,6 +105,10 @@ public class SidebarPanel extends JPanel {
         void onReorder(int from, int to);
     }
     private ReorderListener onReorderTracks;
+    public interface OnRemoveTrackListener {
+        void onRemove(int index);
+    }
+    private OnRemoveTrackListener onRemoveTrack;
 
     public void setOnAddTrack(Runnable callback) {
         this.onAddTrack = callback;
@@ -112,6 +116,10 @@ public class SidebarPanel extends JPanel {
 
     public void setOnReorderTracks(ReorderListener listener) {
         this.onReorderTracks = listener;
+    }
+
+    public void setOnRemoveTrack(OnRemoveTrackListener listener) {
+        this.onRemoveTrack = listener;
     }
     
     private java.util.List<TrackControlPanel> tracks = new java.util.ArrayList<>();
@@ -162,6 +170,23 @@ public class SidebarPanel extends JPanel {
                 if (onAddTrack != null) onAddTrack.run(); // Final sync
             }
         });
+
+        // Context Menu for Track
+        JPopupMenu trackPopup = new JPopupMenu();
+        JMenuItem deleteItem = new JMenuItem("Eliminar Pista");
+        deleteItem.addActionListener(e -> removeTrack(track));
+        trackPopup.add(deleteItem);
+
+        track.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                if (e.isPopupTrigger()) trackPopup.show(e.getComponent(), e.getX(), e.getY());
+            }
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (e.isPopupTrigger()) trackPopup.show(e.getComponent(), e.getX(), e.getY());
+            }
+        });
         
         if (index >= 0 && index <= tracks.size()) {
             tracks.add(index, track);
@@ -177,6 +202,22 @@ public class SidebarPanel extends JPanel {
         
         if (onAddTrack != null) {
             onAddTrack.run(); 
+        }
+    }
+
+    public void removeTrack(TrackControlPanel track) {
+        int index = tracks.indexOf(track);
+        if (index != -1) {
+            tracks.remove(index);
+            tracksContainer.remove(track);
+            refreshTrackNumbering();
+            
+            if (onRemoveTrack != null) {
+                onRemoveTrack.onRemove(index);
+            }
+            if (onAddTrack != null) {
+                onAddTrack.run(); // Sync heights
+            }
         }
     }
 

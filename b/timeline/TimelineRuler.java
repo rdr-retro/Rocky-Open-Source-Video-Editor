@@ -13,7 +13,6 @@ public class TimelineRuler extends JPanel {
     private final Color RULER_BG = Color.decode("#2d2d2d");
     private final Color TICK_COLOR = Color.decode("#808080");
     private final Color TEXT_COLOR = Color.decode("#b0b0b0");
-    private final Color PLAYHEAD_COLOR = Color.decode("#54a0ff");
     private final Color HOVER_CURSOR_COLOR = Color.decode("#d4d4d4");
 
     private int mouseX = -1;
@@ -58,12 +57,9 @@ public class TimelineRuler extends JPanel {
     }
 
     private String formatTimecode(long totalFrames) {
-        long frames = totalFrames % FPS;
-        long totalSeconds = totalFrames / FPS;
-        long seconds = totalSeconds % 60;
-        long minutes = (totalSeconds / 60) % 60;
-        long hours = totalSeconds / 3600;
-        return String.format("%02d:%02d:%02d;%02d", hours, minutes, seconds, frames);
+        // Delegate to timeline's blueline if possible or use local fallback
+        // Since we refactored, let's just use the logic from TimelinePanel
+        return timeline.formatTimecode(totalFrames);
     }
 
     @Override
@@ -167,7 +163,7 @@ public class TimelineRuler extends JPanel {
         int playheadX = timeline.timeToScreen(playheadFrame / (double) FPS);
         
         if (playheadX >= -10 && playheadX <= width + 10) {
-            g2d.setColor(PLAYHEAD_COLOR);
+            g2d.setColor(timeline.getPlayheadColor());
             int[] px = {playheadX - 5, playheadX + 5, playheadX};
             int[] py = {0, 0, 15};
             g2d.fillPolygon(px, py, 3);

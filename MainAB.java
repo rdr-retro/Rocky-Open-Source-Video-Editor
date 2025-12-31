@@ -17,7 +17,7 @@ import java.io.File;
  * Main entrance of the application located at the root.
  * Assembles Part A (Visor + MasterSound) and Part B (Timeline).
  * 
- * COMPILE: javac -cp "lib/*:." a/visor/*.java a/mastersound/*.java b/timeline/*.java c/toolbar/*.java egine/media/*.java egine/engine/*.java egine/render/*.java egine/persistence/*.java MainAB.java
+ * COMPILE: javac -cp "lib/*:." a/visor/*.java a/mastersound/*.java b/timeline/*.java c/toolbar/*.java egine/media/*.java egine/engine/*.java egine/render/*.java egine/persistence/*.java egine/blueline/*.java MainAB.java
  * RUN:     java -cp "lib/*:." MainAB
  */
 public class MainAB {
@@ -68,6 +68,9 @@ public class MainAB {
             });
             sidebar.setOnReorderTracks((from, to) -> {
                 timeline.reorderTracks(from, to);
+            });
+            sidebar.setOnRemoveTrack(index -> {
+                timeline.removeTrackData(index);
             });
             
             JScrollPane scrollPane = new JScrollPane(timeline);

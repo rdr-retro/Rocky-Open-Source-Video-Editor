@@ -11,10 +11,7 @@ import egine.media.MediaSource;
 
 public class TimelinePanel extends JPanel {
     private int mouseX = -1; // Hover cursor position
-    private long playheadFrame = 0; // Active Playhead Time (Source of Truth)
-    // Removed: javax.swing.Timer playbackTimer; (Handled by AudioServer as Master Clock)
-
-    private boolean isPlaying = false;
+    private egine.blueline.Blueline blueline = new egine.blueline.Blueline();
     
     private final int FPS = 30;
     
@@ -32,7 +29,6 @@ public class TimelinePanel extends JPanel {
     // Colors
     private final Color BG_COLOR = Color.decode("#1e1e1e"); 
     private final Color HOVER_CURSOR_COLOR = Color.decode("#d4d4d4"); 
-    private final Color PLAYHEAD_COLOR = Color.decode("#54a0ff"); 
 
     // Media
     private egine.media.MediaPool mediaPool;
@@ -53,13 +49,14 @@ public class TimelinePanel extends JPanel {
     // --- PUBLIC ACCESSORS FOR RULER ---
     public double getPixelsPerSecond() { return pixelsPerSecond; }
     public double getVisibleStartTime() { return visibleStartTime; }
-    public long getPlayheadFrame() { return playheadFrame; }
+    public long getPlayheadFrame() { return blueline.getPlayheadFrame(); }
     public java.util.List<TimelineClip> getClips() { 
         synchronized(clips) {
             return new java.util.ArrayList<>(clips); 
         }
     }
     public java.util.List<Integer> getTrackHeights() { return trackHeights; }
+    public Color getPlayheadColor() { return blueline.getColor(); }
     
     public void setMediaPool(egine.media.MediaPool pool) { this.mediaPool = pool; }
     public void clearClips() { synchronized(clips) { clips.clear(); } repaint(); }
@@ -104,19 +101,26 @@ public class TimelinePanel extends JPanel {
     }
     
     public void updatePlayheadFromFrame(long frame) {
-        this.playheadFrame = frame;
+        blueline.setPlayheadFrame(frame);
         double time = frame / (double) FPS;
+        
+        // Auto-scroll logic: if playing and playhead goes off-screen, jump view
+        double newScroll = blueline.calculateAutoScroll(visibleStartTime, getVisibleDuration());
+        if (newScroll >= 0) {
+            visibleStartTime = newScroll;
+        }
+
         if (timeListener != null) {
-            timeListener.onTimeUpdate(time, frame, formatTimecode(frame));
+            timeListener.onTimeUpdate(time, frame, blueline.formatTimecode(frame));
             timeListener.onTimelineUpdated();
         }
         repaint();
     }
 
-    public boolean isPlaying() { return isPlaying; }
+    public boolean isPlaying() { return blueline.isPlaying(); }
 
     public void togglePlayback() {
-        if (isPlaying) {
+        if (blueline.isPlaying()) {
             stopPlayback();
         } else {
             startPlayback();
@@ -124,12 +128,14 @@ public class TimelinePanel extends JPanel {
     }
 
     public void startPlayback() {
-        // Playback is now driven by AudioServer
-        isPlaying = true;
+        blueline.startPlayback();
     }
 
     public void stopPlayback() {
-        isPlaying = false;
+        long start = blueline.getPlaybackStartFrame();
+        blueline.stopPlayback();
+        // Restore playhead to start position
+        updatePlayheadFromFrame(start);
     }
 
     public TimelinePanel() {
@@ -479,7 +485,7 @@ public class TimelinePanel extends JPanel {
                                     mediaPool.addSource(source);
                                 }
 
-                                long duration = (source.getTotalFrames() > 0) ? source.getTotalFrames() : 5 * FPS;
+                                long duration = (source.getTotalFrames() > 0) ? source.getTotalFrames() : 3 * FPS;
                                 TrackControlPanel.TrackType trackType = (sidebar != null) ? sidebar.getTrackType(targetTrackIndex) : null;
                                 
                                 boolean isMediaVideo = source.isVideo() || (!source.isVideo() && !source.isAudio()); 
@@ -539,11 +545,12 @@ public class TimelinePanel extends JPanel {
 
     private void updatePlayhead(int x) {
         double time = screenToTime(x);
-        playheadFrame = (long) (time * FPS);
-        if (playheadFrame < 0) playheadFrame = 0;
+        long frame = (long) (time * FPS);
+        if (frame < 0) frame = 0;
+        blueline.setPlayheadFrame(frame);
         
         if (timeListener != null) {
-            timeListener.onTimeUpdate(time, playheadFrame, formatTimecode(playheadFrame));
+            timeListener.onTimeUpdate(time, frame, blueline.formatTimecode(frame));
             timeListener.onTimelineUpdated(); // Request Repaint of Ruler
         }
         repaint();
@@ -606,6 +613,24 @@ public class TimelinePanel extends JPanel {
         }
         repaint();
     }
+
+    /**
+     * Removes clips and shifts them up when a track is deleted.
+     */
+    public void removeTrackData(int index) {
+        synchronized(clips) {
+            java.util.List<TimelineClip> toRemove = new java.util.ArrayList<>();
+            for (TimelineClip clip : clips) {
+                if (clip.getTrackIndex() == index) {
+                    toRemove.add(clip);
+                } else if (clip.getTrackIndex() > index) {
+                    clip.setTrackIndex(clip.getTrackIndex() - 1);
+                }
+            }
+            clips.removeAll(toRemove);
+        }
+        repaint();
+    }
     
     public interface TimelineListener {
         void onTimeUpdate(double timeInSeconds, long totalFrames, String timecode);
@@ -618,13 +643,8 @@ public class TimelinePanel extends JPanel {
         this.timeListener = listener;
     }
 
-    private String formatTimecode(long totalFrames) {
-        long frames = totalFrames % FPS;
-        long totalSeconds = totalFrames / FPS;
-        long seconds = totalSeconds % 60;
-        long minutes = (totalSeconds / 60) % 60;
-        long hours = totalSeconds / 3600;
-        return String.format("%02d:%02d:%02d;%02d", hours, minutes, seconds, frames);
+    public String formatTimecode(long totalFrames) {
+        return blueline.formatTimecode(totalFrames);
     }
     
     // External Scroll Control
@@ -802,9 +822,9 @@ public class TimelinePanel extends JPanel {
         }
         
         // Active Playhead Line
-        int playheadX = timeToScreen(playheadFrame / (double) FPS);
+        int playheadX = timeToScreen(blueline.getPlayheadFrame() / (double) FPS);
         if (playheadX >= -20 && playheadX <= width + 20) {
-            g2d.setColor(PLAYHEAD_COLOR);
+            g2d.setColor(blueline.getColor());
             g2d.drawLine(playheadX, 0, playheadX, height);
         }
     }
