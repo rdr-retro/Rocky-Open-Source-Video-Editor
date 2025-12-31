@@ -43,22 +43,32 @@ El sistema es totalmente portable e incluye todas las librerias nativas necesari
 - **Windows**: Compatibilidad completa para versiones de 64 bits (x64) y 32 bits (x86).
 - **Linux**: Soporte optimizado para distribuciones de 64 bits.
 
-## Requisitos y Compilacion
+## Requisitos y Compilación
 
 ### Requisitos del Sistema
-- Java Development Kit (JDK) 17 o superior.
-- FFmpeg (incluido en las librerias del proyecto).
+- **Java Development Kit (JDK) 17** o superior instalado y configurado en el PATH (`javac`).
+- Conexión a internet (solo para la primera compilación para descargar las librerías).
 
-### Instrucciones de Compilacion
-Utilice el script proporcionado para compilar todos los modulos:
-```bash
-./compile.sh
-```
+### Instrucciones de Compilación (Auto-descarga de Librerías)
+Los scripts de compilación detectan automáticamente si faltan las librerías de JavaCV/FFmpeg y las descargan desde Maven Central.
 
-### Instrucciones de Ejecucion
 - **En Mac/Linux**:
   ```bash
-  sh run.sh
+  chmod +x compile.sh
+  ./compile.sh
+  ```
+- **En Windows**:
+  ```batch
+  compile.bat
+  ```
+
+### Instrucciones de Ejecución
+Es **fundamental** utilizar los scripts de ejecución proporcionados, ya que configuran el `classpath` necesario para que Java encuentre las librerías en la carpeta `lib`.
+
+- **En Mac/Linux**:
+  ```bash
+  chmod +x run.sh
+  ./run.sh
   ```
 - **En Windows**:
   ```batch
