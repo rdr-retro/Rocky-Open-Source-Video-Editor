@@ -12,13 +12,13 @@ import java.util.Comparator;
  */
 public class TimelinePanel extends JPanel {
     private final TimelineClip clip;
-    
+
     // UI Constants
     private final int SIDEBAR_WIDTH = 120;
     private final int RULER_HEIGHT = 28;
     private final int TOOLBAR_HEIGHT = 45;
     private final int TRACK_HEIGHT = 24;
-    
+
     // Colors (Matched to reference)
     private final Color BG_COLOR_DARK = Color.decode("#1e1e1e");
     private final Color SIDEBAR_BG = Color.decode("#252525");
@@ -27,7 +27,7 @@ public class TimelinePanel extends JPanel {
     private final Color ACCENT_BLUE = Color.decode("#4a90e2");
     private final Color TEXT_GOLD = Color.decode("#d4af37");
     private final Color ICON_COLOR = Color.decode("#cccccc");
-    
+
     private long localPlayheadFrame = 0;
     private TimelineKeyframe selectedKeyframe = null;
     private boolean isScrubbing = false;
@@ -36,14 +36,14 @@ public class TimelinePanel extends JPanel {
         this.clip = clip;
         setBackground(BG_COLOR_DARK);
         setPreferredSize(new Dimension(800, 220));
-        
+
         MouseAdapter ma = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
                 int x = e.getX();
                 int y = e.getY();
                 int h = getHeight();
-                
+
                 // Scrubbing playhead
                 if (y < RULER_HEIGHT) {
                     isScrubbing = true;
@@ -51,25 +51,33 @@ public class TimelinePanel extends JPanel {
                     repaint();
                     return;
                 }
-                
+
                 // Toolbar interaction
                 if (y > h - TOOLBAR_HEIGHT) {
                     handleToolbarClick(x, y);
                     repaint();
                     return;
                 }
-                
+
+                // Mask toggle interaction
+                if (x < SIDEBAR_WIDTH && y > RULER_HEIGHT + TRACK_HEIGHT && y < RULER_HEIGHT + TRACK_HEIGHT * 2) {
+                    clip.getMask().setEnabled(!clip.getMask().isEnabled());
+                    repaint();
+                    return;
+                }
+
                 // Keyframe interaction
                 selectedKeyframe = findKeyframeAt(x, y);
                 if (SwingUtilities.isRightMouseButton(e) && selectedKeyframe != null) {
-                    if (selectedKeyframe.getClipFrame() > 0 && selectedKeyframe.getClipFrame() < clip.getDurationFrames()) {
+                    if (selectedKeyframe.getClipFrame() > 0
+                            && selectedKeyframe.getClipFrame() < clip.getDurationFrames()) {
                         clip.getTimeKeyframes().remove(selectedKeyframe);
                         selectedKeyframe = null;
                         repaint();
                     }
                 } else if (e.getClickCount() == 2 && selectedKeyframe == null && x > SIDEBAR_WIDTH) {
                     long cf = xToClipFrame(x);
-                    TimelineKeyframe k = new TimelineKeyframe(cf, cf); 
+                    TimelineKeyframe k = new TimelineKeyframe(cf, cf);
                     clip.getTimeKeyframes().add(k);
                     selectedKeyframe = k;
                     repaint();
@@ -83,10 +91,13 @@ public class TimelinePanel extends JPanel {
                     repaint();
                 } else if (selectedKeyframe != null) {
                     long cf = xToClipFrame(e.getX());
-                    if (cf < 0) cf = 0;
-                    if (cf > clip.getDurationFrames()) cf = clip.getDurationFrames();
-                    
-                    if (selectedKeyframe.getClipFrame() > 0 && selectedKeyframe.getClipFrame() < clip.getDurationFrames()) {
+                    if (cf < 0)
+                        cf = 0;
+                    if (cf > clip.getDurationFrames())
+                        cf = clip.getDurationFrames();
+
+                    if (selectedKeyframe.getClipFrame() > 0
+                            && selectedKeyframe.getClipFrame() < clip.getDurationFrames()) {
                         selectedKeyframe.setClipFrame(cf);
                     }
                     repaint();
@@ -99,70 +110,82 @@ public class TimelinePanel extends JPanel {
                 selectedKeyframe = null;
             }
         };
-        
+
         addMouseListener(ma);
         addMouseMotionListener(ma);
     }
 
     private void handleToolbarClick(int x, int y) {
         int iconX = 60; // Offset for icons
-        
+
         // Navigation: Prev
         if (x >= iconX && x < iconX + 40) {
             TimelineKeyframe prev = null;
             for (TimelineKeyframe k : clip.getTimeKeyframes()) {
                 if (k.getClipFrame() < localPlayheadFrame) {
-                    if (prev == null || k.getClipFrame() > prev.getClipFrame()) prev = k;
+                    if (prev == null || k.getClipFrame() > prev.getClipFrame())
+                        prev = k;
                 }
             }
-            if (prev != null) localPlayheadFrame = prev.getClipFrame();
-        } 
+            if (prev != null)
+                localPlayheadFrame = prev.getClipFrame();
+        }
         // Navigation: Next
         else if (x >= iconX + 40 && x < iconX + 80) {
             TimelineKeyframe next = null;
             for (TimelineKeyframe k : clip.getTimeKeyframes()) {
                 if (k.getClipFrame() > localPlayheadFrame) {
-                    if (next == null || k.getClipFrame() < next.getClipFrame()) next = k;
+                    if (next == null || k.getClipFrame() < next.getClipFrame())
+                        next = k;
                 }
             }
-            if (next != null) localPlayheadFrame = next.getClipFrame();
+            if (next != null)
+                localPlayheadFrame = next.getClipFrame();
         }
         // Add Keyframe at Playhead
         else if (x >= iconX + 80 && x < iconX + 120) {
-            if (findKeyframeAt(clipFrameToX(localPlayheadFrame), RULER_HEIGHT + TRACK_HEIGHT/2) == null) {
+            if (findKeyframeAt(clipFrameToX(localPlayheadFrame), RULER_HEIGHT + TRACK_HEIGHT / 2) == null) {
                 clip.getTimeKeyframes().add(new TimelineKeyframe(localPlayheadFrame, localPlayheadFrame));
             }
         }
         // Remove selected/under playhead keyframe
         else if (x >= iconX + 120 && x < iconX + 160) {
             TimelineKeyframe toRemove = selectedKeyframe;
-            if (toRemove == null) toRemove = findKeyframeAt(clipFrameToX(localPlayheadFrame), RULER_HEIGHT + TRACK_HEIGHT/2);
-            
+            if (toRemove == null)
+                toRemove = findKeyframeAt(clipFrameToX(localPlayheadFrame), RULER_HEIGHT + TRACK_HEIGHT / 2);
+
             if (toRemove != null && toRemove.getClipFrame() > 0 && toRemove.getClipFrame() < clip.getDurationFrames()) {
                 clip.getTimeKeyframes().remove(toRemove);
-                if (selectedKeyframe == toRemove) selectedKeyframe = null;
+                if (selectedKeyframe == toRemove)
+                    selectedKeyframe = null;
             }
         }
     }
 
     private TimelineKeyframe findKeyframeAt(int x, int y) {
-        if (x < SIDEBAR_WIDTH) return null;
+        if (x < SIDEBAR_WIDTH)
+            return null;
         for (TimelineKeyframe k : clip.getTimeKeyframes()) {
             int kx = clipFrameToX(k.getClipFrame());
             int ky = RULER_HEIGHT + (TRACK_HEIGHT / 2);
-            if (Math.abs(x - kx) < 8 && Math.abs(y - ky) < 8) return k;
+            if (Math.abs(x - kx) < 8 && Math.abs(y - ky) < 8)
+                return k;
         }
         return null;
     }
 
     private int clipFrameToX(long f) {
         int timelineWidth = getWidth() - SIDEBAR_WIDTH;
+        if (timelineWidth <= 0)
+            return 0;
         double ratio = (double) f / clip.getDurationFrames();
         return SIDEBAR_WIDTH + (int) (ratio * (timelineWidth - 10));
     }
 
     private long xToClipFrame(int x) {
         int timelineWidth = getWidth() - SIDEBAR_WIDTH;
+        if (timelineWidth <= 0)
+            return 0;
         double ratio = (double) (x - SIDEBAR_WIDTH) / (timelineWidth - 10);
         long f = Math.round(ratio * clip.getDurationFrames());
         return Math.max(0, Math.min(f, clip.getDurationFrames()));
@@ -202,7 +225,7 @@ public class TimelinePanel extends JPanel {
         g2.fillRect(SIDEBAR_WIDTH, 0, w - SIDEBAR_WIDTH, RULER_HEIGHT);
         g2.setColor(TEXT_GOLD);
         g2.setFont(new Font("Monospaced", Font.PLAIN, 11));
-        
+
         long dur = clip.getDurationFrames();
         long step = Math.max(1, dur / 5);
         for (long f = 0; f <= dur; f += step) {
@@ -216,12 +239,20 @@ public class TimelinePanel extends JPanel {
         // 4. Sidebar Labels
         g2.setColor(TEXT_GOLD);
         g2.setFont(new Font("Dialog", Font.BOLD, 12));
-        g2.drawString("Time Remapping", 10, RULER_HEIGHT + 16);
-        
-        // 5. Drawing Keyframe Line
+        g2.drawString("Posición", 10, RULER_HEIGHT + 16);
+
+        g2.setColor(Color.WHITE);
+        g2.drawString(clip.getMask().isEnabled() ? "[x] Máscara" : "[ ] Máscara", 10, RULER_HEIGHT + TRACK_HEIGHT + 16);
+
+        // 5. Drawing Keyframe Line (Position)
         clip.getTimeKeyframes().sort(Comparator.comparingLong(TimelineKeyframe::getClipFrame));
         g2.setColor(new Color(80, 80, 80));
         g2.drawLine(SIDEBAR_WIDTH, RULER_HEIGHT + TRACK_HEIGHT / 2, w, RULER_HEIGHT + TRACK_HEIGHT / 2);
+
+        // Drawing Keyframe Line (Mask) - Mock representation
+        g2.setColor(new Color(60, 60, 60));
+        g2.drawLine(SIDEBAR_WIDTH, RULER_HEIGHT + TRACK_HEIGHT + TRACK_HEIGHT / 2, w,
+                RULER_HEIGHT + TRACK_HEIGHT + TRACK_HEIGHT / 2);
 
         // 6. Diamonds
         for (TimelineKeyframe k : clip.getTimeKeyframes()) {
@@ -245,14 +276,14 @@ public class TimelinePanel extends JPanel {
         d.addPoint(x + size, ky);
         d.addPoint(x, ky + size);
         d.addPoint(x - size, ky);
-        
+
         g2.setColor(Color.decode("#999999"));
         g2.fill(d);
         g2.setColor(selected ? Color.WHITE : Color.decode("#333333"));
         g2.draw(d);
         if (selected) {
             g2.setColor(Color.BLACK);
-            g2.fillRect(x-1, ky-1, 2, 2);
+            g2.fillRect(x - 1, ky - 1, 2, 2);
         }
     }
 
@@ -265,7 +296,7 @@ public class TimelinePanel extends JPanel {
         p.addPoint(px, RULER_HEIGHT);
         p.addPoint(px - 6, RULER_HEIGHT - 8);
         g2.fill(p);
-        
+
         g2.setColor(ACCENT_BLUE);
         g2.drawLine(px, RULER_HEIGHT, px, getHeight() - TOOLBAR_HEIGHT);
     }
@@ -276,12 +307,12 @@ public class TimelinePanel extends JPanel {
         g2.fillRect(0, ty, w, TOOLBAR_HEIGHT);
         g2.setColor(Color.BLACK);
         g2.drawLine(0, ty, w, ty);
-        
+
         int iconX = 60;
         int iconY = ty + 15;
         g2.setColor(ICON_COLOR);
         g2.fillRect(20, iconY, 12, 12); // Stop
-        
+
         iconX = 60;
         g2.drawString("◀", iconX, iconY + 10);
         iconX += 40;

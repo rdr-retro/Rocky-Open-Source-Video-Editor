@@ -17,11 +17,15 @@ import java.io.File;
  * Main entrance of the application located at the root.
  * Assembles Part A (Visor + MasterSound) and Part B (Timeline).
  * 
- * COMPILE: javac -cp "lib/*:." a/visor/*.java a/mastersound/*.java b/timeline/*.java c/toolbar/*.java egine/media/*.java egine/engine/*.java egine/render/*.java egine/persistence/*.java egine/blueline/*.java MainAB.java
- * RUN:     java -cp "lib/*:." MainAB
+ * COMPILE: javac -cp "lib/*:." a/visor/*.java a/mastersound/*.java
+ * b/timeline/*.java c/toolbar/*.java egine/media/*.java egine/engine/*.java
+ * egine/render/*.java egine/persistence/*.java egine/blueline/*.java
+ * MainAB.java
+ * RUN: java -cp "lib/*:." MainAB
  */
 public class MainAB {
-    private static void updatePlaybackRate(double rate, b.timeline.TimelinePanel timeline, b.timeline.BottomBarPanel bottomBar) {
+    private static void updatePlaybackRate(double rate, b.timeline.TimelinePanel timeline,
+            b.timeline.BottomBarPanel bottomBar) {
         timeline.setPlaybackRate(rate);
         bottomBar.setRate(rate);
         if (rate != 0 && !timeline.isPlaying()) {
@@ -65,14 +69,14 @@ public class MainAB {
             timeline.setMediaPool(mediaPool);
             timeline.setSidebar(sidebar);
             TimelineRuler ruler = new TimelineRuler(timeline);
-            
+
             VisualizerPanel visualizer = new VisualizerPanel();
             FrameServer frameServer = new FrameServer(timeline, mediaPool, visualizer);
             frameServer.setProperties(projectProps);
-            
+
             MasterSoundPanel masterSound = new MasterSoundPanel();
             AudioServer audioServer = new AudioServer(timeline, mediaPool, masterSound);
-            
+
             sidebar.setOnAddTrack(() -> {
                 timeline.setTrackHeights(sidebar.getTrackHeights());
             });
@@ -82,24 +86,24 @@ public class MainAB {
             sidebar.setOnRemoveTrack(index -> {
                 timeline.removeTrackData(index);
             });
-            
+
             JScrollPane scrollPane = new JScrollPane(timeline);
             scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
             scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
             scrollPane.setBorder(null);
-            
+
             JViewport rowViewport = new JViewport();
             rowViewport.setView(sidebar.getSidebarContent());
             scrollPane.setRowHeader(rowViewport);
             scrollPane.setColumnHeaderView(ruler);
             scrollPane.setCorner(JScrollPane.UPPER_LEFT_CORNER, sidebar.getHeaderPanel());
-            
+
             JPanel centerContainer = new JPanel(new BorderLayout());
             centerContainer.add(scrollPane, BorderLayout.CENTER);
-            
+
             JPanel scrollbarPanel = new JPanel(new BorderLayout());
             scrollbarPanel.setBackground(Color.decode("#1e1e1e"));
-            
+
             JPanel sidebarSpacer = new JPanel();
             sidebarSpacer.setPreferredSize(new Dimension(250, 0));
             sidebarSpacer.setBackground(Color.decode("#1e1e1e"));
@@ -107,23 +111,24 @@ public class MainAB {
 
             JScrollBar hScroll = new JScrollBar(JScrollBar.HORIZONTAL);
             scrollbarPanel.add(hScroll, BorderLayout.CENTER);
-            
+
             hScroll.addAdjustmentListener(e -> {
-                 double time = e.getValue() / 1000.0; 
-                 if (Math.abs(timeline.getVisibleStartTime() - time) > 0.05) {
+                double time = e.getValue() / 1000.0;
+                if (Math.abs(timeline.getVisibleStartTime() - time) > 0.05) {
                     timeline.setHorizontalScroll(time);
                     ruler.repaint();
-                 }
+                }
             });
             centerContainer.add(scrollbarPanel, BorderLayout.SOUTH);
-            
+
             timeline.setTimelineListener(new TimelinePanel.TimelineListener() {
                 @Override
-                public void onTimeUpdate(double time, long frame, String timecode) {
+                public void onTimeUpdate(double time, long frame, String timecode, boolean force) {
                     sidebar.setTimecode(timecode);
-                    frameServer.processFrame(time);
+                    frameServer.processFrame(time, force);
                     audioServer.processAudio(frame);
                 }
+
                 @Override
                 public void onTimelineUpdated() {
                     ruler.repaint();
@@ -132,26 +137,26 @@ public class MainAB {
                     long projectDuration = (long) (timeline.getProjectDuration() * 1000);
                     hScroll.setValues((int) visibleStart, (int) visibleDuration, 0, (int) projectDuration);
                     hScroll.setBlockIncrement((int) visibleDuration);
-                    hScroll.setUnitIncrement((int) (visibleDuration / 10)); 
+                    hScroll.setUnitIncrement((int) (visibleDuration / 10));
                 }
             });
-            
+
             timeline.addComponentListener(new ComponentAdapter() {
                 @Override
                 public void componentResized(ComponentEvent e) {
-                     long visibleStart = (long) (timeline.getVisibleStartTime() * 1000);
-                     long visibleDuration = (long) (timeline.getVisibleDuration() * 1000);
-                     long projectDuration = (long) (timeline.getProjectDuration() * 1000);
-                     hScroll.setValues((int) visibleStart, (int) visibleDuration, 0, (int) projectDuration);
-                     hScroll.setBlockIncrement((int) visibleDuration);
-                     hScroll.setUnitIncrement((int) (visibleDuration / 10));
+                    long visibleStart = (long) (timeline.getVisibleStartTime() * 1000);
+                    long visibleDuration = (long) (timeline.getVisibleDuration() * 1000);
+                    long projectDuration = (long) (timeline.getProjectDuration() * 1000);
+                    hScroll.setValues((int) visibleStart, (int) visibleDuration, 0, (int) projectDuration);
+                    hScroll.setBlockIncrement((int) visibleDuration);
+                    hScroll.setUnitIncrement((int) (visibleDuration / 10));
                 }
             });
 
             // --- PART A: Top Section (Visualizer & MasterSound) ---
             JPanel topPanel = new JPanel(new GridBagLayout());
             topPanel.setBackground(Color.decode("#1e1e1e"));
-            
+
             GridBagConstraints gbcTop = new GridBagConstraints();
             gbcTop.fill = GridBagConstraints.BOTH;
             gbcTop.weighty = 1.0;
@@ -160,11 +165,13 @@ public class MainAB {
             JPanel leftContentPlaceholder = new JPanel();
             leftContentPlaceholder.setBackground(Color.decode("#1e1e1e"));
             leftContentPlaceholder.setPreferredSize(new Dimension(550, 0)); // Even larger as requested
-            gbcTop.gridx = 0; gbcTop.weightx = 0.0;
+            gbcTop.gridx = 0;
+            gbcTop.weightx = 0.0;
             topPanel.add(leftContentPlaceholder, gbcTop);
 
             // Visualizer (Main center content)
-            gbcTop.gridx = 1; gbcTop.weightx = 1.0;
+            gbcTop.gridx = 1;
+            gbcTop.weightx = 1.0;
             topPanel.add(visualizer, gbcTop);
             visualizer.setOnPlay(() -> timeline.startPlayback());
             visualizer.setOnPause(() -> timeline.stopPlayback());
@@ -174,7 +181,8 @@ public class MainAB {
             });
 
             // Master Sound (Attached to the right of visualizer)
-            gbcTop.gridx = 2; gbcTop.weightx = 0.0;
+            gbcTop.gridx = 2;
+            gbcTop.weightx = 0.0;
             topPanel.add(masterSound, gbcTop);
 
             // --- TOP TOOLBAR ---
@@ -209,13 +217,13 @@ public class MainAB {
                 settingsPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
                 String[] commonRes = {
-                    "1920x1080x32; 29,970i",
-                    "3840x2160x32; 60p",
-                    "1920x1080x32; 60p",
-                    "1280x720x32; 29,970p",
-                    "720x480x32; 29,970i",
-                    "480x270x32; 29,970p",
-                    "597x336x32"
+                        "1920x1080x32; 29,970i",
+                        "3840x2160x32; 60p",
+                        "1920x1080x32; 60p",
+                        "1280x720x32; 29,970p",
+                        "720x480x32; 29,970i",
+                        "480x270x32; 29,970p",
+                        "597x336x32"
                 };
 
                 JComboBox<String> projCombo = new JComboBox<>(commonRes);
@@ -230,7 +238,8 @@ public class MainAB {
                 dispCombo.setEditable(true);
                 dispCombo.setSelectedItem(projectProps.getDisplayRes());
 
-                JCheckBox lowResCheck = new JCheckBox("Vista Previa de Baja Resolución (Pixelada para mayor fluidez)", projectProps.isLowResPreview());
+                JCheckBox lowResCheck = new JCheckBox("Vista Previa de Baja Resolución (Pixelada para mayor fluidez)",
+                        projectProps.isLowResPreview());
                 lowResCheck.setOpaque(false);
                 lowResCheck.setForeground(Color.WHITE);
 
@@ -242,13 +251,14 @@ public class MainAB {
                 settingsPanel.add(Box.createVerticalStrut(10));
                 settingsPanel.add(lowResCheck);
 
-                int result = JOptionPane.showConfirmDialog(frame, settingsPanel, "Ajustes del Proyecto", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+                int result = JOptionPane.showConfirmDialog(frame, settingsPanel, "Ajustes del Proyecto",
+                        JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
                 if (result == JOptionPane.OK_OPTION) {
                     projectProps.setProjectRes((String) projCombo.getSelectedItem());
                     projectProps.setPreviewRes((String) prevCombo.getSelectedItem());
                     projectProps.setDisplayRes((String) dispCombo.getSelectedItem());
                     projectProps.setLowResPreview(lowResCheck.isSelected());
-                    
+
                     visualizer.updateProperties(projectProps);
                 }
             });
@@ -276,6 +286,7 @@ public class MainAB {
                         public void onProgress(int percentage) {
                             SwingUtilities.invokeLater(() -> progressBar.setValue(percentage));
                         }
+
                         @Override
                         public void onComplete() {
                             SwingUtilities.invokeLater(() -> {
@@ -283,11 +294,13 @@ public class MainAB {
                                 JOptionPane.showMessageDialog(frame, "Renderizado completado:\n" + finalFile.getName());
                             });
                         }
+
                         @Override
                         public void onError(String message) {
                             SwingUtilities.invokeLater(() -> {
                                 progressDialog.dispose();
-                                JOptionPane.showMessageDialog(frame, "Error en el renderizado:\n" + message, "Error", JOptionPane.ERROR_MESSAGE);
+                                JOptionPane.showMessageDialog(frame, "Error en el renderizado:\n" + message, "Error",
+                                        JOptionPane.ERROR_MESSAGE);
                             });
                         }
                     });
@@ -301,9 +314,9 @@ public class MainAB {
             mainSplit.setDividerLocation(400);
             mainSplit.setDividerSize(5);
             mainSplit.setBorder(null);
-            
+
             frame.add(mainSplit, BorderLayout.CENTER);
-            
+
             BottomBarPanel bottomBar = new BottomBarPanel();
             frame.add(bottomBar, BorderLayout.SOUTH);
 
@@ -322,21 +335,29 @@ public class MainAB {
                 if (e.getID() == KeyEvent.KEY_PRESSED) {
                     int code = e.getKeyCode();
                     double currentRate = timeline.getPlaybackRate();
-                    
+
                     if (code == KeyEvent.VK_L) {
-                        if (currentRate <= 0) currentRate = 1.0;
-                        else if (currentRate < 1.0) currentRate = 1.0;
-                        else currentRate *= 2.0;
-                        
-                        if (currentRate > 4.0) currentRate = 4.0; // Limit to slider range
+                        if (currentRate <= 0)
+                            currentRate = 1.0;
+                        else if (currentRate < 1.0)
+                            currentRate = 1.0;
+                        else
+                            currentRate *= 2.0;
+
+                        if (currentRate > 4.0)
+                            currentRate = 4.0; // Limit to slider range
                         updatePlaybackRate(currentRate, timeline, bottomBar);
                         return true;
                     } else if (code == KeyEvent.VK_J) {
-                        if (currentRate >= 0) currentRate = -1.0;
-                        else if (currentRate > -1.0) currentRate = -1.0;
-                        else currentRate *= 2.0;
-                        
-                        if (currentRate < -4.0) currentRate = -4.0;
+                        if (currentRate >= 0)
+                            currentRate = -1.0;
+                        else if (currentRate > -1.0)
+                            currentRate = -1.0;
+                        else
+                            currentRate *= 2.0;
+
+                        if (currentRate < -4.0)
+                            currentRate = -4.0;
                         updatePlaybackRate(currentRate, timeline, bottomBar);
                         return true;
                     } else if (code == KeyEvent.VK_K) {
@@ -345,8 +366,8 @@ public class MainAB {
                     } else if (code == KeyEvent.VK_SPACE) {
                         // Global Spacebar Play/Pause (avoiding text fields)
                         Component focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
-                        if (!(focusOwner instanceof javax.swing.text.JTextComponent) && 
-                            !(focusOwner instanceof javax.swing.JComboBox)) {
+                        if (!(focusOwner instanceof javax.swing.text.JTextComponent) &&
+                                !(focusOwner instanceof javax.swing.JComboBox)) {
                             timeline.togglePlayback();
                             return true;
                         }
