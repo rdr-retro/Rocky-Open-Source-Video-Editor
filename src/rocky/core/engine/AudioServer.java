@@ -101,6 +101,9 @@ public class AudioServer {
                     processedTimelineFrame = -1;
                     lastTimelineFrame = -1;
                     masterSound.setLevels(0, 0);
+                    if (line != null && line.isActive()) {
+                        line.flush();
+                    }
                     try { Thread.sleep(10); } catch (Exception e) {}
                 }
             }

@@ -27,7 +27,8 @@ public class MediaSource {
         this.isVideo = lower.endsWith(".mp4") || lower.endsWith(".avi") || 
                        lower.endsWith(".mov") || lower.endsWith(".mkv") ||
                        lower.endsWith(".m4v") || lower.endsWith(".ts") ||
-                       lower.endsWith(".webm") || lower.endsWith(".flv");
+                       lower.endsWith(".webm") || lower.endsWith(".flv") ||
+                       lower.endsWith(".gif");
         this.isAudio = lower.endsWith(".mp3") || lower.endsWith(".wav") || 
                        lower.endsWith(".aac") || lower.endsWith(".m4a") ||
                        lower.endsWith(".ogg") || lower.endsWith(".flac");
@@ -79,6 +80,10 @@ public class MediaSource {
 
     public short[] getAudioSamples(long index) {
         if (audioDecoder != null) {
+            if (index >= totalFrames) {
+                // Return silence (zeros) for out-of-bounds requests
+                return new short[audioDecoder.getSamplesPerFrame()];
+            }
             return audioDecoder.getAudioSamples(index, 1);
         }
         return null;
@@ -93,7 +98,15 @@ public class MediaSource {
 
     public BufferedImage getFrame(long index) {
         if (isVideo && videoDecoder != null) {
-            return videoDecoder.getFrame(index);
+            long finalIndex;
+            if (filePath.toLowerCase().endsWith(".gif") && totalFrames > 0) {
+                // Looping for GIFs
+                finalIndex = index % totalFrames;
+            } else {
+                // Freeze-frame for standard videos
+                finalIndex = Math.min(index, totalFrames - 1);
+            }
+            return videoDecoder.getFrame(finalIndex);
         }
         return getOrLoadImage();
     }

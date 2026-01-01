@@ -39,6 +39,7 @@ public class TimelineRuler extends JPanel {
             @Override
             public void mousePressed(MouseEvent e) {
                 // Clicking ruler jumps playhead
+                timeline.pausePlayback();
                 timeline.setPlayheadFromScreenX(e.getX());
                 repaint();
             }
@@ -46,6 +47,7 @@ public class TimelineRuler extends JPanel {
             @Override
             public void mouseDragged(MouseEvent e) {
                 // Dragging in ruler scrubs playhead
+                timeline.pausePlayback();
                 timeline.setPlayheadFromScreenX(e.getX());
                 mouseX = e.getX();
                 repaint();

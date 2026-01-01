@@ -51,7 +51,7 @@ public class FrameServer {
         lastSubmittedFrame = targetFrame;
 
         executor.submit(() -> {
-            BufferedImage rendered = getFrameAt(targetFrame);
+            BufferedImage rendered = getFrameAt(targetFrame, false);
             if (rendered == null) return;
 
             // Clone to avoid tearing if the buffer is reused before paint
@@ -68,21 +68,21 @@ public class FrameServer {
 
     private BufferedImage cachedCanvas;
 
-    public BufferedImage getFrameAt(long targetFrame) {
+    public BufferedImage getFrameAt(long targetFrame, boolean forceFullRes) {
         if (properties == null)
             return null;
 
         int canvasW = properties.getProjectWidth();
         int canvasH = properties.getProjectHeight();
 
-        if (properties.isLowResPreview()) {
+        if (properties.isLowResPreview() && !forceFullRes) {
             canvasW = properties.getPreviewWidth();
             canvasH = properties.getPreviewHeight();
         }
 
         // --- Performance Optimization: Buffer Reuse ---
         if (cachedCanvas == null || cachedCanvas.getWidth() != canvasW || cachedCanvas.getHeight() != canvasH) {
-            cachedCanvas = new BufferedImage(canvasW, canvasH, BufferedImage.TYPE_INT_RGB);
+            cachedCanvas = new BufferedImage(canvasW, canvasH, BufferedImage.TYPE_INT_ARGB);
         }
         
         BufferedImage canvas = cachedCanvas;

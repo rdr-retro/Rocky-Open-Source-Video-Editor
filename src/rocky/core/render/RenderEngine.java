@@ -64,17 +64,19 @@ public class RenderEngine {
                 BufferedImage blackFrame = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
                 
                 for (long f = 0; f < totalFrames; f++) {
-                    BufferedImage frame = frameServer.getFrameAt(f);
+                    BufferedImage frame = frameServer.getFrameAt(f, true);
                     if (frame == null) frame = blackFrame;
                     
-                    // Ensure the frame is the right size
-                    BufferedImage resizedFrame = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-                    java.awt.Graphics2D g = resizedFrame.createGraphics();
-                    g.drawImage(frame, 0, 0, width, height, null);
-                    g.dispose();
+                    BufferedImage finalFrame = frame;
+                    if (frame.getWidth() != width || frame.getHeight() != height) {
+                        finalFrame = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+                        java.awt.Graphics2D g = finalFrame.createGraphics();
+                        g.drawImage(frame, 0, 0, width, height, null);
+                        g.dispose();
+                    }
                     
                     // Extract raw bytes (BGRA)
-                    int[] pixels = ((DataBufferInt) resizedFrame.getRaster().getDataBuffer()).getData();
+                    int[] pixels = ((DataBufferInt) finalFrame.getRaster().getDataBuffer()).getData();
                     ByteBuffer buffer = ByteBuffer.allocate(pixels.length * 4);
                     buffer.order(ByteOrder.LITTLE_ENDIAN);
                     buffer.asIntBuffer().put(pixels);

@@ -386,7 +386,10 @@ public class TimelinePanel extends JPanel {
                                 }
 
                                 if (Math.abs(mouseX - clipX) <= RESIZE_MARGIN) {
-                                    startInteraction(clip, 2, mouseX);
+                                    startInteraction(clip, 2, mouseX); // Left-Edge Resize
+                                    return;
+                                } else if (Math.abs(mouseX - (clipX + clipW)) <= RESIZE_MARGIN) {
+                                    startInteraction(clip, 3, mouseX); // Right-Edge Resize
                                     return;
                                 } else if (mouseX > clipX && mouseX < clipX + clipW) {
                                     startInteraction(clip, 1, mouseX);
@@ -402,6 +405,7 @@ public class TimelinePanel extends JPanel {
                 }
 
                 if (activeClip == null) {
+                    pausePlayback();
                     updatePlayhead(mouseX);
                 }
             }
@@ -522,7 +526,8 @@ public class TimelinePanel extends JPanel {
 
                         if (timeListener != null)
                             timeListener.onTimelineUpdated();
-                    } else if (interactionMode == 2) {
+                    } else if (interactionMode == 3) {
+                        // Right-Edge Resize (End Trim)
                         long newEnd = originalStart + originalDuration + deltaFrames;
                         long snappedEnd = findSnapFrame(newEnd, activeClip);
                         long finalEnd = snappedEnd != -1 ? snappedEnd : newEnd;
@@ -869,6 +874,7 @@ public class TimelinePanel extends JPanel {
     }
 
     private void updatePlayhead(int x) {
+        pausePlayback();
         double time = screenToTime(x);
         long frame = (long) (time * getFPS());
         if (frame < 0)

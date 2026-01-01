@@ -7,9 +7,9 @@ import java.awt.*;
  * Centralizes playback status and frame position.
  */
 public class Blueline {
-    private long playheadFrame = 0;
+    private volatile long playheadFrame = 0;
     private long playbackStartFrame = 0;
-    private boolean isPlaying = false;
+    private volatile boolean isPlaying = false;
     private final int FPS = 30;
     private final Color PLAYHEAD_COLOR = Color.decode("#9d50bb");
     private double playbackRate = 1.0; // 1.0 = Normal, 2.0 = 2x, -1.0 = Reverse

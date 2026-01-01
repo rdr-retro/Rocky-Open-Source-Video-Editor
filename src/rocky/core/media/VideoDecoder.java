@@ -17,6 +17,7 @@ public class VideoDecoder {
     private int width;
     private int height;
     private long lastFrameNumber = -2; 
+    private double videoFPS = 30.0;
 
     public VideoDecoder(File file, int width, int height) {
         this.videoFile = file;
@@ -53,9 +54,13 @@ public class VideoDecoder {
             int audioStream = grabber.getAudioStream();
             int audioChannels = grabber.getAudioChannels();
             
+            this.videoFPS = grabber.getFrameRate();
+            if (this.videoFPS <= 0) this.videoFPS = 30.0;
+
             System.out.println("[VideoDecoder] Started. Audio Stream: " + audioStream + 
                                ", Channels: " + audioChannels + 
-                               ", Video Stream: " + grabber.getVideoStream());
+                               ", Video Stream: " + grabber.getVideoStream() +
+                               ", FPS: " + videoFPS);
             
             return true;
         } catch (Exception e) {
@@ -79,7 +84,7 @@ public class VideoDecoder {
             // Optimization: If it's the next frame, don't seek! 
             // Just grab. This is HUGE for performance during playback.
             if (frameNumber != lastFrameNumber + 1) {
-                long timestamp = (long)((frameNumber / 30.0) * 1000000);
+                long timestamp = (long)((frameNumber / videoFPS) * 1000000);
                 grabber.setTimestamp(timestamp);
             }
             
@@ -98,7 +103,7 @@ public class VideoDecoder {
     public long getTotalFrames() {
         if (grabber == null) return 0;
         double durationSecs = grabber.getLengthInTime() / 1000000.0;
-        return (long)(durationSecs * 30);
+        return (long)(durationSecs * videoFPS);
     }
 
     public void close() {

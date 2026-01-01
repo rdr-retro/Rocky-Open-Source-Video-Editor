@@ -14,6 +14,7 @@ public class AudioDecoder {
     private int sampleRate = 48000;
     private int channels = 2;
     private long lastFrameNumber = -2;
+    private double videoFPS = 30.0;
 
     public AudioDecoder(File file) {
         this.audioFile = file;
@@ -25,6 +26,8 @@ public class AudioDecoder {
             grabber.setSampleRate(sampleRate);
             grabber.setAudioChannels(channels);
             grabber.start();
+            this.videoFPS = grabber.getFrameRate();
+            if (this.videoFPS <= 0) this.videoFPS = 30.0;
             return true;
         } catch (Exception e) {
             e.printStackTrace();
@@ -34,9 +37,12 @@ public class AudioDecoder {
 
     public long getTotalFrames() {
         if (grabber == null) return 0;
-        // FFmpeg lengths are in microseconds
         double durationSecs = grabber.getLengthInTime() / 1000000.0;
-        return (long)(durationSecs * 30);
+        return (long)(durationSecs * videoFPS);
+    }
+
+    public int getSamplesPerFrame() {
+        return (int)((sampleRate / videoFPS) * channels);
     }
 
     private short[] residualBuffer = null;
@@ -94,8 +100,8 @@ public class AudioDecoder {
         try {
             if (grabber == null) return null;
             
-            // Mapping project frame (30fps) to microseconds
-            long targetTimestamp = (long)((frameNumber / 30.0) * 1000000);
+            // Mapping project frame to microseconds
+            long targetTimestamp = (long)((frameNumber / videoFPS) * 1000000);
             
             // Optimization: If it's the next frame, don't seek! 
             if (frameNumber != lastFrameNumber + 1) {
@@ -105,7 +111,7 @@ public class AudioDecoder {
             }
             lastFrameNumber = frameNumber;
             
-            int samplesToGet = (int)((sampleRate / 30.0) * durationFrames);
+            int samplesToGet = (int)((sampleRate / videoFPS) * durationFrames);
             short[] output = new short[samplesToGet * channels];
             int filled = 0;
             

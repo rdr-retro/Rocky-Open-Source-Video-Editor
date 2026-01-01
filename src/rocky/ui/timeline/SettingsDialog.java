@@ -33,8 +33,9 @@ public class SettingsDialog extends JDialog {
                 "1920x1080 (Full HD 1080p)",
                 "1280x720 (HD 720p)",
                 "854x480 (SD 480p)",
-                "640x360",
-                "480x270"
+                "640x360 (SD 360p)",
+                "426x240 (SD 240p)",
+                "256x144 (Mobile 144p)"
         };
 
         projResCombo = createStyledCombo(resolutions, props.getProjectRes());
