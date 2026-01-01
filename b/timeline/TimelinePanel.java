@@ -34,6 +34,16 @@ public class TimelinePanel extends JPanel {
     // Media
     private egine.media.MediaPool mediaPool;
     private SidebarPanel sidebar;
+    private egine.persistence.HistoryManager historyManager;
+    private ProjectProperties projectProps;
+
+    public void setHistoryManager(egine.persistence.HistoryManager historyManager) {
+        this.historyManager = historyManager;
+    }
+
+    public void setProjectProperties(ProjectProperties props) {
+        this.projectProps = props;
+    }
 
     public void setSidebar(SidebarPanel sidebar) {
         this.sidebar = sidebar;
@@ -287,33 +297,33 @@ public class TimelinePanel extends JPanel {
                             int bodyTopY = currentY + headerH;
 
                             if (mouseY >= currentY && mouseY < currentY + trackH) {
+                                // Potentially changing state, push to history
+                                if (historyManager != null) {
+                                    historyManager.pushState(TimelinePanel.this, projectProps, mediaPool);
+                                }
+
                                 // Check for "fx" label click (top-right of clip header)
                                 if (mouseY < currentY + 20 && mouseX >= clipX + clipW - 30 && mouseX <= clipX + clipW) {
-                                    PropertiesWindow pw = new PropertiesWindow(clip, mediaPool, () -> {
-                                        updatePlayheadFromFrame(getPlayheadFrame(), true);
-                                    });
+                                    PropertiesWindow pw = new PropertiesWindow(TimelinePanel.this, projectProps, clip,
+                                            mediaPool, () -> {
+                                                updatePlayheadFromFrame(getPlayheadFrame(), true);
+                                            }, historyManager);
                                     if (timeListener != null)
                                         timeListener.onTimelineUpdated();
                                     pw.setVisible(true);
                                     return;
                                 }
 
-                                int handleSize = 12;
-
                                 // Fade In Handle (Top-Left of BODY)
-                                // Y Range: [bodyTopY, bodyTopY + handleSize]
-                                // X Range: [clipX, clipX + handleSize]
-                                if (mouseY >= bodyTopY && mouseY <= bodyTopY + handleSize &&
-                                        mouseX >= clipX && mouseX <= clipX + handleSize) {
+                                if (mouseY >= bodyTopY && mouseY <= bodyTopY + 10 &&
+                                        mouseX >= clipX && mouseX <= clipX + 20) {
                                     startInteraction(clip, 5, mouseX); // Mode 5 = FADE IN
                                     return;
                                 }
 
                                 // Fade Out Handle (Top-Right of BODY)
-                                // Y Range: [bodyTopY, bodyTopY + handleSize]
-                                // X Range: [clipX + clipW - handleSize, clipX + clipW]
-                                if (mouseY >= bodyTopY && mouseY <= bodyTopY + handleSize &&
-                                        mouseX >= clipX + clipW - handleSize && mouseX <= clipX + clipW) {
+                                if (mouseY >= bodyTopY && mouseY <= bodyTopY + 10 &&
+                                        mouseX >= clipX + clipW - 20 && mouseX <= clipX + clipW) {
                                     startInteraction(clip, 4, mouseX); // Mode 4 = FADE OUT
                                     return;
                                 }
@@ -489,6 +499,9 @@ public class TimelinePanel extends JPanel {
 
                 JMenuItem deleteItem = new JMenuItem("Eliminar");
                 deleteItem.addActionListener(ev -> {
+                    if (historyManager != null) {
+                        historyManager.pushState(TimelinePanel.this, projectProps, mediaPool);
+                    }
                     removeClip(clip);
                     if (timeListener != null)
                         timeListener.onTimelineUpdated();
@@ -497,9 +510,10 @@ public class TimelinePanel extends JPanel {
 
                 JMenuItem propsItem = new JMenuItem("Propiedades");
                 propsItem.addActionListener(ev -> {
-                    PropertiesWindow pw = new PropertiesWindow(clip, mediaPool, () -> {
-                        updatePlayheadFromFrame(getPlayheadFrame(), true);
-                    });
+                    PropertiesWindow pw = new PropertiesWindow(TimelinePanel.this, projectProps, clip, mediaPool,
+                            () -> {
+                                updatePlayheadFromFrame(getPlayheadFrame(), true);
+                            }, historyManager);
                     pw.setVisible(true);
                 });
                 menu.add(propsItem);
@@ -525,6 +539,9 @@ public class TimelinePanel extends JPanel {
                     if (type == currentType)
                         item.setSelected(true);
                     item.addActionListener(ev -> {
+                        if (historyManager != null) {
+                            historyManager.pushState(TimelinePanel.this, projectProps, mediaPool);
+                        }
                         if (isFadeIn)
                             clip.setFadeInType(type);
                         else
@@ -606,6 +623,9 @@ public class TimelinePanel extends JPanel {
 
             @Override
             public void drop(java.awt.dnd.DropTargetDropEvent dtde) {
+                if (historyManager != null) {
+                    historyManager.pushState(TimelinePanel.this, null, mediaPool);
+                }
                 try {
                     dtde.acceptDrop(java.awt.dnd.DnDConstants.ACTION_COPY);
                     java.util.List<java.io.File> droppedFiles = (java.util.List<java.io.File>) dtde.getTransferable()
@@ -1017,35 +1037,35 @@ public class TimelinePanel extends JPanel {
                 }
 
                 g2d.setColor(Color.WHITE);
-                int handleSize = 12;
 
                 // Draw Fade In Curve & Handle
                 if (clip.getFadeInFrames() > 0) {
                     double fadeDurationSec = clip.getFadeInFrames() / (double) FPS;
                     int fadeW = (int) (fadeDurationSec * pixelsPerSecond);
-                    int fadeEndX = x + fadeW;
-
                     // Render Curve using Polyline
                     drawFadeCurve(g2d, clip.getFadeInType(), true, x, fadeW, bodyTopY, bodyH);
                 }
 
-                // Fade In Handle (Top-Left of BODY) - Cyan
+                // Fade In Handle (Top-Left of BODY) - Cyan rounded handle
                 g2d.setColor(Color.CYAN);
-                g2d.drawArc(x - handleSize, bodyTopY - handleSize, handleSize * 2, handleSize * 2, 270, 90);
+                g2d.fillRoundRect(x, bodyTopY, 15, 6, 4, 4);
+                g2d.setColor(Color.WHITE);
+                g2d.drawRoundRect(x, bodyTopY, 15, 6, 4, 4);
 
                 // Draw Fade Out Curve & Handle
                 if (clip.getFadeOutFrames() > 0) {
                     double fadeDurationSec = clip.getFadeOutFrames() / (double) FPS;
                     int fadeW = (int) (fadeDurationSec * pixelsPerSecond);
                     int fadeStartX = x + w - fadeW;
-
                     // Render Curve using Polyline
                     drawFadeCurve(g2d, clip.getFadeOutType(), false, fadeStartX, fadeW, bodyTopY, bodyH);
                 }
 
-                // Fade Out Handle (Top-Right of BODY) - Cyan
+                // Fade Out Handle (Top-Right of BODY) - Cyan rounded handle
                 g2d.setColor(Color.CYAN);
-                g2d.drawArc(x + w - handleSize, bodyTopY - handleSize, handleSize * 2, handleSize * 2, 180, 90);
+                g2d.fillRoundRect(x + w - 15, bodyTopY, 15, 6, 4, 4);
+                g2d.setColor(Color.WHITE);
+                g2d.drawRoundRect(x + w - 15, bodyTopY, 15, 6, 4, 4);
 
                 // Existing Triangles (Resize Handles)
                 g2d.setColor(Color.BLUE);
@@ -1147,11 +1167,10 @@ public class TimelinePanel extends JPanel {
         // Now add Top-Right.
         fillPoly.addPoint(startX + width, topY);
 
-        // Fill Stipple Pattern
-        Paint oldPaint = g2d.getPaint();
-        g2d.setPaint(stipplePaint);
+        // Fill semi-transparent black overlay for the "transparent" part (above the
+        // curve)
+        g2d.setColor(new Color(0, 0, 0, 100));
         g2d.fillPolygon(fillPoly);
-        g2d.setPaint(oldPaint);
 
         Stroke oldStroke = g2d.getStroke();
         g2d.setStroke(new BasicStroke(2.0f));

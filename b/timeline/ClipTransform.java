@@ -12,24 +12,74 @@ public class ClipTransform {
     private double anchorX = 0.5; // Normalized (0-1)
     private double anchorY = 0.5; // Normalized (0-1)
 
-    public double getX() { return x; }
-    public void setX(double x) { this.x = x; }
+    public ClipTransform() {
+    }
 
-    public double getY() { return y; }
-    public void setY(double y) { this.y = y; }
+    public ClipTransform(ClipTransform other) {
+        if (other != null) {
+            this.x = other.x;
+            this.y = other.y;
+            this.scaleX = other.scaleX;
+            this.scaleY = other.scaleY;
+            this.rotation = other.rotation;
+            this.anchorX = other.anchorX;
+            this.anchorY = other.anchorY;
+        }
+    }
 
-    public double getScaleX() { return scaleX; }
-    public void setScaleX(double sx) { this.scaleX = sx; }
+    public double getX() {
+        return x;
+    }
 
-    public double getScaleY() { return scaleY; }
-    public void setScaleY(double sy) { this.scaleY = sy; }
+    public void setX(double x) {
+        this.x = x;
+    }
 
-    public double getRotation() { return rotation; }
-    public void setRotation(double r) { this.rotation = r; }
+    public double getY() {
+        return y;
+    }
 
-    public double getAnchorX() { return anchorX; }
-    public void setAnchorX(double ax) { this.anchorX = ax; }
+    public void setY(double y) {
+        this.y = y;
+    }
 
-    public double getAnchorY() { return anchorY; }
-    public void setAnchorY(double ay) { this.anchorY = ay; }
+    public double getScaleX() {
+        return scaleX;
+    }
+
+    public void setScaleX(double sx) {
+        this.scaleX = sx;
+    }
+
+    public double getScaleY() {
+        return scaleY;
+    }
+
+    public void setScaleY(double sy) {
+        this.scaleY = sy;
+    }
+
+    public double getRotation() {
+        return rotation;
+    }
+
+    public void setRotation(double r) {
+        this.rotation = r;
+    }
+
+    public double getAnchorX() {
+        return anchorX;
+    }
+
+    public void setAnchorX(double ax) {
+        this.anchorX = ax;
+    }
+
+    public double getAnchorY() {
+        return anchorY;
+    }
+
+    public void setAnchorY(double ay) {
+        this.anchorY = ay;
+    }
 }

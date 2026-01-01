@@ -32,6 +32,16 @@ public class TimelinePanel extends JPanel {
     private TimelineKeyframe selectedKeyframe = null;
     private boolean isScrubbing = false;
 
+    private TimelineListener timelineListener;
+
+    public interface TimelineListener {
+        void onPlayheadChanged(long frame);
+    }
+
+    public void setTimelineListener(TimelineListener l) {
+        this.timelineListener = l;
+    }
+
     public TimelinePanel(TimelineClip clip) {
         this.clip = clip;
         setBackground(BG_COLOR_DARK);
@@ -48,6 +58,8 @@ public class TimelinePanel extends JPanel {
                 if (y < RULER_HEIGHT) {
                     isScrubbing = true;
                     localPlayheadFrame = xToClipFrame(x);
+                    if (timelineListener != null)
+                        timelineListener.onPlayheadChanged(localPlayheadFrame);
                     repaint();
                     return;
                 }
@@ -88,6 +100,8 @@ public class TimelinePanel extends JPanel {
             public void mouseDragged(MouseEvent e) {
                 if (isScrubbing) {
                     localPlayheadFrame = xToClipFrame(e.getX());
+                    if (timelineListener != null)
+                        timelineListener.onPlayheadChanged(localPlayheadFrame);
                     repaint();
                 } else if (selectedKeyframe != null) {
                     long cf = xToClipFrame(e.getX());
@@ -127,8 +141,11 @@ public class TimelinePanel extends JPanel {
                         prev = k;
                 }
             }
-            if (prev != null)
+            if (prev != null) {
                 localPlayheadFrame = prev.getClipFrame();
+                if (timelineListener != null)
+                    timelineListener.onPlayheadChanged(localPlayheadFrame);
+            }
         }
         // Navigation: Next
         else if (x >= iconX + 40 && x < iconX + 80) {
@@ -139,8 +156,11 @@ public class TimelinePanel extends JPanel {
                         next = k;
                 }
             }
-            if (next != null)
+            if (next != null) {
                 localPlayheadFrame = next.getClipFrame();
+                if (timelineListener != null)
+                    timelineListener.onPlayheadChanged(localPlayheadFrame);
+            }
         }
         // Add Keyframe at Playhead
         else if (x >= iconX + 80 && x < iconX + 120) {

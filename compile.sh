@@ -31,6 +31,31 @@ for url in "${LIBS[@]}"; do
     fi
 done
 
+# --- FFmpeg Standalone Download ---
+BIN_DIR="bin"
+mkdir -p "$BIN_DIR"
+
+if [ ! -f "$BIN_DIR/ffmpeg" ]; then
+    OS_TYPE=$(uname -s)
+    echo "FFmpeg no encontrado en $BIN_DIR. Detectando OS: $OS_TYPE..."
+    
+    if [ "$OS_TYPE" == "Linux" ]; then
+        FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+        echo "Descargando FFmpeg para Linux..."
+        curl -L "$FFMPEG_URL" -o "$BIN_DIR/ffmpeg.tar.xz"
+        tar -xJf "$BIN_DIR/ffmpeg.tar.xz" -C "$BIN_DIR" --strip-components=1
+        rm "$BIN_DIR/ffmpeg.tar.xz"
+    elif [ "$OS_TYPE" == "Darwin" ]; then
+        FFMPEG_URL="https://evermeet.cx/ffmpeg/ffmpeg-6.0.zip"
+        echo "Descargando FFmpeg para macOS..."
+        curl -L "$FFMPEG_URL" -o "$BIN_DIR/ffmpeg.zip"
+        unzip -o "$BIN_DIR/ffmpeg.zip" -d "$BIN_DIR"
+        rm "$BIN_DIR/ffmpeg.zip"
+    fi
+    chmod +x "$BIN_DIR/ffmpeg"
+    echo "FFmpeg configurado exitosamente."
+fi
+
 # Compilar todo el proyecto Rocky Open Source Video Editor incluyendo las librerías JavaCV
 echo "Compilando proyecto..."
 javac -cp "lib/*:." a/visor/*.java a/mastersound/*.java b/timeline/*.java c/toolbar/*.java egine/media/*.java egine/engine/*.java egine/render/*.java egine/persistence/*.java egine/blueline/*.java propiedades/*.java propiedades/timelinekeyframes/*.java MainAB.java

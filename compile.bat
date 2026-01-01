@@ -19,6 +19,22 @@ for %%u in (%LIBS%) do (
     )
 )
 
+:: --- FFmpeg Standalone Download ---
+set BIN_DIR=bin
+if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
+if not exist "%BIN_DIR%\ffmpeg.exe" (
+    echo FFmpeg no encontrado en %BIN_DIR%. Descargando version portable...
+    set "FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+    curl -L "!FFMPEG_URL!" -o "%BIN_DIR%\ffmpeg.zip"
+    echo Extrayendo FFmpeg...
+    powershell -Command "Expand-Archive -Path '%BIN_DIR%\ffmpeg.zip' -DestinationPath '%BIN_DIR%\temp' -Force"
+    move "%BIN_DIR%\temp\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe" "%BIN_DIR%\ffmpeg.exe"
+    move "%BIN_DIR%\temp\ffmpeg-master-latest-win64-gpl\bin\ffprobe.exe" "%BIN_DIR%\ffprobe.exe"
+    rd /s /q "%BIN_DIR%\temp"
+    del "%BIN_DIR%\ffmpeg.zip"
+    echo FFmpeg configurado exitosamente.
+)
+
 echo Compilando proyecto...
 javac -cp "lib/*;." a/visor/*.java a/mastersound/*.java b/timeline/*.java c/toolbar/*.java egine/media/*.java egine/engine/*.java egine/render/*.java egine/persistence/*.java egine/blueline/*.java propiedades/*.java propiedades/timelinekeyframes/*.java MainAB.java
 

@@ -59,15 +59,17 @@ public class MainAB {
             frame.setBackground(Color.decode("#1e1e1e"));
             frame.setLayout(new BorderLayout());
 
-            // --- STATE ---
             ProjectProperties projectProps = new ProjectProperties();
             MediaPool mediaPool = new MediaPool();
+            egine.persistence.HistoryManager history = new egine.persistence.HistoryManager();
 
             // --- PART B: Timeline Components (from package b.timeline) ---
             SidebarPanel sidebar = new SidebarPanel();
             TimelinePanel timeline = new TimelinePanel();
             timeline.setMediaPool(mediaPool);
             timeline.setSidebar(sidebar);
+            timeline.setHistoryManager(history);
+            timeline.setProjectProperties(projectProps);
             TimelineRuler ruler = new TimelineRuler(timeline);
 
             VisualizerPanel visualizer = new VisualizerPanel();
@@ -78,12 +80,15 @@ public class MainAB {
             AudioServer audioServer = new AudioServer(timeline, mediaPool, masterSound);
 
             sidebar.setOnAddTrack(() -> {
+                history.pushState(timeline, projectProps, mediaPool);
                 timeline.setTrackHeights(sidebar.getTrackHeights());
             });
             sidebar.setOnReorderTracks((from, to) -> {
+                history.pushState(timeline, projectProps, mediaPool);
                 timeline.reorderTracks(from, to);
             });
             sidebar.setOnRemoveTrack(index -> {
+                history.pushState(timeline, projectProps, mediaPool);
                 timeline.removeTrackData(index);
             });
 
@@ -207,8 +212,9 @@ public class MainAB {
                 chooser.setFileFilter(new FileNameExtensionFilter("Rocky Project (.rocky)", "rocky"));
                 if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
                     System.out.println("MainAB: File selected for load");
-                    ProjectManager.loadProject(timeline, projectProps, mediaPool, chooser.getSelectedFile());
+                    ProjectManager.loadProject(timeline, projectProps, mediaPool, sidebar, chooser.getSelectedFile());
                     visualizer.updateProperties(projectProps);
+                    history.pushState(timeline, projectProps, mediaPool);
                 }
             });
             toolbar.setOnSettings(() -> {
@@ -254,6 +260,7 @@ public class MainAB {
                 int result = JOptionPane.showConfirmDialog(frame, settingsPanel, "Ajustes del Proyecto",
                         JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
                 if (result == JOptionPane.OK_OPTION) {
+                    history.pushState(timeline, projectProps, mediaPool);
                     projectProps.setProjectRes((String) projCombo.getSelectedItem());
                     projectProps.setPreviewRes((String) prevCombo.getSelectedItem());
                     projectProps.setDisplayRes((String) dispCombo.getSelectedItem());
@@ -371,6 +378,22 @@ public class MainAB {
                             timeline.togglePlayback();
                             return true;
                         }
+                    } else if (code == KeyEvent.VK_Z && (e.isControlDown() || e.isMetaDown())) {
+                        if (e.isShiftDown()) {
+                            history.redo(timeline, projectProps, mediaPool, sidebar);
+                        } else {
+                            history.undo(timeline, projectProps, mediaPool, sidebar);
+                        }
+                        visualizer.updateProperties(projectProps);
+                        timeline.repaint();
+                        ruler.repaint();
+                        return true;
+                    } else if (code == KeyEvent.VK_Y && (e.isControlDown() || e.isMetaDown())) {
+                        history.redo(timeline, projectProps, mediaPool, sidebar);
+                        visualizer.updateProperties(projectProps);
+                        timeline.repaint();
+                        ruler.repaint();
+                        return true;
                     }
                 }
                 return false;
@@ -378,6 +401,9 @@ public class MainAB {
 
             // --- KEY BINDINGS ---
             // Removed old SPACE binding to favor global dispatcher
+
+            // Initial Snapshot
+            history.pushState(timeline, projectProps, mediaPool);
 
             frame.setLocationRelativeTo(null);
             frame.setVisible(true);

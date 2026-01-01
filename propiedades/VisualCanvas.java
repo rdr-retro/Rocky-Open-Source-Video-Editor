@@ -10,13 +10,15 @@ import java.awt.geom.Point2D;
 import java.util.List;
 import b.timeline.TimelineClip;
 import b.timeline.ClipTransform;
+import egine.media.MediaPool;
+import propiedades.timelinekeyframes.TimelineKeyframe;
 
 /**
  * A canvas to visualize and manipulate the clip's transform.
  */
 public class VisualCanvas extends JPanel {
     private final TimelineClip clip;
-    private final egine.media.MediaPool pool;
+    private final MediaPool pool;
     private double zoom = 1.0;
     private Point lastMousePos;
     private ToolsSidebar.Tool currentTool = ToolsSidebar.Tool.SELECT;
@@ -32,15 +34,28 @@ public class VisualCanvas extends JPanel {
     private int resizeHandle = -1; // 0-7
     private double initialRotation;
     private double initialMouseAngle;
+    private long localPlayheadFrame = 0;
+    private final egine.persistence.HistoryManager historyManager;
+    private b.timeline.TimelinePanel mainTimeline;
+    private b.timeline.ProjectProperties projectProps;
 
-    public VisualCanvas(TimelineClip clip, egine.media.MediaPool pool) {
+    public void setContext(b.timeline.TimelinePanel timeline, b.timeline.ProjectProperties props) {
+        this.mainTimeline = timeline;
+        this.projectProps = props;
+    }
+
+    public VisualCanvas(TimelineClip clip, MediaPool pool, egine.persistence.HistoryManager historyManager) {
         this.clip = clip;
         this.pool = pool;
-        setBackground(Color.decode("#3b3b3b"));
+        this.historyManager = historyManager;
+        setBackground(Color.decode("#1a1a1a"));
 
         MouseAdapter ma = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
+                if (historyManager != null) {
+                    historyManager.pushState(mainTimeline, projectProps, pool);
+                }
                 lastMousePos = e.getPoint();
                 Point2D p = inverseTransform(e.getPoint());
 
@@ -104,8 +119,7 @@ public class VisualCanvas extends JPanel {
                 }
 
                 lastMousePos = e.getPoint();
-                repaint();
-                firePropertyChange("transform", null, clip.getTransform());
+                updateTransform();
             }
 
             @Override
@@ -128,6 +142,32 @@ public class VisualCanvas extends JPanel {
 
     public void setCurrentTool(ToolsSidebar.Tool tool) {
         this.currentTool = tool;
+        repaint();
+    }
+
+    public void setPlayheadFrame(long frame) {
+        this.localPlayheadFrame = frame;
+        repaint();
+    }
+
+    private void updateTransform() {
+        // Auto-Keying Logic
+        TimelineKeyframe existing = null;
+        for (TimelineKeyframe k : clip.getTimeKeyframes()) {
+            if (k.getClipFrame() == localPlayheadFrame) {
+                existing = k;
+                break;
+            }
+        }
+
+        if (existing != null) {
+            existing.setTransform(new ClipTransform(clip.getTransform()));
+        } else {
+            clip.getTimeKeyframes().add(new TimelineKeyframe(
+                    localPlayheadFrame, localPlayheadFrame, clip.getTransform()));
+        }
+
+        firePropertyChange("transform", null, clip.getTransform());
         repaint();
     }
 

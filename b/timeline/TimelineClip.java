@@ -84,6 +84,49 @@ public class TimelineClip {
         return left.getSourceFrame() + Math.round(t * (right.getSourceFrame() - left.getSourceFrame()));
     }
 
+    public ClipTransform getInterpolatedTransform(long clipFrame) {
+        if (timeKeyframes.isEmpty()) {
+            return transform;
+        }
+
+        // Sort by clipFrame
+        timeKeyframes.sort(Comparator.comparingLong(TimelineKeyframe::getClipFrame));
+
+        TimelineKeyframe left = null;
+        TimelineKeyframe right = null;
+
+        for (TimelineKeyframe k : timeKeyframes) {
+            if (k.getClipFrame() <= clipFrame) {
+                left = k;
+            } else {
+                right = k;
+                break;
+            }
+        }
+
+        if (left == null)
+            return timeKeyframes.get(0).getTransform();
+        if (right == null)
+            return left.getTransform();
+
+        // Interpolate
+        double t = (double) (clipFrame - left.getClipFrame()) / (right.getClipFrame() - left.getClipFrame());
+
+        ClipTransform lt = left.getTransform();
+        ClipTransform rt = right.getTransform();
+
+        ClipTransform result = new ClipTransform();
+        result.setX(lt.getX() + t * (rt.getX() - lt.getX()));
+        result.setY(lt.getY() + t * (rt.getY() - lt.getY()));
+        result.setScaleX(lt.getScaleX() + t * (rt.getScaleX() - lt.getScaleX()));
+        result.setScaleY(lt.getScaleY() + t * (rt.getScaleY() - lt.getScaleY()));
+        result.setRotation(lt.getRotation() + t * (rt.getRotation() - lt.getRotation()));
+        result.setAnchorX(lt.getAnchorX() + t * (rt.getAnchorX() - lt.getAnchorX()));
+        result.setAnchorY(lt.getAnchorY() + t * (rt.getAnchorY() - lt.getAnchorY()));
+
+        return result;
+    }
+
     public ClipTransform getTransform() {
         return transform;
     }
@@ -175,6 +218,24 @@ public class TimelineClip {
 
     public void setFadeInType(FadeType t) {
         this.fadeInType = t;
+    }
+
+    public double getOpacityAt(long clipFrame) {
+        double opacity = 1.0;
+
+        // Fade In
+        if (clipFrame < fadeInFrames) {
+            double t = (double) clipFrame / fadeInFrames;
+            opacity = getOpacity(fadeInType, t, true);
+        }
+        // Fade Out
+        else if (clipFrame > durationFrames - fadeOutFrames) {
+            long fadeOutStart = durationFrames - fadeOutFrames;
+            double t = (double) (clipFrame - fadeOutStart) / fadeOutFrames;
+            opacity = getOpacity(fadeOutType, t, false);
+        }
+
+        return opacity;
     }
 
     public static double getOpacity(FadeType type, double t, boolean isFadeIn) {

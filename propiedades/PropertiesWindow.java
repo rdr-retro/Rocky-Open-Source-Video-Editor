@@ -11,13 +11,14 @@ import propiedades.timelinekeyframes.TimelinePanel;
  */
 public class PropertiesWindow extends JFrame {
 
-    public PropertiesWindow(TimelineClip clip, MediaPool pool, Runnable onUpdate) {
+    public PropertiesWindow(b.timeline.TimelinePanel mainTimeline, b.timeline.ProjectProperties projectProps,
+            TimelineClip clip, MediaPool pool, Runnable onUpdate, egine.persistence.HistoryManager historyManager) {
         setTitle("Panorización/Recorte de evento: " + clip.getName());
         setSize(1000, 700);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
 
-        PanCropEditor pce = new PanCropEditor(clip, pool, onUpdate);
+        PanCropEditor pce = new PanCropEditor(mainTimeline, projectProps, clip, pool, onUpdate, historyManager);
         add(pce);
     }
 }

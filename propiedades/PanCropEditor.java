@@ -12,7 +12,9 @@ import propiedades.timelinekeyframes.TimelinePanel;
 public class PanCropEditor extends JPanel {
     private final TimelineClip clip;
 
-    public PanCropEditor(TimelineClip clip, MediaPool pool, Runnable onUpdate) {
+    public PanCropEditor(b.timeline.TimelinePanel mainTimeline, b.timeline.ProjectProperties projectProps,
+            TimelineClip clip, MediaPool pool, Runnable onUpdate,
+            egine.persistence.HistoryManager historyManager) {
         this.clip = clip;
         setLayout(new BorderLayout());
         setBackground(Color.decode("#1e1e1e"));
@@ -28,29 +30,42 @@ public class PanCropEditor extends JPanel {
         ToolsSidebar sidebar = new ToolsSidebar();
         middleSection.add(sidebar, BorderLayout.WEST);
 
-        PropertiesTreePanel treePanel = new PropertiesTreePanel(clip);
-        VisualCanvas canvas = new VisualCanvas(clip, pool);
+        JPanel emptyLeftPanel = new JPanel();
+        emptyLeftPanel.setBackground(Color.decode("#252525"));
+        VisualCanvas canvas = new VisualCanvas(clip, pool, historyManager);
+        canvas.setContext(mainTimeline, projectProps);
 
         sidebar.setOnToolSelected(canvas::setCurrentTool);
 
         canvas.addPropertyChangeListener("transform", e -> {
-            treePanel.refresh();
             if (onUpdate != null)
                 onUpdate.run();
         });
 
-        JSplitPane horizontalSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, treePanel, canvas);
+        JSplitPane horizontalSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, emptyLeftPanel, canvas);
         horizontalSplit.setDividerLocation(250);
         horizontalSplit.setDividerSize(5);
         horizontalSplit.setBorder(null);
+
         middleSection.add(horizontalSplit, BorderLayout.CENTER);
 
         // --- BOTTOM SECTION (Timeline) ---
         TimelinePanel timeline = new TimelinePanel(clip);
 
+        timeline.setTimelineListener(new propiedades.timelinekeyframes.TimelinePanel.TimelineListener() {
+            @Override
+            public void onPlayheadChanged(long frame) {
+                canvas.setPlayheadFrame(frame);
+                // Update clip's working transform to the interpolated one for preview
+                clip.setTransform(clip.getInterpolatedTransform(frame));
+                if (onUpdate != null)
+                    onUpdate.run();
+            }
+        });
+
         JSplitPane verticalSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, middleSection, timeline);
-        verticalSplit.setDividerLocation(400);
-        verticalSplit.setDividerSize(8);
+        verticalSplit.setDividerLocation(350);
+        verticalSplit.setDividerSize(5);
         verticalSplit.setBorder(null);
 
         add(verticalSplit, BorderLayout.CENTER);
