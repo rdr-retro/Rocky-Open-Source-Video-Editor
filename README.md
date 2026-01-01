@@ -32,11 +32,8 @@ Una ventana inteligente que escala el lienzo del proyecto para que quepa en tu p
 ### Línea de Tiempo Profesional (Core B)
 - **Multitrack Dinámico**: Capas ilimitadas de vídeo y audio con gestión de profundidad.
 - **Visualización de Ondas**: Renderizado de picos de audio asíncrono. El `PeakManager` escanea los archivos en hilos paralelos para mostrar la forma de onda sin ralentizar la UI.
-- **Sistema de Fundidos (Fades)**: Control de opacidad avanzado con curvas de velocidad matemáticas:
-    - **Linear**: Transición constante.
-    - **Smooth**: Curva de suavizado Bézier (3x^2 - 2x^3).
-    - **Fast/Slow**: Curvas de aceleración y desaceleración.
-    - **Sharp**: Transiciones de alto contraste.
+- **Sistema de Fundidos (Fades)**: Control de opacidad avanzado con curvas de velocidad matemáticas.
+- **Dithering de Transición**: Implementación de un patrón de *stippling* (punteado) en las áreas de fade para una visualización técnica y estética superior en el timeline.
 - **Control de Clips**: Menú contextual de propiedades y botón de acceso rápido "fx" para ajustes de transformación.
 
 ### Motor de Renderizado & Review (Engine)
@@ -45,33 +42,81 @@ Una ventana inteligente que escala el lienzo del proyecto para que quepa en tu p
     - **Posición**: Movimiento libre en píxeles de proyecto.
     - **Escala**: Ampliación uniforme sin pérdida de nitidez lógica.
     - **Rotación**: Rotación completa en grados sobre un punto de anclaje definido.
-    - **Anchor Point**: Centro de transformación personalizable (0.5, 0.5 por defecto).
-- **Espacio de Expansión**: Hemos rediseñado la interfaz para incluir un panel de **550px** a la izquierda del visor, dedicado a las futuras herramientas de efectos y control de colores (Grading/LUTs).
-
-### Experiencia de Usuario Ágil
-- **Atajos Globales**: Control de Play/Pause universal mediante la tecla **Espacio**. Gracias a un `KeyEventDispatcher` personalizado, el espacio funciona incluso si el foco está en un botón o barra de herramientas.
-- **Pausa Inteligente**: El cabezal se detiene exactamente en el fotograma actual, permitiendo revisiones precisas cuadro a cuadro.
-- **Estética Vibrant Dark**: Interfaz premium con diseño oscuro curado, fuentes Inter/Serif y micro-animaciones para feedback táctil.
+- **Espacio de Expansión**: Interfaz rediseñada con un panel de **550px** lateral para herramientas de efectos y corrección de color.
 
 ---
 
-## Estructura Detallada del Proyecto
+## Sistema de Undo/Redo (Historial Infinito)
 
-Cada paquete en Rocky tiene una responsabilidad única y desacoplada:
+Rocky implementa un sistema de gestión de estado basado en el patrón **Command**. Cada acción significativa en el timeline se encapsula en un objeto que sabe cómo aplicarse y cómo revertirse.
 
-### `MainAB.java`
-El orquestador principal. Encargado de inicializar el entorno Swing, configurar el Look & Feel y ensamblar los componentes de las partes A, B y C en un layout `GridBagLayout` robusto.
+### Arquitectura del HistoryManager
+El `HistoryManager` gestiona dos pilas (vía `java.util.Stack`):
+1.  **Undo Stack**: Almacena acciones realizadas.
+2.  **Redo Stack**: Almacena acciones revertidas.
 
-### `egine/` (El Motor Central)
-- **`engine.FrameServer`**: El compositor. Decide qué fotograma de qué clip debe mostrarse basándose en el tiempo del `AudioServer`.
-- **`engine.AudioServer`**: El motor de audio que actúa como reloj maestro (Master Clock). Asegura que el vídeo siga al audio para evitar desincronizaciones.
-- **`media/`**: Decodificadores nativos que utilizan **JavaCV** y **FFmpeg**. Optimizados para Apple Silicon (M4) mediante **VideoToolbox**.
-- **`blueline/`**: Gestiona el estado de reproducción y la posición del playhead en microsegundos y fotogramas.
+### Acciones Soportadas
+- **Clip Movement**: Movimiento horizontal (tiempo) y vertical (cambio de pista).
+- **Media Ingestion**: Adición de nuevos archivos mediante drag-and-drop.
+- **Property Changes**: Ajustes en curvas de fade, transformaciones y nombres de clips.
 
-### `a/` y `b/` (Interfaz y Visualización)
-- **`visor.VisualizerPanel`**: Implementa la lógica de Viewport Adaptativo y renderizado de alta calidad con interpolación bilineal.
-- **`mastersound.MasterSoundPanel`**: Monitorización de audio con vúmetros que soportan picos dinámicos y colorimetría profesional.
-- **`timeline.TimelinePanel`**: El componente más complejo, encargado de la interacción con el usuario, drag-and-drop de archivos y renderizado de clips.
+> [!NOTE]
+> El sistema de Undo es atómico. Si una acción de movimiento desplaza múltiples clips, se trata como un único evento en el historial.
+
+---
+
+## Persistencia: El Formato .rocky
+
+Hemos abandonado los formatos genéricos para implementar nuestra propia estructura de serialización basada en archivos `.rocky`.
+
+### Estructura del Archivo
+Los archivos `.rocky` (anteriormente `.berga`) son archivos XML/JSON estructurados que contienen:
+-   **Project Metadata**: Resolución base (1920x1080), FPS nativo y duración total.
+-   **Track Definitions**: Listado de pistas de vídeo y audio con sus estados (Mute, Solo, Lock).
+-   **Clip Data**: Referencias absolutas a archivos de media, puntos de entrada/salida (In/Out points) y su posición en el timeline.
+-   **Transformation Keyframes**: Datos de animación para posición, escala y rotación.
+
+### ProjectManager
+El `ProjectManager` es la clase encargada de:
+-   **Auto-Save**: Sistema de guardado preventivo cada 5 minutos.
+-   **Relative Path Mapping**: Intenta resolver rutas de archivos si el proyecto se mueve de carpeta o unidad de disco.
+
+---
+
+## Guía Interna para Desarrolladores (Internal API)
+
+Para extender Rocky, es fundamental entender los tres niveles de interacción:
+
+### 1. El Nivel de Datos (`egine.media`)
+Para añadir soporte a un nuevo formato de archivo, debes extender `MediaDecoder`.
+-   `decodeFrame(long microsecond)`: Debe devolver un `BufferedImage` o un frame nativo de FFmpeg.
+-   `getDuration()`: Precisión necesaria en microsegundos.
+
+### 2. El Nivel de Interacción (`b.timeline`)
+La lógica de la línea de tiempo se divide en:
+-   **`TimelinePanel`**: El lienzo principal de dibujo.
+-   **`TimelineInteractionHandler`**: Gestiona los clics, drags y selecciones.
+-   **`TimelineRenderer`**: Optimiza el dibujo de clips visibles (Culling).
+
+### 3. El Nivel de Playback (`egine.blueline`)
+Si deseas controlar el playhead programáticamente:
+```java
+Blueline master = Blueline.getInstance();
+master.seek(5000000); // Salta a los 5 segundos
+master.play();        // Inicia la reproducción
+```
+
+---
+
+## Estructura de Archivos del Proyecto
+
+| Directorio | Propósito |
+| :--- | :--- |
+| `src/rocky/core` | Lógica de negocio, motores de audio/video y persistencia. |
+| `src/rocky/ui` | Componentes Swing, paneles de timeline y visor. |
+| `bin/` | Clases compiladas organizadas por paquetes. |
+| `lib/` | Dependencias externas (JavaCV, FFmpeg, FlatLaf). |
+| `egine/` | Paquete histórico que contiene el "Engine" (legacy/core mix). |
 
 ---
 
@@ -79,132 +124,35 @@ El orquestador principal. Encargado de inicializar el entorno Swing, configurar 
 
 ### Requisitos del Sistema
 - **Java**: JDK 17 o superior.
-- **Memoria**: Mínimo 8GB RAM (Recomendado 16GB para edición 4K).
-- **Procesador**: Optimizado para Apple Silicon (M1-M4) y procesadores multinúcleo x64.
+- **Memoria**: Mínimo 8GB RAM (Recomendado 16GB).
+- **Procesador**: Optimizado para Apple Silicon (M1-M4) vía hardware acceleration.
 
-### Dependencias Nativas
-Rocky descarga automáticamente los binarios de FFmpeg adaptados a tu sistema operativo:
-- **macOS**: `macosx-arm64` y `macosx-x86_64`.
-- **Windows**: `windows-x86_64`.
-- **Linux**: `linux-x86_64`.
-
-### Guía de Compilación Profesional
+### Guía de Compilación
 ```bash
-# Otorgar permisos al script
-chmod +x compile.sh
-
-# Ejecutar compilación (descarga librerías si faltan)
-# Solo se requiere sudo si la carpeta del proyecto tiene permisos restringidos
-sudo ./compile.sh
-```
-
-### Ejecución
-```bash
-# Iniciar el editor
-chmod +x run.sh
-./run.sh
-```
-
----
-
-## Deep Dive: El Pipeline de Sincronización
-
-Uno de los mayores retos de Rocky es mantener la sincronización entre el audio y el vídeo. El sistema utiliza un modelo de **Master Clock** basado en el `AudioServer`:
-
--   **Pre-fetching**: El `FrameServer` no espera a que se necesite un fotograma; predice los siguientes 5 fotogramas y los decodifica de forma asíncrona.
--   **Drop Frame Logic**: Si el procesador no puede mantener el ritmo (ej. archivos 8K en hardware antiguo), Rocky prioriza el audio y "salta" fotogramas en el visor, asegurando que nunca haya un retraso acumulado.
--   **Interpolación Temporal**: El sistema calcula la posición del playhead en nanosegundos para una suavidad extrema en el movimiento de los clips.
-
----
-
-## Componentes del Motor (Deep Dive)
-
-### FrameServer: El Compositor Inteligente
-El `FrameServer` es un servicio desacoplado que utiliza un `ExecutorService` de un solo hilo para evitar colisiones de memoria en el renderizado. Su flujo es:
-1.  Recibe una petición de tiempo (segundos).
-2.  Busca los clips en el `TimelinePanel` que se solapan con ese tiempo.
-3.  Ordena los clips por índice de pista para gestionar la transparencia (Z-index).
-4.  Solicita los fotogramas al `MediaPool`.
-5.  Aplica la pila de transformaciones (`ClipTransform`): **Translate -> Rotate -> Scale**.
-6.  Dibuja el resultado en un `BufferedImage` del tamaño del proyecto.
-
-### PeakManager: El Escáner de Audio
-Para que el editor sea fluido, no podemos procesar el audio en tiempo real mientras dibujamos la línea de tiempo. El `PeakManager`:
--   Genera archivos de caché `.peaks` para evitar re-procesar archivos conocidos.
--   Utiliza un algoritmo de **Root Mean Square (RMS)** para calcular la potencia visual del audio.
--   Dibuja la onda de forma vectorial, permitiendo hacer zoom infinito en la línea de tiempo sin perder detalle.
-
----
-
-## Glosario Técnico de Rocky
-
--   **Blueline**: La abstracción lógica de la línea de tiempo que contiene el estado de reproducción.
--   **Playhead**: El cabezal de reproducción (la línea roja) que marca el tiempo actual.
--   **ClipTransform**: Objeto que encapsula todos los datos espaciales de un clip (X, Y, Rot, Scale).
--   **Low-Res Preview**: Modo que reduce el lienzo del proyecto a una resolución de preview (ej. 360p) para edición fluida.
--   **Handle**: Los puntos de interacción en los bordes de los clips para ajustar duración o fundidos.
-
----
-
-## Guía para Desarrolladores: Cómo Contribuir
-
-Si quieres añadir una nueva funcionalidad, sigue esta guía de estilo y flujo:
-
-### 1. Manejo de la UI (Swing)
--   Usa **Vanilla Swing**. Evita librerías externas de UI para mantener el proyecto ligero.
--   Dibuja directamente en `paintComponent` para componentes de alto rendimiento como la línea de tiempo.
--   Usa códigos hexadecimales para colores (`Color.decode("#121212")`) para mantener la coherencia estética.
-
-### 2. Gestión de Memoria
--   Libera siempre los contextos de `Graphics2D` (`g.dispose()`).
--   No instancies objetos pesados dentro de bucles de renderizado.
--   Usa el `MediaPool` para acceder a recursos compartidos; nunca cargues el mismo archivo dos veces fuera del pool.
-
-### 3. Workflow de Git
-```bash
-# Limpiar antes de subir (Muy importante)
+# 1. Limpiar versiones previas
 sudo find . -name "*.class" -delete
 
-# Crear una rama descriptiva
-git checkout -b feature/panel-efectos
+# 2. Otorgar permisos
+chmod +x compile.sh
 
-# Documentar cambios
-# Asegúrate de actualizar el archivo walkthrough.md si añades una feature mayor.
+# 3. Compilar
+./compile.sh
 ```
 
 ---
 
-## Solución de Problemas (Troubleshooting)
-
-| Problema | Causa Probable | Solución |
-| :--- | :--- | :--- |
-| **Error de Compilación** | Java no está en el PATH. | Verifica con `javac -version`. |
-| **Vídeo Lentificado** | El bitrate del original es muy alto. | Activa "Vista Previa de Baja Resolución". |
-| **Audio Desfasado** | Diferente Sample Rate (44.1k vs 48k). | Rocky resampleará automáticamente, pero usar 48kHz es recomendado. |
-| **Error de Permisos** | Archivos .class creados por root. | Usa `sudo ./compile.sh` para resetear permisos. |
-
----
-
-## Hoja de Ruta (Roadmap) y Futuro
-
-El desarrollo de Rocky sigue una metodología de "Composición Primero".
-
-### Fase 1: Cimientos (Completado [x])
-- [x] **Arquitectura de 3 espacios**: Independencia Asset -> Proyecto -> Viewport.
-- [x] **Motor de reproducción**: Sincronización precisa audio/vídeo.
-- [x] **Transformaciones Vectoriales**: Posición, escala y rotación funcional.
-- [x] **Atajos de teclado**: Control global por barra de espacio.
+## Hoja de Ruta (Roadmap)
 
 ### Fase 2: Edición Avanzada (En progreso [/])
-- [ ] **Efectos de Clip**: Implementación de filtros en tiempo real (Brillo, Contraste, Blur).
-- [ ] **Corrección de Color**: Soporte para curvas RGB y carga de LUTs (.cube).
-- [ ] **Transiciones**: Sistema de solapamiento para fundidos cruzados automáticos.
-- [ ] **Keyframes**: Animación de transformaciones a lo largo del tiempo.
+- [x] **Undo/Redo System**: Integración total de acciones.
+- [x] **Visual Dithering**: Estética de fades mejorada.
+- [ ] **Efectos en Tiempo Real**: Blur y corrección gamma básica.
+- [ ] **Multi-Select**: Selección de varios clips para movimiento en bloque.
 
 ### Fase 3: Post-Producción (Próximamente [.])
-- [ ] **Generador de Títulos**: Capas de texto con soporte para fuentes personalizadas.
-- [ ] **Exportación Multi-Perfil**: Presets para YouTube, Instagram (9:16) y ProRes.
-- [ ] **Audio Mixer**: Panel de mezcla por canales individuales.
+- [ ] **Generador de Títulos**: Capas de texto enriquecido.
+- [ ] **Exportación ProRes/H264**: Pipeline de renderizado final.
+- [ ] **Audio Mixer**: Mezcla por bus y efectos de audio (EQ/Reverb).
 
 ---
 
@@ -212,8 +160,46 @@ El desarrollo de Rocky sigue una metodología de "Composición Primero".
 
 Este proyecto se distribuye bajo la licencia Open Source propia del equipo Rocky.
 -   **Core Lead**: Desarrollado con tecnología Java Modern.
--   **Librerías**: Gracias a los equipos de **JavaCV** y **FFmpeg**.
+-   **Librerías**: JavaCV, FFmpeg, y FlatLaf para la UI.
 
-**Rocky Open Source Video Editor** - *Diseñado para el editor, construido para el rendimiento.*
+**Rocky Open Source Video Editor** - *Simplificando la complejidad del cine digital.*
 
 © 2026 Rocky Project Team. *Desarrollado para la comunidad creativa mundial.*
+
+---
+
+## Notas de Desarrollo Adicionales
+
+### El Desafío de la Sincronía
+Rocky utiliza el `AudioServer` como reloj de referencia. Si el sistema detecta un retraso en el renderizado de vídeo superior a 50ms, el `FrameServer` saltará automáticamente al siguiente fotograma clave disponible para re-sincronizar el flujo visual.
+
+### Renderizado de Ondas de Audio
+Para evitar bloqueos en la interfaz (UI Freezing), el `PeakManager` utiliza un pool de hilos (`FixedThreadPool`) proporcional al número de núcleos de la CPU. Las ondas se dibujan mediante un sistema de caché de memoria de dos niveles:
+1.  **L1 Cache**: Datos de picos en memoria RAM.
+2.  **L2 Cache**: Archivos binarios temporales en disco.
+
+---
+
+## Preguntas Frecuentes (FAQ)
+
+**¿Por qué Java para un editor de vídeo?**
+Java ofrece una portabilidad excelente y, gracias a librerías como JavaCV (Ffmpeg wrapper), podemos acceder a aceleración por hardware nativa mientras mantenemos una lógica de UI segura y fácil de mantener.
+
+**¿Cómo funciona el escalado en el visor?**
+El `VisualizerPanel` calcula una matriz de transformación afín basada en el ratio del proyecto vs. el ratio del componente Swing. Esto asegura que los píxeles siempre se interpelen de forma correcta, ya sea usando *Nearest Neighbor* para velocidad o *Bicubic* para calidad final.
+
+**¿Puedo usar plugins externos?**
+Próximamente implementaremos un sistema de carga dinámica de clases (.jar) que permitirá crear filtros y exportadores personalizados sin modificar el núcleo del motor.
+
+---
+
+### Mantenimiento y Limpieza
+Para mantener el repositorio limpio de binarios, se recomienda ejecutar el siguiente comando antes de realizar cualquier commit:
+```bash
+# Elimina todos los archivos compilados en bin y src
+find . -type f -name "*.class" -delete
+```
+
+---
+
+*Fin del documento de especificaciones de Rocky Open Source Video Editor.*
