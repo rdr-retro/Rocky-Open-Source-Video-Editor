@@ -39,7 +39,7 @@ public class ProjectManager {
         StringWriter sw = new StringWriter();
         try (PrintWriter writer = new PrintWriter(sw)) {
             writer.println("ROCKY_V6");
-            writer.println("FPS:" + 30);
+            writer.println("FPS:" + props.getFPS());
 
             // Save Project Settings
             writer.println("SET_PROJ:" + props.getProjectRes());

@@ -14,7 +14,9 @@ public class TimelinePanel extends JPanel {
     private int mouseX = -1; // Hover cursor position
     private rocky.core.blueline.Blueline blueline = new rocky.core.blueline.Blueline();
 
-    private final int FPS = 30;
+    private double getFPS() {
+        return (projectProps != null) ? projectProps.getFPS() : 30.0;
+    }
 
     // View State
     private double pixelsPerSecond = 100.0; // Dynamic Zoom Scale
@@ -28,8 +30,8 @@ public class TimelinePanel extends JPanel {
     private double projectDuration = 300.0; // Seconds (Default 5 mins)
 
     // Colors
-    private final Color BG_COLOR = Color.decode("#1e1e1e");
-    private final Color HOVER_CURSOR_COLOR = Color.decode("#d4d4d4");
+    private final Color BG_COLOR = Color.decode("#0f051d");
+    private final Color HOVER_CURSOR_COLOR = Color.decode("#9d50bb");
 
     // Media
     private rocky.core.media.MediaPool mediaPool;
@@ -47,6 +49,10 @@ public class TimelinePanel extends JPanel {
 
     public void setProjectProperties(ProjectProperties props) {
         this.projectProps = props;
+    }
+
+    public ProjectProperties getProjectProperties() {
+        return projectProps;
     }
 
     public void setSidebar(SidebarPanel sidebar) {
@@ -73,6 +79,10 @@ public class TimelinePanel extends JPanel {
 
     public long getPlayheadFrame() {
         return blueline.getPlayheadFrame();
+    }
+
+    public double getPlayheadTime() {
+        return blueline.getPlayheadFrame() / getFPS();
     }
 
     public java.util.List<TimelineClip> getClips() {
@@ -139,7 +149,7 @@ public class TimelinePanel extends JPanel {
         // Calculate dynamic duration based on content
         double maxTime = 300.0; // Minimum 5 minutes
         for (TimelineClip clip : clips) {
-            double end = (clip.getStartFrame() + clip.getDurationFrames()) / (double) FPS;
+            double end = (clip.getStartFrame() + clip.getDurationFrames()) / (double) getFPS();
             if (end > maxTime)
                 maxTime = end;
         }
@@ -171,7 +181,7 @@ public class TimelinePanel extends JPanel {
 
     public void updatePlayheadFromFrame(long frame, boolean force) {
         blueline.setPlayheadFrame(frame);
-        double time = frame / (double) FPS;
+        double time = frame / (double) getFPS();
 
         // Auto-scroll logic: if playing and playhead goes off-screen, jump view
         double newScroll = blueline.calculateAutoScroll(visibleStartTime, getVisibleDuration());
@@ -250,8 +260,8 @@ public class TimelinePanel extends JPanel {
                     int trackH = trackHeights.get(i);
                     for (TimelineClip clip : clips) {
                         if (clip.getTrackIndex() == i) {
-                            int clipX = timeToScreen(clip.getStartFrame() / (double) FPS);
-                            int clipW = (int) (clip.getDurationFrames() / (double) FPS * pixelsPerSecond);
+                            int clipX = timeToScreen(clip.getStartFrame() / (double) getFPS());
+                            int clipW = (int) (clip.getDurationFrames() / (double) getFPS() * pixelsPerSecond);
 
                             if (mouseY >= currentY && mouseY < currentY + trackH) {
                                 int headerH = 20;
@@ -328,8 +338,8 @@ public class TimelinePanel extends JPanel {
                     int trackH = trackHeights.get(i);
                     for (TimelineClip clip : clips) {
                         if (clip.getTrackIndex() == i) {
-                            int clipX = timeToScreen(clip.getStartFrame() / (double) FPS);
-                            int clipW = (int) (clip.getDurationFrames() / (double) FPS * pixelsPerSecond);
+                            int clipX = timeToScreen(clip.getStartFrame() / (double) getFPS());
+                            int clipW = (int) (clip.getDurationFrames() / (double) getFPS() * pixelsPerSecond);
 
                             int headerH = 20;
                             int bodyTopY = currentY + headerH;
@@ -417,7 +427,7 @@ public class TimelinePanel extends JPanel {
                 if (activeClip != null) {
                     int deltaX = e.getX() - dragStartX;
                     double deltaSecs = deltaX / pixelsPerSecond;
-                    long deltaFrames = (long) (deltaSecs * FPS);
+                    long deltaFrames = (long) (deltaSecs * getFPS());
 
                     if (interactionMode == 1) {
                         long newStart = originalStart + deltaFrames;
@@ -555,8 +565,8 @@ public class TimelinePanel extends JPanel {
                     int trackH = trackHeights.get(i);
                     for (TimelineClip clip : clips) {
                         if (clip.getTrackIndex() == i) {
-                            int clipX = timeToScreen(clip.getStartFrame() / (double) FPS);
-                            int clipW = (int) (clip.getDurationFrames() / (double) FPS * pixelsPerSecond);
+                            int clipX = timeToScreen(clip.getStartFrame() / (double) getFPS());
+                            int clipW = (int) (clip.getDurationFrames() / (double) getFPS() * pixelsPerSecond);
 
                             int headerH = 20;
                             int bodyTopY = currentY + headerH;
@@ -564,7 +574,7 @@ public class TimelinePanel extends JPanel {
                             if (mouseY >= currentY && mouseY < currentY + trackH) {
                                 if (mouseX >= clipX && mouseX <= clipX + clipW) {
                                     // Check if click is in Fade In Area
-                                    int fadeInW = (int) (clip.getFadeInFrames() / (double) FPS * pixelsPerSecond);
+                                    int fadeInW = (int) (clip.getFadeInFrames() / (double) getFPS() * pixelsPerSecond);
                                     if (fadeInW > 5 && mouseX >= clipX && mouseX <= clipX + fadeInW
                                             && mouseY >= bodyTopY) {
                                         showFadeMenu(e, clip, true);
@@ -572,7 +582,7 @@ public class TimelinePanel extends JPanel {
                                     }
 
                                     // Check Fade Out Area
-                                    int fadeOutW = (int) (clip.getFadeOutFrames() / (double) FPS * pixelsPerSecond);
+                                    int fadeOutW = (int) (clip.getFadeOutFrames() / (double) getFPS() * pixelsPerSecond);
                                     if (fadeOutW > 5 && mouseX >= clipX + clipW - fadeOutW && mouseX <= clipX + clipW
                                             && mouseY >= bodyTopY) {
                                         showFadeMenu(e, clip, false);
@@ -731,7 +741,7 @@ public class TimelinePanel extends JPanel {
 
                         Point loc = dtde.getLocation();
                         double droppedTime = screenToTime(loc.x);
-                        long startFrame = (long) (droppedTime * FPS);
+                        long startFrame = (long) (droppedTime * getFPS());
 
                         int currentY = 0;
                         int targetTrackIndex = -1;
@@ -745,9 +755,17 @@ public class TimelinePanel extends JPanel {
                         }
 
                         // If dropping into an empty timeline or empty area below tracks, create a NEW
-                        // Video track
+                        // track based on media type
                         if (targetTrackIndex == -1 && sidebar != null) {
-                            sidebar.addTrack(TrackControlPanel.TrackType.VIDEO);
+                            String lower = name.toLowerCase();
+                            boolean isAudioFile = lower.endsWith(".mp3") || lower.endsWith(".wav") || 
+                                                 lower.endsWith(".aac") || lower.endsWith(".m4a") ||
+                                                 lower.endsWith(".ogg") || lower.endsWith(".flac");
+                            
+                            TrackControlPanel.TrackType autoType = isAudioFile ? 
+                                    TrackControlPanel.TrackType.AUDIO : TrackControlPanel.TrackType.VIDEO;
+                                    
+                            sidebar.addTrack(autoType);
                             targetTrackIndex = sidebar.getTrackCount() - 1;
                         }
 
@@ -763,7 +781,7 @@ public class TimelinePanel extends JPanel {
                                     mediaPool.addSource(source);
                                 }
 
-                                long duration = (source.getTotalFrames() > 0) ? source.getTotalFrames() : 5 * FPS; // Images
+                                long duration = (source.getTotalFrames() > 0) ? source.getTotalFrames() : (long)(5 * getFPS()); // Images
                                                                                                                    // default
                                                                                                                    // 5s
                                 TrackControlPanel.TrackType trackType = (sidebar != null)
@@ -852,7 +870,7 @@ public class TimelinePanel extends JPanel {
 
     private void updatePlayhead(int x) {
         double time = screenToTime(x);
-        long frame = (long) (time * FPS);
+        long frame = (long) (time * getFPS());
         if (frame < 0)
             frame = 0;
         blueline.setPlayheadFrame(frame);
@@ -944,7 +962,7 @@ public class TimelinePanel extends JPanel {
     private long findSnapFrame(long targetFrame, TimelineClip excludeClip) {
         // Dynamic Threshold: proportional to screen distance (e.g. 12 pixels)
         double pixelThreshold = 12.0;
-        long thresholdFrames = (long) ((pixelThreshold / pixelsPerSecond) * FPS);
+        long thresholdFrames = (long) ((pixelThreshold / pixelsPerSecond) * getFPS());
         if (thresholdFrames < 5)
             thresholdFrames = 5; // Minimum safety
 
@@ -1035,7 +1053,7 @@ public class TimelinePanel extends JPanel {
             trackYPositions.add(currentY);
             int th = trackH;
 
-            g2d.setColor(Color.decode("#222222"));
+            g2d.setColor(Color.decode("#0f051d"));
             g2d.fillRect(0, currentY, width, th);
             g2d.setColor(Color.BLACK);
             g2d.drawLine(0, currentY + th - 1, width, currentY + th - 1);
@@ -1044,7 +1062,7 @@ public class TimelinePanel extends JPanel {
             Stroke originalStroke = g2d.getStroke();
             g2d.setStroke(
                     new BasicStroke(1, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL, 0, new float[] { 2, 10 }, 0));
-            g2d.setColor(Color.decode("#333333"));
+            g2d.setColor(Color.decode("#1a0b2e"));
 
             double step = 1.0;
             if (pixelsPerSecond > 200)
@@ -1075,8 +1093,8 @@ public class TimelinePanel extends JPanel {
                 int trackY = trackYPositions.get(clip.getTrackIndex());
                 int trackH = trackHeights.get(clip.getTrackIndex());
 
-                int x = timeToScreen(clip.getStartFrame() / (double) FPS);
-                int w = (int) (clip.getDurationFrames() / (double) FPS * pixelsPerSecond);
+                int x = timeToScreen(clip.getStartFrame() / (double) getFPS());
+                int w = (int) (clip.getDurationFrames() / (double) getFPS() * pixelsPerSecond);
 
                 if (x + w < 0 || x > width)
                     continue;
@@ -1117,11 +1135,16 @@ public class TimelinePanel extends JPanel {
                 g2d.drawString(clip.getName(), x + 5, trackY + 15);
                 g2d.setClip(oldClip);
 
-                int iconX = x + w - 30;
-                if (iconX > x) {
-                    g2d.setColor(Color.decode("#cccccc"));
-                    g2d.setFont(new Font("Serif", Font.ITALIC, 16));
-                    g2d.drawString("fx", iconX, trackY + 14);
+                int iconW = 24;
+                int iconH = 14;
+                int iconX = x + w - iconW - 5;
+                if (iconX > x + 5) {
+                    g2d.setColor(Color.decode("#1a0b2e"));
+                    g2d.fillRoundRect(iconX, trackY + 3, iconW, iconH, 4, 4);
+                    g2d.setColor(Color.WHITE);
+                    g2d.drawRoundRect(iconX, trackY + 3, iconW, iconH, 4, 4);
+                    g2d.setFont(new Font("SansSerif", Font.BOLD, 10));
+                    g2d.drawString("fx", iconX + 6, trackY + 14);
                 }
 
                 int cornerR = 8;
@@ -1191,7 +1214,7 @@ public class TimelinePanel extends JPanel {
         }
 
         // Active Playhead Line
-        int playheadX = timeToScreen(blueline.getPlayheadFrame() / (double) FPS);
+        int playheadX = timeToScreen(blueline.getPlayheadFrame() / (double) getFPS());
         if (playheadX >= -20 && playheadX <= width + 20) {
             g2d.setColor(blueline.getColor());
             g2d.drawLine(playheadX, 0, playheadX, height);

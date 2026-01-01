@@ -20,13 +20,13 @@ public class KeyframeTimelinePanel extends JPanel {
     private final int TRACK_HEIGHT = 24;
 
     // Colors (Matched to reference)
-    private final Color BG_COLOR_DARK = Color.decode("#1e1e1e");
-    private final Color SIDEBAR_BG = Color.decode("#252525");
-    private final Color TRACK_BG = Color.decode("#202020");
-    private final Color RULER_BG = Color.decode("#333333");
-    private final Color ACCENT_BLUE = Color.decode("#4a90e2");
-    private final Color TEXT_GOLD = Color.decode("#d4af37");
-    private final Color ICON_COLOR = Color.decode("#cccccc");
+    private final Color BG_COLOR_DARK = Color.decode("#0f051d");
+    private final Color SIDEBAR_BG = Color.decode("#1a0b2e");
+    private final Color TRACK_BG = Color.decode("#0f051d");
+    private final Color RULER_BG = Color.decode("#1a0b2e");
+    private final Color ACCENT_LILAC = Color.decode("#dcd0ff");
+    private final Color ACCENT_PURPLE = Color.decode("#9d50bb");
+    private final Color ICON_COLOR = Color.decode("#dcd0ff");
 
     private long localPlayheadFrame = 0;
     private TimelineKeyframe selectedKeyframe = null;
@@ -243,7 +243,7 @@ public class KeyframeTimelinePanel extends JPanel {
         // 3. Ruler
         g2.setColor(RULER_BG);
         g2.fillRect(SIDEBAR_WIDTH, 0, w - SIDEBAR_WIDTH, RULER_HEIGHT);
-        g2.setColor(TEXT_GOLD);
+        g2.setColor(ACCENT_LILAC);
         g2.setFont(new Font("Monospaced", Font.PLAIN, 11));
 
         long dur = clip.getDurationFrames();
@@ -252,12 +252,12 @@ public class KeyframeTimelinePanel extends JPanel {
             int x = clipFrameToX(f);
             g2.setColor(new Color(100, 100, 100));
             g2.drawLine(x, RULER_HEIGHT - 8, x, RULER_HEIGHT);
-            g2.setColor(TEXT_GOLD);
+            g2.setColor(ACCENT_LILAC);
             g2.drawString(formatTC(f), x + 4, 15);
         }
 
         // 4. Sidebar Labels
-        g2.setColor(TEXT_GOLD);
+        g2.setColor(ACCENT_LILAC);
         g2.setFont(new Font("Dialog", Font.BOLD, 12));
         g2.drawString("Posición", 10, RULER_HEIGHT + 16);
 
@@ -319,7 +319,7 @@ public class KeyframeTimelinePanel extends JPanel {
         p.addPoint(px - 6, RULER_HEIGHT - 8);
         g2.fill(p);
 
-        g2.setColor(ACCENT_BLUE);
+        g2.setColor(ACCENT_PURPLE);
         g2.drawLine(px, RULER_HEIGHT, px, getHeight() - TOOLBAR_HEIGHT);
     }
 

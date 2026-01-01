@@ -9,10 +9,10 @@ import java.awt.event.*;
  * Replicates the provided UI with active (green) and idle (grey) states.
  */
 public class MasterSoundPanel extends JPanel {
-    private final Color BG_COLOR = Color.decode("#1a1a1a");
-    private final Color TEXT_COLOR = Color.decode("#cccccc");
-    private final Color VALUE_BLUE = Color.decode("#5fbcd3");
-    private final Color DB_BLUE = Color.decode("#4e8fb2");
+    private final Color BG_COLOR = Color.decode("#1a0b2e");
+    private final Color TEXT_COLOR = Color.decode("#dcd0ff");
+    private final Color VALUE_PURPLE = Color.decode("#9d50bb");
+    private final Color DB_LILAC = Color.decode("#dcd0ff");
     
     private float leftLevel = 0.0f;  // 0.0 to 1.0 (Idle)
     private float rightLevel = 0.0f;
@@ -96,7 +96,7 @@ public class MasterSoundPanel extends JPanel {
         dbLabels.setBackground(BG_COLOR);
         for (int i = 1; i <= 19; i++) {
             JLabel l = new JLabel("- " + (i * 3) + " -", SwingConstants.CENTER);
-            l.setForeground(DB_BLUE);
+            l.setForeground(DB_LILAC);
             l.setFont(new Font("Dialog", Font.PLAIN, 10));
             dbLabels.add(l);
         }
@@ -127,9 +127,9 @@ public class MasterSoundPanel extends JPanel {
         JPanel footer = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
         footer.setBackground(BG_COLOR);
         JLabel v1 = new JLabel("0,0");
-        v1.setForeground(VALUE_BLUE); v1.setFont(new Font("Dialog", Font.BOLD, 11));
+        v1.setForeground(VALUE_PURPLE); v1.setFont(new Font("Dialog", Font.BOLD, 11));
         JLabel v2 = new JLabel("0,0");
-        v2.setForeground(VALUE_BLUE); v2.setFont(new Font("Dialog", Font.BOLD, 11));
+        v2.setForeground(VALUE_PURPLE); v2.setFont(new Font("Dialog", Font.BOLD, 11));
         footer.add(v1); footer.add(Box.createHorizontalStrut(10)); footer.add(v2);
         add(footer, BorderLayout.SOUTH);
     }
@@ -184,7 +184,7 @@ public class MasterSoundPanel extends JPanel {
             float level = isLeft ? leftLevel : rightLevel;
 
             // Background (Idle Gray)
-            g2d.setColor(Color.decode("#2a2a2a"));
+            g2d.setColor(Color.decode("#0f051d"));
             g2d.fillRect(2, 0, w - 4, h);
 
             if (level > 0) {
@@ -231,7 +231,7 @@ public class MasterSoundPanel extends JPanel {
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             int centerX = getWidth() / 2 + 5;
             int margin = 30;
-            g2d.setColor(Color.decode("#333333"));
+            g2d.setColor(Color.decode("#1a0b2e"));
             g2d.drawLine(centerX, margin, centerX, getHeight() - margin);
             int trackH = getHeight() - (2 * margin);
             int handleY = margin + (int)(faderValue * trackH);

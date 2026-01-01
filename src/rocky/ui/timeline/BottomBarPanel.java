@@ -4,8 +4,8 @@ import javax.swing.*;
 import java.awt.*;
 
 public class BottomBarPanel extends JPanel {
-    private final Color BG_COLOR = Color.decode("#2d2d2d"); // Dark gray background
-    private final Color TEXT_COLOR = Color.decode("#b0b0b0");
+    private final Color BG_COLOR = Color.decode("#1a0b2e"); 
+    private final Color TEXT_COLOR = Color.decode("#dcd0ff");
 
     private JLabel speedLabel;
     private JSlider speedSlider;
@@ -81,7 +81,7 @@ public class BottomBarPanel extends JPanel {
             btn.setContentAreaFilled(false);
             btn.setBorderPainted(false);
             btn.setForeground(TEXT_COLOR);
-            if (icon.equals("●")) btn.setForeground(Color.decode("#d98888")); // Red record
+            if (icon.equals("●")) btn.setForeground(Color.decode("#ff4757")); // Vibrant red record
             centerPanel.add(btn);
         }
 

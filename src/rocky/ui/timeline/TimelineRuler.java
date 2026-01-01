@@ -10,10 +10,10 @@ public class TimelineRuler extends JPanel {
     // Reference to main timeline for shared state
     private TimelinePanel timeline;
     
-    private final Color RULER_BG = Color.decode("#2d2d2d");
-    private final Color TICK_COLOR = Color.decode("#808080");
-    private final Color TEXT_COLOR = Color.decode("#b0b0b0");
-    private final Color HOVER_CURSOR_COLOR = Color.decode("#d4d4d4");
+    private final Color RULER_BG = Color.decode("#0f051d");
+    private final Color TICK_COLOR = Color.decode("#dcd0ff");
+    private final Color TEXT_COLOR = Color.decode("#dcd0ff");
+    private final Color HOVER_CURSOR_COLOR = Color.decode("#9d50bb");
 
     private int mouseX = -1;
 

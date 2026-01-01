@@ -43,7 +43,8 @@ public class FrameServer {
     }
 
     public void processFrame(double timeInSeconds, boolean force) {
-        long targetFrame = (long) (timeInSeconds * 30); // Assuming 30 FPS
+        double fps = (properties != null) ? properties.getFPS() : 30.0;
+        long targetFrame = (long) (timeInSeconds * fps); 
 
         if (!force && targetFrame == lastSubmittedFrame)
             return;

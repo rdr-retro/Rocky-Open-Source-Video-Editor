@@ -8,12 +8,12 @@ public class TrackControlPanel extends JPanel {
     public enum TrackType { VIDEO, AUDIO }
     
     private int height = 60; // Current height
-    private final Color BG_COLOR_VIDEO = Color.decode("#607079"); // Muted Blue-Grey
-    private final Color BG_COLOR_AUDIO = Color.decode("#606070"); // Slightly darker/purplish for audio
-    private final Color STRIP_COLOR_VIDEO = Color.decode("#4a6b8a");
-    private final Color STRIP_COLOR_AUDIO = Color.decode("#4a4a6b"); // Darker purple-blue strip
+    private final Color BG_COLOR_VIDEO = Color.decode("#1a0b2e");
+    private final Color BG_COLOR_AUDIO = Color.decode("#25103d");
+    private final Color STRIP_COLOR_VIDEO = Color.decode("#9d50bb");
+    private final Color STRIP_COLOR_AUDIO = Color.decode("#8a2be2");
     
-    private final Color TEXT_COLOR = Color.WHITE;
+    private final Color TEXT_COLOR = Color.decode("#dcd0ff");
     
     private JLabel numLabel;
     private ResizeListener resizeListener;
@@ -85,12 +85,26 @@ public class TrackControlPanel extends JPanel {
         leftStrip.addMouseListener(moveAdapter);
         leftStrip.addMouseMotionListener(moveAdapter);
 
-        // Menu Icon
-        JLabel menuIcon = new JLabel("≡");
-        menuIcon.setForeground(Color.WHITE);
-        menuIcon.setFont(new Font("SansSerif", Font.BOLD, 14));
+        // Menu Icon (Improved)
+        JPanel menuIcon = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2d = (Graphics2D) g.create();
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2d.setColor(Color.WHITE);
+                int w = getWidth();
+                int h = getHeight();
+                int lineH = 2;
+                int lineW = 12;
+                int x = (w - lineW) / 2;
+                g2d.fillRect(x, 4, lineW, lineH);
+                g2d.fillRect(x, 7, lineW, lineH);
+                g2d.fillRect(x, 10, lineW, lineH);
+                g2d.dispose();
+            }
+        };
+        menuIcon.setOpaque(false);
         menuIcon.setBounds(0, 2, 24, 15);
-        menuIcon.setHorizontalAlignment(SwingConstants.CENTER);
         leftStrip.add(menuIcon);
         
         // Track Number
@@ -101,20 +115,42 @@ public class TrackControlPanel extends JPanel {
         numLabel.setHorizontalAlignment(SwingConstants.CENTER);
         leftStrip.add(numLabel);
         
-        // Track Icon (Generic)
-        // Icon logic could go here
+        // Track Type Icon (Video/Audio) - REFINED
+        JPanel typeIcon = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2d = (Graphics2D) g.create();
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2d.setColor(new Color(255, 255, 255, 200));
+                int w = getWidth();
+                int h = getHeight();
+                if (type == TrackType.VIDEO) {
+                    // Film strip icon
+                    g2d.drawRect(5, 5, 14, 14);
+                    for(int i=0; i<3; i++) {
+                        g2d.drawRect(7, 7 + i*5, 3, 3);
+                        g2d.drawRect(14, 7 + i*5, 3, 3);
+                    }
+                } else {
+                    // Modern Waveform icon
+                    int mid = h / 2;
+                    g2d.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2d.drawLine(4, mid, 6, mid - 6);
+                    g2d.drawLine(6, mid - 6, 9, mid + 8);
+                    g2d.drawLine(9, mid + 8, 12, mid - 10);
+                    g2d.drawLine(12, mid - 10, 15, mid + 6);
+                    g2d.drawLine(15, mid + 6, 18, mid - 4);
+                    g2d.drawLine(18, mid - 4, 20, mid);
+                }
+                g2d.dispose();
+            }
+        };
+        typeIcon.setOpaque(false);
+        typeIcon.setBounds(0, 40, 24, 24);
+        leftStrip.add(typeIcon);
         
         add(leftStrip);
         
-        // Mute / Solo Buttons (Common)
-        RoundButton btnM = new RoundButton("M", Color.decode("#d98888"));
-        btnM.setBounds(190, 5, 20, 20);
-        add(btnM);
-        
-        RoundButton btnS = new RoundButton("S", Color.decode("#d9c688"));
-        btnS.setBounds(215, 5, 20, 20);
-        add(btnS);
-
         if (type == TrackType.VIDEO) {
             setupVideoControls();
         } else {

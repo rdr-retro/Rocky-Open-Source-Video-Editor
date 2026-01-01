@@ -2,6 +2,7 @@ import rocky.ui.viewer.VisualizerPanel;
 import rocky.core.audio.MasterSoundPanel;
 import rocky.ui.timeline.*;
 import rocky.ui.toolbar.TopToolbar;
+import rocky.ui.navigation.NavigationPanel;
 import rocky.core.media.*;
 import rocky.core.engine.FrameServer;
 import rocky.core.engine.AudioServer;
@@ -53,7 +54,7 @@ public class MainAB {
             JFrame frame = new JFrame("Rocky Open Source Video Editor (.rocky Projects)");
             frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             frame.setSize(1200, 800);
-            frame.setBackground(Color.decode("#1e1e1e"));
+            frame.setBackground(Color.decode("#0f051d"));
             frame.setLayout(new BorderLayout());
 
             ProjectProperties projectProps = new ProjectProperties();
@@ -104,11 +105,11 @@ public class MainAB {
             centerContainer.add(scrollPane, BorderLayout.CENTER);
 
             JPanel scrollbarPanel = new JPanel(new BorderLayout());
-            scrollbarPanel.setBackground(Color.decode("#1e1e1e"));
+            scrollbarPanel.setBackground(Color.decode("#0f051d"));
 
             JPanel sidebarSpacer = new JPanel();
             sidebarSpacer.setPreferredSize(new Dimension(250, 0));
-            sidebarSpacer.setBackground(Color.decode("#1e1e1e"));
+            sidebarSpacer.setBackground(Color.decode("#0f051d"));
             scrollbarPanel.add(sidebarSpacer, BorderLayout.WEST);
 
             JScrollBar hScroll = new JScrollBar(JScrollBar.HORIZONTAL);
@@ -183,19 +184,18 @@ public class MainAB {
 
             // --- PART A: Top Section (Visualizer & MasterSound) ---
             JPanel topPanel = new JPanel(new GridBagLayout());
-            topPanel.setBackground(Color.decode("#1e1e1e"));
+            topPanel.setBackground(Color.decode("#0f051d"));
 
             GridBagConstraints gbcTop = new GridBagConstraints();
             gbcTop.fill = GridBagConstraints.BOTH;
             gbcTop.weighty = 1.0;
 
-            // Left Side Placeholder (For future functionality)
-            JPanel leftContentPlaceholder = new JPanel();
-            leftContentPlaceholder.setBackground(Color.decode("#1e1e1e"));
-            leftContentPlaceholder.setPreferredSize(new Dimension(550, 0)); // Even larger as requested
+            // Navigation Panel (Left Side of Visualizer)
+            NavigationPanel navPanel = new NavigationPanel();
+            navPanel.setPreferredSize(new Dimension(550, 0));
             gbcTop.gridx = 0;
             gbcTop.weightx = 0.0;
-            topPanel.add(leftContentPlaceholder, gbcTop);
+            topPanel.add(navPanel, gbcTop);
 
             // Visualizer (Main center content)
             gbcTop.gridx = 1;
@@ -241,55 +241,18 @@ public class MainAB {
                 }
             });
             toolbar.setOnSettings(() -> {
-                JPanel settingsPanel = new JPanel();
-                settingsPanel.setLayout(new BoxLayout(settingsPanel, BoxLayout.Y_AXIS));
-                settingsPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-
-                String[] commonRes = {
-                        "1920x1080x32; 29,970i",
-                        "3840x2160x32; 60p",
-                        "1920x1080x32; 60p",
-                        "1280x720x32; 29,970p",
-                        "720x480x32; 29,970i",
-                        "480x270x32; 29,970p",
-                        "597x336x32"
-                };
-
-                JComboBox<String> projCombo = new JComboBox<>(commonRes);
-                projCombo.setEditable(true);
-                projCombo.setSelectedItem(projectProps.getProjectRes());
-
-                JComboBox<String> prevCombo = new JComboBox<>(commonRes);
-                prevCombo.setEditable(true);
-                prevCombo.setSelectedItem(projectProps.getPreviewRes());
-
-                JComboBox<String> dispCombo = new JComboBox<>(commonRes);
-                dispCombo.setEditable(true);
-                dispCombo.setSelectedItem(projectProps.getDisplayRes());
-
-                JCheckBox lowResCheck = new JCheckBox("Vista Previa de Baja Resolución (Pixelada para mayor fluidez)",
-                        projectProps.isLowResPreview());
-                lowResCheck.setOpaque(false);
-                lowResCheck.setForeground(Color.WHITE);
-
-                autoLayoutSetting(settingsPanel, "Proyecto:", projCombo);
-                settingsPanel.add(Box.createVerticalStrut(10));
-                autoLayoutSetting(settingsPanel, "Vista Previa:", prevCombo);
-                settingsPanel.add(Box.createVerticalStrut(10));
-                autoLayoutSetting(settingsPanel, "Visualización:", dispCombo);
-                settingsPanel.add(Box.createVerticalStrut(10));
-                settingsPanel.add(lowResCheck);
-
-                int result = JOptionPane.showConfirmDialog(frame, settingsPanel, "Ajustes del Proyecto",
-                        JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-                if (result == JOptionPane.OK_OPTION) {
+                SettingsDialog dialog = new SettingsDialog(frame, projectProps);
+                dialog.setVisible(true);
+                if (dialog.isApproved()) {
                     history.pushState(timeline, projectProps, mediaPool);
-                    projectProps.setProjectRes((String) projCombo.getSelectedItem());
-                    projectProps.setPreviewRes((String) prevCombo.getSelectedItem());
-                    projectProps.setDisplayRes((String) dispCombo.getSelectedItem());
-                    projectProps.setLowResPreview(lowResCheck.isSelected());
-
+                    dialog.applyTo(projectProps);
+                    
+                    // Force components to acknowledge new settings
                     visualizer.updateProperties(projectProps);
+                    frameServer.setProperties(projectProps); // Re-set just in case
+                    frameServer.processFrame(timeline.getPlayheadTime(), true);
+                    
+                    timeline.repaint();
                 }
             });
             toolbar.setOnRender(() -> {
@@ -309,7 +272,7 @@ public class MainAB {
                     progressDialog.setSize(300, 70);
                     progressDialog.setLocationRelativeTo(frame);
 
-                    RenderEngine engine = new RenderEngine(frameServer, 1920, 1080);
+                    RenderEngine engine = new RenderEngine(frameServer);
                     final File finalFile = outputFile;
                     engine.render(outputFile, new RenderEngine.RenderProgressListener() {
                         @Override
@@ -433,13 +396,4 @@ public class MainAB {
         });
     }
 
-    private static void autoLayoutSetting(JPanel parent, String label, JComponent comp) {
-        JPanel row = new JPanel(new BorderLayout());
-        row.setOpaque(false);
-        JLabel lbl = new JLabel(label);
-        lbl.setPreferredSize(new Dimension(100, 25));
-        row.add(lbl, BorderLayout.WEST);
-        row.add(comp, BorderLayout.CENTER);
-        parent.add(row);
-    }
 }

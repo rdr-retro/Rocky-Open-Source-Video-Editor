@@ -8,15 +8,15 @@ public class SidebarPanel extends JPanel {
     private JLabel timecodeLabel;
 
     // Aesthetic colors
-    private final Color BG_COLOR = Color.decode("#1e1e1e");
-    private final Color HEADER_BG = Color.decode("#2d2d2d"); // Matches ruler background roughly or slightly different?
+    private final Color BG_COLOR = Color.decode("#0f051d");
+    private final Color HEADER_BG = Color.decode("#1a0b2e"); 
     // Image shows Top Left is darker/blackish?
     // Actually looking at the image: Top Left box with numbers is NOT the same
     // color as the ruler. It looks like a dark grey/black box.
     // Ruler is lighter.
 
-    private final Color TIMECODE_BG = Color.decode("#262626"); // Dark box for timecode
-    private final Color TIMECODE_TEXT = Color.decode("#d4d4d4");
+    private final Color TIMECODE_BG = Color.decode("#1a0b2e"); 
+    private final Color TIMECODE_TEXT = Color.decode("#dcd0ff");
     private final Font TIMECODE_FONT = new Font("SansSerif", Font.PLAIN, 20);
 
     private JPanel tracksContainer;

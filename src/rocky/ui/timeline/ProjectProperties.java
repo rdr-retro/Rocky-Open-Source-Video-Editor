@@ -4,10 +4,13 @@ package rocky.ui.timeline;
  * Data model for project settings.
  */
 public class ProjectProperties {
-    private String projectRes = "1920x1080x32; 29,970i";
-    private String previewRes = "480x270x32; 29,970p";
-    private String displayRes = "597x336x32";
-    private boolean lowResPreview = true; // Default to true as requested
+    private String projectRes = "1920x1080 (Full HD 1080p)";
+    private String previewRes = "854x480 (SD 480p)";
+    private String displayRes = "1920x1080 (Full HD 1080p)";
+    private boolean lowResPreview = true;
+    private double fps = 30.0;
+    private int audioSampleRate = 44100;
+    private int audioChannels = 2;
 
     public String getProjectRes() { return projectRes; }
     public void setProjectRes(String res) { this.projectRes = res; }
@@ -20,6 +23,15 @@ public class ProjectProperties {
 
     public boolean isLowResPreview() { return lowResPreview; }
     public void setLowResPreview(boolean low) { this.lowResPreview = low; }
+
+    public double getFPS() { return fps; }
+    public void setFPS(double fps) { this.fps = fps; }
+
+    public int getAudioSampleRate() { return audioSampleRate; }
+    public void setAudioSampleRate(int rate) { this.audioSampleRate = rate; }
+
+    public int getAudioChannels() { return audioChannels; }
+    public void setAudioChannels(int channels) { this.audioChannels = channels; }
 
     public int getProjectWidth() { return parseWidth(projectRes); }
     public int getProjectHeight() { return parseHeight(projectRes); }

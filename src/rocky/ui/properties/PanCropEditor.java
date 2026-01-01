@@ -17,10 +17,10 @@ public class PanCropEditor extends JPanel {
             rocky.core.persistence.HistoryManager historyManager) {
         this.clip = clip;
         setLayout(new BorderLayout());
-        setBackground(Color.decode("#1e1e1e"));
+        setBackground(Color.decode("#0f051d"));
 
         // --- TOP TOOLBAR ---
-        setBackground(Color.decode("#252525"));
+        setBackground(Color.decode("#1a0b2e"));
         add(createTopToolbar(), BorderLayout.NORTH);
 
         // --- CENTER SECTION (Sidebar + Tree + Canvas) ---
@@ -31,7 +31,7 @@ public class PanCropEditor extends JPanel {
         middleSection.add(sidebar, BorderLayout.WEST);
 
         JPanel emptyLeftPanel = new JPanel();
-        emptyLeftPanel.setBackground(Color.decode("#252525"));
+        emptyLeftPanel.setBackground(Color.decode("#1a0b2e"));
         VisualCanvas canvas = new VisualCanvas(clip, pool, historyManager);
         canvas.setContext(mainTimeline, projectProps);
 
@@ -73,8 +73,8 @@ public class PanCropEditor extends JPanel {
 
     private JPanel createTopToolbar() {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
-        toolbar.setBackground(Color.decode("#333333"));
-        toolbar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Color.BLACK));
+        toolbar.setBackground(Color.decode("#1a0b2e"));
+        toolbar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Color.decode("#0f051d")));
 
         addMockButton(toolbar, "Preset");
         toolbar.add(new JComboBox<>(new String[] { "(Sin nombre)" }));

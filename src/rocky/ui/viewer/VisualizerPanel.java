@@ -10,10 +10,10 @@ import java.awt.event.MouseEvent;
  * Replicated to match the provided reference image.
  */
 public class VisualizerPanel extends JPanel {
-    private final Color ACCENT_RED = Color.decode("#FF6B6B");
-    private final Color PANEL_BG = Color.decode("#1e1e1e");
-    private final Color CONTROL_BG = Color.decode("#404040");
-    private final Color TEXT_COLOR = Color.decode("#cccccc");
+    private final Color ACCENT_LILAC = Color.decode("#dcd0ff");
+    private final Color PANEL_BG = Color.decode("#0f051d");
+    private final Color CONTROL_BG = Color.decode("#1a0b2e");
+    private final Color TEXT_COLOR = Color.decode("#dcd0ff");
 
     private JLabel projectVal;
     private JLabel previewVal;
@@ -61,7 +61,7 @@ public class VisualizerPanel extends JPanel {
         videoArea.setBackground(Color.BLACK);
         
         frameDisplayLabel = new JLabel("", SwingConstants.CENTER);
-        frameDisplayLabel.setForeground(ACCENT_RED);
+        frameDisplayLabel.setForeground(ACCENT_LILAC);
         frameDisplayLabel.setFont(new Font("Monospaced", Font.BOLD, 18));
         videoArea.add(frameDisplayLabel, BorderLayout.CENTER);
         
@@ -77,10 +77,10 @@ public class VisualizerPanel extends JPanel {
         playBar.setBackground(CONTROL_BG);
         playBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
         
-        playBar.add(createIconButton("▶", e -> { if(onPlay != null) onPlay.run(); })); // Play
-        playBar.add(createIconButton("⏸", e -> { if(onPause != null) onPause.run(); })); // Pause
-        playBar.add(createIconButton("■", e -> { if(onStop != null) onStop.run(); })); // Stop
-        playBar.add(createIconButton("≡", null)); // Menu
+        playBar.add(new VectorIcon("PLAY", 16, e -> { if(onPlay != null) onPlay.run(); })); 
+        playBar.add(new VectorIcon("PAUSE", 16, e -> { if(onPause != null) onPause.run(); })); 
+        playBar.add(new VectorIcon("STOP", 16, e -> { if(onStop != null) onStop.run(); })); 
+        playBar.add(new VectorIcon("MENU", 16, null)); 
         
         southContainer.add(playBar);
 
@@ -101,7 +101,7 @@ public class VisualizerPanel extends JPanel {
         leftCol.add(Box.createVerticalStrut(2));
         
         previewVal = new JLabel("480x270x32; 29,970p");
-        leftCol.add(createStatusLine("Vista previa:", previewVal, ACCENT_RED));
+        leftCol.add(createStatusLine("Vista previa:", previewVal, ACCENT_LILAC));
         statusPanel.add(leftCol);
 
         // Column Right
@@ -115,7 +115,7 @@ public class VisualizerPanel extends JPanel {
         rightCol.add(Box.createVerticalStrut(2));
         
         displayVal = new JLabel("597x336x32");
-        rightCol.add(createStatusLine("Visualización:", displayVal, ACCENT_RED));
+        rightCol.add(createStatusLine("Visualización:", displayVal, ACCENT_LILAC));
         statusPanel.add(rightCol);
 
         southContainer.add(statusPanel);
@@ -123,7 +123,7 @@ public class VisualizerPanel extends JPanel {
         // 3. Tab Bar
         JPanel tabBar = new JPanel();
         tabBar.setLayout(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        tabBar.setBackground(Color.decode("#252525"));
+        tabBar.setBackground(Color.decode("#1a0b2e"));
         tabBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
         tabBar.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, Color.BLACK));
 
@@ -139,20 +139,78 @@ public class VisualizerPanel extends JPanel {
         videoArea.repaint();
     }
 
-    private JLabel createIconButton(String icon, java.util.function.Consumer<MouseEvent> onClick) {
-        JLabel label = new JLabel(icon);
-        label.setForeground(Color.WHITE);
-        label.setFont(new Font("Monospaced", Font.BOLD, 22));
-        label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        if (onClick != null) {
-            label.addMouseListener(new java.awt.event.MouseAdapter() {
+    // --- CUSTOM VECTOR ICON CLASS ---
+    private class VectorIcon extends JComponent {
+        private String type;
+        private int size;
+        private boolean hovered = false;
+
+        public VectorIcon(String type, int size, java.util.function.Consumer<MouseEvent> onClick) {
+            this.type = type;
+            this.size = size;
+            setPreferredSize(new Dimension(size + 10, size + 10));
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+            addMouseListener(new java.awt.event.MouseAdapter() {
                 @Override
-                public void mousePressed(java.awt.event.MouseEvent e) {
-                    onClick.accept(e);
+                public void mouseEntered(MouseEvent e) { hovered = true; repaint(); }
+                @Override
+                public void mouseExited(MouseEvent e) { hovered = false; repaint(); }
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    if (onClick != null) onClick.accept(e);
                 }
             });
         }
-        return label;
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2d = (Graphics2D) g.create();
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            
+            int w = getWidth();
+            int h = getHeight();
+            int iconSize = size;
+            int x = (w - iconSize) / 2;
+            int y = (h - iconSize) / 2;
+
+            Color baseColor = hovered ? Color.WHITE : TEXT_COLOR;
+            g2d.setColor(baseColor);
+
+            switch (type) {
+                case "PLAY":
+                    // Smooth rounded triangle
+                    java.awt.geom.Path2D playPath = new java.awt.geom.Path2D.Double();
+                    double r = 4.0; 
+                    playPath.moveTo(x + r, y);
+                    playPath.lineTo(x + iconSize - r*1.5, y + iconSize/2.0 - r);
+                    playPath.quadTo(x + iconSize, y + iconSize/2.0, x + iconSize - r*1.5, y + iconSize/2.0 + r);
+                    playPath.lineTo(x + r, y + iconSize);
+                    playPath.quadTo(x, y + iconSize, x, y + iconSize - r);
+                    playPath.lineTo(x, y + r);
+                    playPath.quadTo(x, y, x + r, y);
+                    g2d.fill(playPath);
+                    break;
+                case "PAUSE":
+                    int barW = iconSize / 3;
+                    g2d.fillRoundRect(x, y, barW, iconSize, 6, 6);
+                    g2d.fillRoundRect(x + iconSize - barW, y, barW, iconSize, 6, 6);
+                    break;
+                case "STOP":
+                    // Squircle/Modern rounded square
+                    g2d.fillRoundRect(x, y, iconSize, iconSize, 10, 10);
+                    break;
+                case "MENU":
+                    int lineH = 3;
+                    int arc = 3;
+                    int spacing = (iconSize - (3 * lineH)) / 2;
+                    g2d.fillRoundRect(x, y, iconSize, lineH, arc, arc);
+                    g2d.fillRoundRect(x, y + lineH + spacing, iconSize, lineH, arc, arc);
+                    g2d.fillRoundRect(x, y + 2 * (lineH + spacing), iconSize, lineH, arc, arc);
+                    break;
+            }
+            g2d.dispose();
+        }
     }
 
     public void setOnPlay(Runnable r) { this.onPlay = r; }
@@ -191,7 +249,7 @@ public class VisualizerPanel extends JPanel {
 
     private JPanel createTab(String title, boolean selected) {
         JPanel tab = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
-        tab.setBackground(selected ? PANEL_BG : Color.decode("#252525"));
+        tab.setBackground(selected ? PANEL_BG : Color.decode("#1a0b2e"));
         tab.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, Color.BLACK));
         
         JLabel label = new JLabel(title);

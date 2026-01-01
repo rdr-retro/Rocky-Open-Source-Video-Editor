@@ -15,14 +15,8 @@ import javax.swing.SwingUtilities;
  */
 public class RenderEngine {
     private FrameServer frameServer;
-    private int width;
-    private int height;
-    private int fps = 30;
-
-    public RenderEngine(FrameServer frameServer, int width, int height) {
+    public RenderEngine(FrameServer frameServer) {
         this.frameServer = frameServer;
-        this.width = width;
-        this.height = height;
     }
 
     public void render(File outputFile, RenderProgressListener listener) {
@@ -30,12 +24,17 @@ public class RenderEngine {
             Process process = null;
             File tempAudioFile = new File(outputFile.getParent(), "temp_audio_" + System.currentTimeMillis() + ".wav");
             try {
+                rocky.ui.timeline.ProjectProperties props = frameServer.getTimeline().getProjectProperties();
+                int width = props.getProjectWidth();
+                int height = props.getProjectHeight();
+                double fps = props.getFPS();
+
                 // Determine duration from timeline based on actual content
                 long totalFrames = frameServer.getTimeline().getContentDurationFrames();
-                if (totalFrames <= 0) totalFrames = fps; // Default 1 second if empty
+                if (totalFrames <= 0) totalFrames = (long)fps; // Default 1 second if empty
                 
                 // 1. RENDER AUDIO TO TEMP WAV
-                renderAudioToWav(tempAudioFile, totalFrames);
+                renderAudioToWav(tempAudioFile, totalFrames, props);
 
                 // 2. RENDER VIDEO AND MUX WITH TEMP AUDIO
                 // FFmpeg command: pipe from stdin (raw video) and temp audio file to mp4
@@ -106,10 +105,12 @@ public class RenderEngine {
         }).start();
     }
 
-    private void renderAudioToWav(File wavFile, long totalFrames) throws Exception {
-        int sampleRate = 48000;
-        int framesPerProjectFrame = sampleRate / fps;
-        javax.sound.sampled.AudioFormat format = new javax.sound.sampled.AudioFormat(sampleRate, 16, 2, true, true);
+    private void renderAudioToWav(File wavFile, long totalFrames, rocky.ui.timeline.ProjectProperties props) throws Exception {
+        int sampleRate = props.getAudioSampleRate();
+        double fps = props.getFPS();
+        int channels = props.getAudioChannels();
+        int framesPerProjectFrame = (int)(sampleRate / fps);
+        javax.sound.sampled.AudioFormat format = new javax.sound.sampled.AudioFormat(sampleRate, 16, channels, true, true);
         
         long totalSamples = totalFrames * framesPerProjectFrame;
         java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
@@ -129,14 +130,18 @@ public class RenderEngine {
         
         byte[] audioData = baos.toByteArray();
         java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(audioData);
-        javax.sound.sampled.AudioInputStream ais = new javax.sound.sampled.AudioInputStream(bais, format, audioData.length / 4);
+        javax.sound.sampled.AudioInputStream ais = new javax.sound.sampled.AudioInputStream(bais, format, audioData.length / (channels * 2));
         javax.sound.sampled.AudioSystem.write(ais, javax.sound.sampled.AudioFileFormat.Type.WAVE, wavFile);
     }
 
     private float[] mixFrameAudio(long frameIndex) {
         TimelinePanel timeline = frameServer.getTimeline();
         java.util.List<rocky.ui.timeline.TimelineClip> allClips = timeline.getClips();
-        int samplesPerFrame = (48000 / fps) * 2;
+        rocky.ui.timeline.ProjectProperties props = timeline.getProjectProperties();
+        int sampleRate = props.getAudioSampleRate();
+        double fps = props.getFPS();
+        int channels = props.getAudioChannels();
+        int samplesPerFrame = (int)((sampleRate / fps) * channels);
         float[] mixedBuffer = new float[samplesPerFrame];
 
         for (rocky.ui.timeline.TimelineClip clip : allClips) {

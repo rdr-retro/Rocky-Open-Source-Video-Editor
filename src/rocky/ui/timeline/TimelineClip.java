@@ -25,11 +25,11 @@ public class TimelineClip {
     private double endOpacity = 1.0;
 
     // Exact colors from the user's screenshot
-    public static final Color HEADER_COLOR = Color.decode("#683539"); // Dark reddish/maroon
-    public static final Color BODY_COLOR = Color.decode("#6e3b40"); // Similar body color
+    public static final Color HEADER_COLOR = Color.decode("#4b2a6d"); 
+    public static final Color BODY_COLOR = Color.decode("#5e358c"); 
 
-    public static final Color AUDIO_HEADER_COLOR = Color.decode("#356839"); // Professional Dark Green
-    public static final Color AUDIO_BODY_COLOR = Color.decode("#3b6e40"); // Professional Dark Green
+    public static final Color AUDIO_HEADER_COLOR = Color.decode("#3a2a6d"); 
+    public static final Color AUDIO_BODY_COLOR = Color.decode("#4a358c"); 
 
     public TimelineClip(String name, long startFrame, long durationFrames, int trackIndex) {
         this.name = name;
