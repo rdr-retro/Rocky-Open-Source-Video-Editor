@@ -1,3 +1,3 @@
 #!/bin/bash
-# Ejecutar Rocky Open Source Video Editor usando las librerías en lib/
-java -cp "lib/*:." MainAB
+# Run with bin and lib in classpath
+java -cp "lib/*:bin" MainAB
