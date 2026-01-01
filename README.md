@@ -1,4 +1,4 @@
-# 🪨 Rocky Open Source Video Editor 🎬
+# Rocky Open Source Video Editor
 
 **Rocky Open Source Video Editor** es un motor de edición de vídeo cinematográfico y profesional desarrollado íntegramente en **Java**. Diseñado para ofrecer una arquitectura de alta fidelidad, Rocky separa los conceptos de datos brutos, composición lógica y visualización dinámica para garantizar que tu visión creativa nunca se vea comprometida por limitaciones técnicas.
 
@@ -6,7 +6,7 @@ Este proyecto nace de la necesidad de un editor de código abierto que priorice 
 
 ---
 
-## 🚀 Arquitectura de Vanguardia: El Sistema de 3 Espacios
+## Arquitectura de Vanguardia: El Sistema de 3 Espacios
 
 A diferencia de editores básicos que estiran las imágenes para que encajen en el visor, Rocky implementa un sistema vectorial de transformación inspirado en software de gama alta (Premiere, DaVinci Resolve, Vegas):
 
@@ -27,9 +27,9 @@ Una ventana inteligente que escala el lienzo del proyecto para que quepa en tu p
 
 ---
 
-## ✨ Características Principales
+## Características Principales
 
-### 🎞️ Línea de Tiempo Profesional (Core B)
+### Línea de Tiempo Profesional (Core B)
 - **Multitrack Dinámico**: Capas ilimitadas de vídeo y audio con gestión de profundidad.
 - **Visualización de Ondas**: Renderizado de picos de audio asíncrono. El `PeakManager` escanea los archivos en hilos paralelos para mostrar la forma de onda sin ralentizar la UI.
 - **Sistema de Fundidos (Fades)**: Control de opacidad avanzado con curvas de velocidad matemáticas:
@@ -39,7 +39,7 @@ Una ventana inteligente que escala el lienzo del proyecto para que quepa en tu p
     - **Sharp**: Transiciones de alto contraste.
 - **Control de Clips**: Menú contextual de propiedades y botón de acceso rápido "fx" para ajustes de transformación.
 
-### 🎥 Motor de Renderizado & Review (Engine)
+### Motor de Renderizado & Review (Engine)
 - **Layered Composition**: El `FrameServer` procesa y compone las imágenes. Las pistas inferiores en el índice (V1, V2...) se dibujan como capas superiores.
 - **Transformaciones Vectoriales**:
     - **Posición**: Movimiento libre en píxeles de proyecto.
@@ -48,14 +48,14 @@ Una ventana inteligente que escala el lienzo del proyecto para que quepa en tu p
     - **Anchor Point**: Centro de transformación personalizable (0.5, 0.5 por defecto).
 - **Espacio de Expansión**: Hemos rediseñado la interfaz para incluir un panel de **550px** a la izquierda del visor, dedicado a las futuras herramientas de efectos y control de colores (Grading/LUTs).
 
-### ⌨️ Experiencia de Usuario Ágil
+### Experiencia de Usuario Ágil
 - **Atajos Globales**: Control de Play/Pause universal mediante la tecla **Espacio**. Gracias a un `KeyEventDispatcher` personalizado, el espacio funciona incluso si el foco está en un botón o barra de herramientas.
 - **Pausa Inteligente**: El cabezal se detiene exactamente en el fotograma actual, permitiendo revisiones precisas cuadro a cuadro.
 - **Estética Vibrant Dark**: Interfaz premium con diseño oscuro curado, fuentes Inter/Serif y micro-animaciones para feedback táctil.
 
 ---
 
-## 🛠️ Estructura Detallada del Proyecto
+## Estructura Detallada del Proyecto
 
 Cada paquete en Rocky tiene una responsabilidad única y desacoplada:
 
@@ -75,7 +75,7 @@ El orquestador principal. Encargado de inicializar el entorno Swing, configurar 
 
 ---
 
-## ⚙️ Especificaciones Técnicas y Compilación
+## Especificaciones Técnicas y Compilación
 
 ### Requisitos del Sistema
 - **Java**: JDK 17 o superior.
@@ -92,7 +92,10 @@ Rocky descarga automáticamente los binarios de FFmpeg adaptados a tu sistema op
 ```bash
 # Otorgar permisos al script
 chmod +x compile.sh
-./compile.sh
+
+# Ejecutar compilación (descarga librerías si faltan)
+# Solo se requiere sudo si la carpeta del proyecto tiene permisos restringidos
+sudo ./compile.sh
 ```
 
 ### Ejecución
@@ -102,7 +105,9 @@ chmod +x run.sh
 ./run.sh
 ```
 
-## 🌊 Deep Dive: El Pipeline de Sincronización
+---
+
+## Deep Dive: El Pipeline de Sincronización
 
 Uno de los mayores retos de Rocky es mantener la sincronización entre el audio y el vídeo. El sistema utiliza un modelo de **Master Clock** basado en el `AudioServer`:
 
@@ -112,7 +117,7 @@ Uno de los mayores retos de Rocky es mantener la sincronización entre el audio 
 
 ---
 
-## 🔬 Componentes del Motor (Deep Dive)
+## Componentes del Motor (Deep Dive)
 
 ### FrameServer: El Compositor Inteligente
 El `FrameServer` es un servicio desacoplado que utiliza un `ExecutorService` de un solo hilo para evitar colisiones de memoria en el renderizado. Su flujo es:
@@ -131,7 +136,7 @@ Para que el editor sea fluido, no podemos procesar el audio en tiempo real mient
 
 ---
 
-## 📘 Glosario Técnico de Rocky
+## Glosario Técnico de Rocky
 
 -   **Blueline**: La abstracción lógica de la línea de tiempo que contiene el estado de reproducción.
 -   **Playhead**: El cabezal de reproducción (la línea roja) que marca el tiempo actual.
@@ -141,7 +146,7 @@ Para que el editor sea fluido, no podemos procesar el audio en tiempo real mient
 
 ---
 
-## 🛠️ Guía para Desarrolladores: Cómo Contribuir
+## Guía para Desarrolladores: Cómo Contribuir
 
 Si quieres añadir una nueva funcionalidad, sigue esta guía de estilo y flujo:
 
@@ -169,7 +174,7 @@ git checkout -b feature/panel-efectos
 
 ---
 
-## ❓ Solución de Problemas (Troubleshooting)
+## Solución de Problemas (Troubleshooting)
 
 | Problema | Causa Probable | Solución |
 | :--- | :--- | :--- |
@@ -180,30 +185,30 @@ git checkout -b feature/panel-efectos
 
 ---
 
-## 🏁 Hoja de Ruta (Roadmap) y Futuro
+## Hoja de Ruta (Roadmap) y Futuro
 
 El desarrollo de Rocky sigue una metodología de "Composición Primero".
 
-### Fase 1: Cimientos (Completado ✅)
+### Fase 1: Cimientos (Completado [x])
 - [x] **Arquitectura de 3 espacios**: Independencia Asset -> Proyecto -> Viewport.
 - [x] **Motor de reproducción**: Sincronización precisa audio/vídeo.
 - [x] **Transformaciones Vectoriales**: Posición, escala y rotación funcional.
 - [x] **Atajos de teclado**: Control global por barra de espacio.
 
-### Fase 2: Edición Avanzada (En progreso 🚧)
+### Fase 2: Edición Avanzada (En progreso [/])
 - [ ] **Efectos de Clip**: Implementación de filtros en tiempo real (Brillo, Contraste, Blur).
 - [ ] **Corrección de Color**: Soporte para curvas RGB y carga de LUTs (.cube).
 - [ ] **Transiciones**: Sistema de solapamiento para fundidos cruzados automáticos.
 - [ ] **Keyframes**: Animación de transformaciones a lo largo del tiempo.
 
-### Fase 3: Post-Producción (Próximamente 🔮)
+### Fase 3: Post-Producción (Próximamente [.])
 - [ ] **Generador de Títulos**: Capas de texto con soporte para fuentes personalizadas.
 - [ ] **Exportación Multi-Perfil**: Presets para YouTube, Instagram (9:16) y ProRes.
 - [ ] **Audio Mixer**: Panel de mezcla por canales individuales.
 
 ---
 
-## 📄 Licencia y Créditos
+## Licencia y Créditos
 
 Este proyecto se distribuye bajo la licencia Open Source propia del equipo Rocky.
 -   **Core Lead**: Desarrollado con tecnología Java Modern.
@@ -211,4 +216,4 @@ Este proyecto se distribuye bajo la licencia Open Source propia del equipo Rocky
 
 **Rocky Open Source Video Editor** - *Diseñado para el editor, construido para el rendimiento.*
 
-© 2026 Rocky Project Team. *Desarrollado con ❤️ para la comunidad creativa mundial.*
+© 2026 Rocky Project Team. *Desarrollado para la comunidad creativa mundial.*
