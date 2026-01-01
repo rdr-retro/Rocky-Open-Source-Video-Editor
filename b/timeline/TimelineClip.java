@@ -1,6 +1,11 @@
 package b.timeline;
 
 import java.awt.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import propiedades.timelinekeyframes.TimelineKeyframe;
 
 public class TimelineClip {
     private String name;
@@ -9,6 +14,7 @@ public class TimelineClip {
     private int trackIndex;
     private String mediaSourceId;
     private long sourceOffsetFrames;
+    private List<TimelineKeyframe> timeKeyframes;
     
     // Exact colors from the user's screenshot
     public static final Color HEADER_COLOR = Color.decode("#683539"); // Dark reddish/maroon
@@ -26,6 +32,41 @@ public class TimelineClip {
         this.mediaSourceId = ""; // Default empty
         this.sourceOffsetFrames = 0;
         this.transform = new ClipTransform();
+        this.timeKeyframes = new ArrayList<>();
+        // Default 1:1 keyframes
+        this.timeKeyframes.add(new TimelineKeyframe(0, 0));
+        this.timeKeyframes.add(new TimelineKeyframe(durationFrames, durationFrames));
+    }
+
+    public List<TimelineKeyframe> getTimeKeyframes() { return timeKeyframes; }
+
+    public long getSourceFrameAt(long clipFrame) {
+        if (timeKeyframes.isEmpty()) {
+            return sourceOffsetFrames + clipFrame;
+        }
+
+        // Sort keyframes just in case
+        timeKeyframes.sort(Comparator.comparingLong(TimelineKeyframe::getClipFrame));
+
+        // Find the bounding keyframes
+        TimelineKeyframe left = null;
+        TimelineKeyframe right = null;
+
+        for (TimelineKeyframe k : timeKeyframes) {
+            if (k.getClipFrame() <= clipFrame) {
+                left = k;
+            } else {
+                right = k;
+                break;
+            }
+        }
+
+        if (left == null) return timeKeyframes.get(0).getSourceFrame();
+        if (right == null) return left.getSourceFrame();
+
+        // Linear interpolation
+        double t = (double)(clipFrame - left.getClipFrame()) / (right.getClipFrame() - left.getClipFrame());
+        return left.getSourceFrame() + Math.round(t * (right.getSourceFrame() - left.getSourceFrame()));
     }
 
     public ClipTransform getTransform() { return transform; }

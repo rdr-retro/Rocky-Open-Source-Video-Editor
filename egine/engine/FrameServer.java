@@ -84,7 +84,7 @@ public class FrameServer {
             if (source == null) continue;
 
             long frameInClip = targetFrame - clip.getStartFrame();
-            long sourceFrame = clip.getSourceOffsetFrames() + frameInClip;
+            long sourceFrame = clip.getSourceFrameAt(frameInClip);
             BufferedImage asset = source.getFrame(sourceFrame);
             if (asset == null) continue;
 

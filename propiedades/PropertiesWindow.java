@@ -3,6 +3,7 @@ package propiedades;
 import javax.swing.*;
 import java.awt.*;
 import b.timeline.TimelineClip;
+import propiedades.timelinekeyframes.TimelinePanel;
 
 /**
  * A window to display and edit properties of a TimelineClip.
@@ -12,7 +13,7 @@ public class PropertiesWindow extends JFrame {
     
     public PropertiesWindow(TimelineClip clip) {
         setTitle("Propiedades: " + clip.getName());
-        setSize(400, 300);
+        setSize(800, 250);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         
@@ -20,9 +21,8 @@ public class PropertiesWindow extends JFrame {
         mainPanel.setBackground(Color.decode("#1e1e1e"));
         mainPanel.setLayout(new BorderLayout());
         
-        JLabel placeholder = new JLabel("Propiedades de: " + clip.getName(), SwingConstants.CENTER);
-        placeholder.setForeground(Color.WHITE);
-        mainPanel.add(placeholder, BorderLayout.CENTER);
+        TimelinePanel tp = new TimelinePanel(clip);
+        mainPanel.add(tp, BorderLayout.CENTER);
         
         add(mainPanel);
     }
