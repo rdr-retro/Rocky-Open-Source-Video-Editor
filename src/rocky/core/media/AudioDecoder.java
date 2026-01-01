@@ -13,8 +13,7 @@ public class AudioDecoder {
     private FFmpegFrameGrabber grabber;
     private int sampleRate = 48000;
     private int channels = 2;
-    private long lastFrameNumber = -2;
-    private double videoFPS = 30.0;
+    private final double PROJECT_FPS = 30.0;
 
     public AudioDecoder(File file) {
         this.audioFile = file;
@@ -22,14 +21,15 @@ public class AudioDecoder {
 
     public boolean init() {
         try {
+            System.out.println("[AudioDecoder] Initializing for: " + audioFile.getName());
             grabber = new FFmpegFrameGrabber(audioFile);
             grabber.setSampleRate(sampleRate);
             grabber.setAudioChannels(channels);
             grabber.start();
-            this.videoFPS = grabber.getFrameRate();
-            if (this.videoFPS <= 0) this.videoFPS = 30.0;
+            System.out.println("[AudioDecoder] SUCCESS. Channels: " + grabber.getAudioChannels() + " Format: " + grabber.getSampleFormat());
             return true;
         } catch (Exception e) {
+            System.err.println("[AudioDecoder] FAILED init: " + audioFile.getName());
             e.printStackTrace();
             return false;
         }
@@ -38,11 +38,11 @@ public class AudioDecoder {
     public long getTotalFrames() {
         if (grabber == null) return 0;
         double durationSecs = grabber.getLengthInTime() / 1000000.0;
-        return (long)(durationSecs * videoFPS);
+        return (long)(durationSecs * PROJECT_FPS);
     }
 
     public int getSamplesPerFrame() {
-        return (int)((sampleRate / videoFPS) * channels);
+        return (int)((sampleRate / PROJECT_FPS) * channels);
     }
 
     private short[] residualBuffer = null;
@@ -52,6 +52,39 @@ public class AudioDecoder {
     private short[] slidingWindow = null;
     private long windowStartSample = -1;
     private final int WINDOW_SIZE_SAMPLES = 48000 * 2; 
+
+    private short[] extractSamples(Frame frame) {
+        if (frame == null || frame.samples == null) return null;
+        
+        int channels = frame.samples.length;
+        int samplesPerChannel = 0;
+        if (frame.samples[0] instanceof java.nio.Buffer) {
+            samplesPerChannel = ((java.nio.Buffer)frame.samples[0]).remaining();
+        }
+        
+        short[] output = new short[samplesPerChannel * channels];
+        
+        // Efficient extraction
+        if (channels > 1 && frame.samples[1] != null) {
+            for (int c = 0; c < channels; c++) {
+                if (frame.samples[c] instanceof ShortBuffer) {
+                    ShortBuffer sb = (ShortBuffer) frame.samples[c];
+                    for (int s = 0; s < samplesPerChannel; s++) output[s * channels + c] = sb.get();
+                } else if (frame.samples[c] instanceof java.nio.FloatBuffer) {
+                    java.nio.FloatBuffer fb = (java.nio.FloatBuffer) frame.samples[c];
+                    for (int s = 0; s < samplesPerChannel; s++) output[s * channels + c] = (short)(fb.get() * 32767);
+                }
+            }
+        } else {
+            if (frame.samples[0] instanceof ShortBuffer) {
+                ((ShortBuffer)frame.samples[0]).get(output);
+            } else if (frame.samples[0] instanceof java.nio.FloatBuffer) {
+                java.nio.FloatBuffer fb = (java.nio.FloatBuffer) frame.samples[0];
+                for (int i = 0; i < output.length; i++) output[i] = (short)(fb.get() * 32767);
+            }
+        }
+        return output;
+    }
 
     public short[] getAudioSampleAt(long sampleIndex) {
         try {
@@ -73,12 +106,12 @@ public class AudioDecoder {
             short[] buffer = new short[WINDOW_SIZE_SAMPLES * channels];
             int filled = 0;
             while (filled < buffer.length) {
-                Frame frame = grabber.grabFrame(true, true, true, false);
-                if (frame == null || frame.samples == null) break;
+                Frame frame = grabber.grabSamples();
+                short[] s = extractSamples(frame);
+                if (s == null) break;
                 
-                ShortBuffer sb = (ShortBuffer) frame.samples[0];
-                int toCopy = Math.min(sb.remaining(), buffer.length - filled);
-                sb.get(buffer, filled, toCopy);
+                int toCopy = Math.min(s.length, buffer.length - filled);
+                System.arraycopy(s, 0, buffer, filled, toCopy);
                 filled += toCopy;
             }
             
@@ -91,6 +124,7 @@ public class AudioDecoder {
                 return new short[]{slidingWindow[offset], slidingWindow[offset+1]};
             }
         } catch (Exception e) {
+            System.err.println("[AudioDecoder] Error in getAudioSampleAt: " + e.getMessage());
             // e.printStackTrace();
         }
         return new short[]{0, 0}; 
@@ -101,17 +135,18 @@ public class AudioDecoder {
             if (grabber == null) return null;
             
             // Mapping project frame to microseconds
-            long targetTimestamp = (long)((frameNumber / videoFPS) * 1000000);
+            long targetTimestamp = (long)((frameNumber / PROJECT_FPS) * 1000000);
             
-            // Optimization: If it's the next frame, don't seek! 
-            if (frameNumber != lastFrameNumber + 1) {
-                grabber.setTimestamp(targetTimestamp);
-                residualBuffer = null;
-                residualOffset = 0;
+            // Optimization: Relax seek threshold to 30ms (approx 1 frame)
+            // Smaller thresholds cause constant re-seeking due to minor timestamp jitter.
+            long currentTs = grabber.getTimestamp();
+            if (frameNumber == 0 || Math.abs(currentTs - targetTimestamp) > 33333) {
+                 grabber.setTimestamp(targetTimestamp);
+                 residualBuffer = null;
+                 residualOffset = 0;
             }
-            lastFrameNumber = frameNumber;
             
-            int samplesToGet = (int)((sampleRate / videoFPS) * durationFrames);
+            int samplesToGet = (int)((sampleRate / PROJECT_FPS) * durationFrames);
             short[] output = new short[samplesToGet * channels];
             int filled = 0;
             
@@ -129,14 +164,14 @@ public class AudioDecoder {
                 }
             }
 
-            // 2. Grab more frames if needed
             while (filled < output.length) {
-                Frame frame = grabber.grabFrame(true, true, true, false);
-                if (frame == null || frame.samples == null) break;
-                
-                ShortBuffer sb = (ShortBuffer) frame.samples[0];
-                short[] frameSamples = new short[sb.remaining()];
-                sb.get(frameSamples);
+                Frame frame = grabber.grabSamples();
+                if (frame == null) {
+                    // System.out.println("[AudioDecoder] grabSamples() returned NULL (EOF?) at frame " + frameNumber);
+                    break;
+                }
+                short[] frameSamples = extractSamples(frame);
+                if (frameSamples == null) continue; 
                 
                 int needed = output.length - filled;
                 int toCopy = Math.min(frameSamples.length, needed);
