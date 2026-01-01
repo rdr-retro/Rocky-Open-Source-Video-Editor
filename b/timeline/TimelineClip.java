@@ -16,6 +16,7 @@ public class TimelineClip {
     
     public static final Color AUDIO_HEADER_COLOR = Color.decode("#356839"); // Professional Dark Green
     public static final Color AUDIO_BODY_COLOR = Color.decode("#3b6e40");   // Professional Dark Green
+    private ClipTransform transform;
     
     public TimelineClip(String name, long startFrame, long durationFrames, int trackIndex) {
         this.name = name;
@@ -24,7 +25,11 @@ public class TimelineClip {
         this.trackIndex = trackIndex;
         this.mediaSourceId = ""; // Default empty
         this.sourceOffsetFrames = 0;
+        this.transform = new ClipTransform();
     }
+
+    public ClipTransform getTransform() { return transform; }
+    public void setTransform(ClipTransform t) { this.transform = t; }
 
     public String getMediaSourceId() { return mediaSourceId; }
     public void setMediaSourceId(String id) { this.mediaSourceId = id; }

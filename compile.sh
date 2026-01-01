@@ -33,7 +33,7 @@ done
 
 # Compilar todo el proyecto Rocky Open Source Video Editor incluyendo las librerías JavaCV
 echo "Compilando proyecto..."
-javac -cp "lib/*:." a/visor/*.java a/mastersound/*.java b/timeline/*.java c/toolbar/*.java egine/media/*.java egine/engine/*.java egine/render/*.java egine/persistence/*.java egine/blueline/*.java MainAB.java
+javac -cp "lib/*:." a/visor/*.java a/mastersound/*.java b/timeline/*.java c/toolbar/*.java egine/media/*.java egine/engine/*.java egine/render/*.java egine/persistence/*.java egine/blueline/*.java propiedades/*.java MainAB.java
 
 if [ $? -eq 0 ]; then
     echo "Compilación exitosa."

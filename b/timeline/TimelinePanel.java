@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import egine.media.PeakManager;
 import egine.media.MediaSource;
+import propiedades.PropertiesWindow;
 
 public class TimelinePanel extends JPanel {
     private int mouseX = -1; // Hover cursor position
@@ -122,7 +123,7 @@ public class TimelinePanel extends JPanel {
 
     public void togglePlayback() {
         if (blueline.isPlaying()) {
-            stopPlayback();
+            pausePlayback();
         } else {
             startPlayback();
         }
@@ -179,6 +180,12 @@ public class TimelinePanel extends JPanel {
                             int clipW = (int)(clip.getDurationFrames() / (double)FPS * pixelsPerSecond);
                             
                             if (mouseY >= currentY && mouseY < currentY + trackH) {
+                            // FX label hover
+                            if (mouseY < currentY + 20 && e.getX() >= clipX + clipW - 30 && e.getX() <= clipX + clipW) {
+                                setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                                cursorSet = true;
+                            }
+                            
                             int headerH = 20; 
                             int bodyTopY = currentY + headerH;
                             
@@ -233,6 +240,13 @@ public class TimelinePanel extends JPanel {
                          int bodyTopY = currentY + headerH;
                          
                          if (mouseY >= currentY && mouseY < currentY + trackH) {
+                             // Check for "fx" label click (top-right of clip header)
+                             if (mouseY < currentY + 20 && mouseX >= clipX + clipW - 30 && mouseX <= clipX + clipW) {
+                                 PropertiesWindow pw = new PropertiesWindow(clip);
+                                 pw.setVisible(true);
+                                 return;
+                             }
+
                              int handleSize = 12;
                              
                              // Fade In Handle (Top-Left of BODY)
@@ -421,6 +435,13 @@ public class TimelinePanel extends JPanel {
                     if (timeListener != null) timeListener.onTimelineUpdated();
                 });
                 menu.add(deleteItem);
+
+                JMenuItem propsItem = new JMenuItem("Propiedades");
+                propsItem.addActionListener(ev -> {
+                    PropertiesWindow pw = new PropertiesWindow(clip);
+                    pw.setVisible(true);
+                });
+                menu.add(propsItem);
 
                 menu.show(e.getComponent(), e.getX(), e.getY());
             }
@@ -857,11 +878,11 @@ public class TimelinePanel extends JPanel {
                 g2d.drawString(clip.getName(), x + 5, trackY + 15);
                 g2d.setClip(oldClip);
                 
-                int iconX = x + w - 50; 
+                int iconX = x + w - 30; 
                 if (iconX > x) {
-                    g2d.setFont(new Font("SansSerif", Font.BOLD, 10));
-                    g2d.drawString("crop", iconX, trackY + 14);
-                    g2d.drawString("fx", iconX + 25, trackY + 14);
+                    g2d.setColor(Color.decode("#cccccc"));
+                    g2d.setFont(new Font("Serif", Font.ITALIC, 16));
+                    g2d.drawString("fx", iconX, trackY + 14);
                 }
                 
                 int cornerR = 8;

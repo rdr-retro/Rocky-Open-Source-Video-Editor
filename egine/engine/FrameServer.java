@@ -34,27 +34,13 @@ public class FrameServer {
     public void processFrame(double timeInSeconds) {
         long targetFrame = (long) (timeInSeconds * 30); // Assuming 30 FPS
         
-        // Skip if already processing or processed
         if (targetFrame == lastSubmittedFrame) return;
         lastSubmittedFrame = targetFrame;
 
-        // Offload decoding to a background thread to keep EDT (UI) responsive
         executor.submit(() -> {
-            BufferedImage img = getFrameAt(targetFrame);
+            BufferedImage canvas = getFrameAt(targetFrame);
             
-            if (img != null && properties != null && properties.isLowResPreview()) {
-                // Downscale to 480x270 (Proxy)
-                int proxyW = 480;
-                int proxyH = 270;
-                BufferedImage proxy = new BufferedImage(proxyW, proxyH, BufferedImage.TYPE_INT_RGB);
-                java.awt.Graphics2D g2 = proxy.createGraphics();
-                g2.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-                g2.drawImage(img, 0, 0, proxyW, proxyH, null);
-                g2.dispose();
-                img = proxy;
-            }
-            
-            final BufferedImage finalImg = img;
+            final BufferedImage finalImg = canvas;
             javax.swing.SwingUtilities.invokeLater(() -> {
                 visualizer.updateFrame(finalImg);
             });
@@ -62,31 +48,80 @@ public class FrameServer {
     }
 
     public BufferedImage getFrameAt(long targetFrame) {
-        List<TimelineClip> allClips = timeline.getClips();
+        if (properties == null) return null;
+
+        int canvasW = properties.getProjectWidth();
+        int canvasH = properties.getProjectHeight();
         
-        TimelineClip activeClip = null;
+        if (properties.isLowResPreview()) {
+            canvasW = properties.getPreviewWidth();
+            canvasH = properties.getPreviewHeight();
+        }
+
+        BufferedImage canvas = new BufferedImage(canvasW, canvasH, BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g2 = canvas.createGraphics();
+        g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        
+        // Background
+        g2.setColor(java.awt.Color.BLACK);
+        g2.fillRect(0, 0, canvasW, canvasH);
+
+        // Get clips active at this frame, sorted by track index (descending so lower index draws last/on top)
+        List<TimelineClip> allClips = timeline.getClips();
+        java.util.List<TimelineClip> activeClips = new java.util.ArrayList<>();
         for (TimelineClip clip : allClips) {
             if (targetFrame >= clip.getStartFrame() && targetFrame < (clip.getStartFrame() + clip.getDurationFrames())) {
-                // Check if track is VIDEO
                 if (timeline.getTrackType(clip.getTrackIndex()) == b.timeline.TrackControlPanel.TrackType.VIDEO) {
-                    // Layering: Lowest track index is "on top" (Vegas/Premiere standard)
-                    if (activeClip == null || clip.getTrackIndex() < activeClip.getTrackIndex()) {
-                        activeClip = clip;
-                    }
+                    activeClips.add(clip);
                 }
             }
         }
+        activeClips.sort((a, b) -> Integer.compare(b.getTrackIndex(), a.getTrackIndex()));
 
-        if (activeClip != null) {
-            String mediaId = activeClip.getMediaSourceId();
-            MediaSource source = pool.getSource(mediaId);
-            
-            if (source != null) {
-                long frameInClip = targetFrame - activeClip.getStartFrame();
-                long sourceFrame = activeClip.getSourceOffsetFrames() + frameInClip;
-                return source.getFrame(sourceFrame);
-            }
+        for (TimelineClip clip : activeClips) {
+            MediaSource source = pool.getSource(clip.getMediaSourceId());
+            if (source == null) continue;
+
+            long frameInClip = targetFrame - clip.getStartFrame();
+            long sourceFrame = clip.getSourceOffsetFrames() + frameInClip;
+            BufferedImage asset = source.getFrame(sourceFrame);
+            if (asset == null) continue;
+
+            drawAssetOnCanvas(g2, asset, clip, canvasW, canvasH);
         }
-        return null; // Black or empty frame
+
+        g2.dispose();
+        return canvas;
+    }
+
+    private void drawAssetOnCanvas(java.awt.Graphics2D g2, BufferedImage asset, TimelineClip clip, int canvasW, int canvasH) {
+        int assetW = asset.getWidth();
+        int assetH = asset.getHeight();
+
+        // 1. Uniform Scale to fit project if requested (Aspect Ratio preservation)
+        double fitScale = Math.min((double) canvasW / assetW, (double) canvasH / assetH);
+        
+        // 2. Apply Custom Transform
+        b.timeline.ClipTransform transform = clip.getTransform();
+        double finalScaleX = fitScale * transform.getScaleX();
+        double finalScaleY = fitScale * transform.getScaleY();
+
+        double renderW = assetW * finalScaleX;
+        double renderH = assetH * finalScaleY;
+
+        // Centering by default + user offset
+        // User x=0, y=0 means centered in project
+        double centerX = (canvasW / 2.0) + transform.getX();
+        double centerY = (canvasH / 2.0) + transform.getY();
+
+        java.awt.geom.AffineTransform at = new java.awt.geom.AffineTransform();
+        at.translate(centerX, centerY);
+        at.rotate(Math.toRadians(transform.getRotation()));
+        at.scale(finalScaleX, finalScaleY);
+        // Anchor point (default center of the image)
+        at.translate(-assetW * transform.getAnchorX(), -assetH * transform.getAnchorY());
+
+        g2.drawImage(asset, at, null);
     }
 }

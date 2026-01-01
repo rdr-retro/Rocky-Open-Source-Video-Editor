@@ -156,8 +156,15 @@ public class MainAB {
             gbcTop.fill = GridBagConstraints.BOTH;
             gbcTop.weighty = 1.0;
 
+            // Left Side Placeholder (For future functionality)
+            JPanel leftContentPlaceholder = new JPanel();
+            leftContentPlaceholder.setBackground(Color.decode("#1e1e1e"));
+            leftContentPlaceholder.setPreferredSize(new Dimension(550, 0)); // Even larger as requested
+            gbcTop.gridx = 0; gbcTop.weightx = 0.0;
+            topPanel.add(leftContentPlaceholder, gbcTop);
+
             // Visualizer (Main center content)
-            gbcTop.gridx = 0; gbcTop.weightx = 1.0;
+            gbcTop.gridx = 1; gbcTop.weightx = 1.0;
             topPanel.add(visualizer, gbcTop);
             visualizer.setOnPlay(() -> timeline.startPlayback());
             visualizer.setOnPause(() -> timeline.stopPlayback());
@@ -166,8 +173,8 @@ public class MainAB {
                 timeline.updatePlayheadFromFrame(0);
             });
 
-            // Master Sound (Attached to the right of visualizer, but they together are "centered" or occupy the top area)
-            gbcTop.gridx = 1; gbcTop.weightx = 0.0;
+            // Master Sound (Attached to the right of visualizer)
+            gbcTop.gridx = 2; gbcTop.weightx = 0.0;
             topPanel.add(masterSound, gbcTop);
 
             // --- TOP TOOLBAR ---
@@ -335,19 +342,21 @@ public class MainAB {
                     } else if (code == KeyEvent.VK_K) {
                         updatePlaybackRate(0.0, timeline, bottomBar);
                         return true;
+                    } else if (code == KeyEvent.VK_SPACE) {
+                        // Global Spacebar Play/Pause (avoiding text fields)
+                        Component focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+                        if (!(focusOwner instanceof javax.swing.text.JTextComponent) && 
+                            !(focusOwner instanceof javax.swing.JComboBox)) {
+                            timeline.togglePlayback();
+                            return true;
+                        }
                     }
                 }
                 return false;
             });
 
             // --- KEY BINDINGS ---
-            frame.getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke("SPACE"), "togglePlayback");
-            frame.getRootPane().getActionMap().put("togglePlayback", new AbstractAction() {
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    timeline.togglePlayback();
-                }
-            });
+            // Removed old SPACE binding to favor global dispatcher
 
             frame.setLocationRelativeTo(null);
             frame.setVisible(true);

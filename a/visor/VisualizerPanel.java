@@ -39,21 +39,18 @@ public class VisualizerPanel extends JPanel {
                 super.paintComponent(g);
                 if (currentFrame != null) {
                     Graphics2D g2d = (Graphics2D) g;
-                    
-                    if (lowResPreview) {
-                        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-                    } else {
-                        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                    }
+                    g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                     
                     int panelW = getWidth();
                     int panelH = getHeight();
-                    int imgW = currentFrame.getWidth();
-                    int imgH = currentFrame.getHeight();
+                    int projectW = currentFrame.getWidth();
+                    int projectH = currentFrame.getHeight();
                     
-                    double scale = Math.min((double)panelW / imgW, (double)panelH / imgH);
-                    int drawW = (int)(imgW * scale);
-                    int drawH = (int)(imgH * scale);
+                    // Viewport Scale (Project -> Screen)
+                    double scale = Math.min((double)panelW / projectW, (double)panelH / projectH);
+                    int drawW = (int)(projectW * scale);
+                    int drawH = (int)(projectH * scale);
                     int x = (panelW - drawW) / 2;
                     int y = (panelH - drawH) / 2;
                     
@@ -202,12 +199,7 @@ public class VisualizerPanel extends JPanel {
         label.setFont(new Font("Inter", Font.PLAIN, 11));
         
         if (selected) {
-             // Add mini close/options icons like in image
-             JLabel icons = new JLabel(" ▢ ✕ ");
-             icons.setForeground(Color.LIGHT_GRAY);
-             icons.setFont(new Font("Monospaced", Font.PLAIN, 10));
              tab.add(label);
-             tab.add(icons);
         } else {
              tab.add(label);
         }
