@@ -43,24 +43,46 @@ public class FrameServer {
         private final long frame;
         private final boolean isPrefetch;
         private final long requestOrder;
+        private final long taskRevision;
         private static final java.util.concurrent.atomic.AtomicLong orderSource = new java.util.concurrent.atomic.AtomicLong(0);
 
-        public RenderTask(long frame, boolean isPrefetch) {
+        public RenderTask(long frame, boolean isPrefetch, long taskRevision) {
             this.frame = frame;
             this.isPrefetch = isPrefetch;
+            this.taskRevision = taskRevision;
             this.requestOrder = orderSource.getAndIncrement();
         }
 
         @Override
         public void run() {
+            // 1. Revision Check: If timeline layout changed since this task was created, abort.
+            // This prevents "zombie" frames (deleted clips) from overwriting the correct new state.
+            if (timeline.getLayoutRevision() > taskRevision) {
+                return;
+            }
+
             if (latestTargetFrame.get() != -1 && !isPrefetch) {
                 if (latestTargetFrame.get() != frame) return;
             }
             
             if (isPrefetch && Math.abs(latestTargetFrame.get() - frame) > 20) return;
 
-            BufferedImage rendered = getFrameAt(frame, false);
+            // 2. Double-check synchronization
+            BufferedImage rendered;
+            try {
+                rendered = getFrameAt(frame, false);
+            } catch (Exception e) {
+                e.printStackTrace();
+                return;
+            }
+            
             if (rendered == null) return;
+            
+            // 3. Final Revision Check before UI Update
+            if (timeline.getLayoutRevision() > taskRevision) {
+                returnCanvasToPool(rendered);
+                return;
+            }
 
             if (!isPrefetch && latestTargetFrame.get() != frame) {
                 returnCanvasToPool(rendered);
@@ -134,7 +156,7 @@ public class FrameServer {
         lastRequestTime = now;
         latestTargetFrame.set(targetFrame);
 
-        executor.execute(new RenderTask(targetFrame, false));
+        executor.execute(new RenderTask(targetFrame, false, timeline.getLayoutRevision()));
         prefetchNextFrames(targetFrame, 15);
     }
 
@@ -142,7 +164,7 @@ public class FrameServer {
         for (int i = 1; i <= count; i++) {
             final long f = startFrame + i;
             if (!frameCache.containsKey(f)) {
-                executor.execute(new RenderTask(f, true));
+                executor.execute(new RenderTask(f, true, timeline.getLayoutRevision()));
             }
         }
     }

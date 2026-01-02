@@ -51,7 +51,7 @@ public class AudioDecoder {
     // Sliding Window Cache (approx 2 seconds of audio)
     private short[] slidingWindow = null;
     private long windowStartSample = -1;
-    private final int WINDOW_SIZE_SAMPLES = 48000 * 2; 
+    private final int WINDOW_SIZE_SAMPLES = 48000 * 4; 
 
     private short[] extractSamples(Frame frame) {
         if (frame == null || frame.samples == null) return null;
@@ -137,10 +137,10 @@ public class AudioDecoder {
             // Mapping project frame to microseconds
             long targetTimestamp = Math.round((frameNumber / PROJECT_FPS) * 1000000);
             
-            // Optimization: Relax seek threshold to 30ms (approx 1 frame)
-            // Smaller thresholds cause constant re-seeking due to minor timestamp jitter.
+            // Optimization: Relax seek threshold to 60ms (approx 2 frames) to prevent micro-seeks
+            // This fixes stuttering on formats like .caf that may have slight timestamp jitter
             long currentTs = grabber.getTimestamp();
-            if (frameNumber == 0 || Math.abs(currentTs - targetTimestamp) > 33333) {
+            if (frameNumber == 0 || Math.abs(currentTs - targetTimestamp) > 60000) {
                  grabber.setTimestamp(targetTimestamp);
                  residualBuffer = null;
                  residualOffset = 0;

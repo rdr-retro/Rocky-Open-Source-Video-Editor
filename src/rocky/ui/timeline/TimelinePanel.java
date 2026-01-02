@@ -15,6 +15,7 @@ public class TimelinePanel extends JPanel {
     private Timer repaintTimer;
     private static TimelineClip copiedClip = null;
     private rocky.core.blueline.Blueline blueline = new rocky.core.blueline.Blueline();
+    private final java.util.concurrent.atomic.AtomicLong layoutRevision = new java.util.concurrent.atomic.AtomicLong(0);
 
     public double getFPS() {
         return (projectProps != null) ? projectProps.getFPS() : 30.0;
@@ -119,6 +120,7 @@ public class TimelinePanel extends JPanel {
         synchronized (clips) {
             clips.clear();
         }
+        layoutRevision.incrementAndGet();
         fireTimelineUpdated();
     }
 
@@ -126,6 +128,7 @@ public class TimelinePanel extends JPanel {
         synchronized (clips) {
             clips.add(clip);
         }
+        layoutRevision.incrementAndGet();
         fireTimelineUpdated();
     }
 
@@ -133,6 +136,7 @@ public class TimelinePanel extends JPanel {
         synchronized (clips) {
             clips.remove(clip);
         }
+        layoutRevision.incrementAndGet();
         fireTimelineUpdated();
     }
 
@@ -882,7 +886,8 @@ public class TimelinePanel extends JPanel {
                             String lower = name.toLowerCase();
                             boolean isAudioFile = lower.endsWith(".mp3") || lower.endsWith(".wav") || 
                                                  lower.endsWith(".aac") || lower.endsWith(".m4a") ||
-                                                 lower.endsWith(".ogg") || lower.endsWith(".flac");
+                                                 lower.endsWith(".ogg") || lower.endsWith(".flac") ||
+                                                 lower.endsWith(".caf");
                             
                             TrackControlPanel.TrackType autoType = isAudioFile ? 
                                     TrackControlPanel.TrackType.AUDIO : TrackControlPanel.TrackType.VIDEO;
@@ -1403,8 +1408,9 @@ public class TimelinePanel extends JPanel {
         // Close the polygon at the top right
         fillPoly.addPoint(x + w, bodyTopY);
 
-        // Fill the area ABOVE the curve with semi-transparent black
-        g2d.setColor(new Color(0, 0, 0, 100));
+        // Fill the area ABOVE the curve with stipple pattern
+        if (stipplePaint == null) initStipplePattern();
+        g2d.setPaint(stipplePaint);
         g2d.fillPolygon(fillPoly);
 
         // Draw the white curve itself
@@ -1475,5 +1481,9 @@ public class TimelinePanel extends JPanel {
             listener.onTimelineUpdated();
         }
         repaint();
+    }
+
+    public long getLayoutRevision() {
+        return layoutRevision.get();
     }
 }

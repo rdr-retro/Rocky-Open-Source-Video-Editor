@@ -46,8 +46,8 @@ public class AudioServer {
             DataLine.Info info = new DataLine.Info(SourceDataLine.class, format);
             line = (SourceDataLine) AudioSystem.getLine(info);
             
-            // 500ms buffer for maximum stability
-            int bufferSize = (int) (SAMPLE_RATE * 0.5 * format.getFrameSize());
+            // 1.0s buffer for maximum stability (Increased from 500ms)
+            int bufferSize = (int) (SAMPLE_RATE * 1.0 * format.getFrameSize());
             line.open(format, bufferSize);
             line.start();
             

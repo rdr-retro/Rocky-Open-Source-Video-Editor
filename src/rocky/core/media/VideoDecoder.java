@@ -57,19 +57,31 @@ public class VideoDecoder {
             }
             
             // Reverting to BGR24 as it matches Java's default pixel order for INT_RGB on Little Endian
-            grabber.setPixelFormat(avutil.AV_PIX_FMT_BGR24); 
-            grabber.start();
-
-            int audioStream = grabber.getAudioStream();
-            int audioChannels = grabber.getAudioChannels();
-            
-            this.videoFPS = grabber.getFrameRate();
-            if (this.videoFPS <= 0) this.videoFPS = 30.0;
-
-            System.out.println("[VideoDecoder] Started. Audio Stream: " + audioStream + 
-                               ", Channels: " + audioChannels + 
-                               ", Video Stream: " + grabber.getVideoStream() +
-                               ", FPS: " + videoFPS);
+            try {
+                // Attempt 1: With proposed Hardware Acceleration
+                grabber.start();
+            } catch (Exception e) {
+                System.err.println("[VideoDecoder] HW Accel failed (" + e.getMessage() + "). Retrying with Software Decoding...");
+                
+                // Reset and try again without HW Accel
+                try {
+                    if (grabber != null) {
+                        try { grabber.stop(); } catch(Exception ex) {}
+                        try { grabber.release(); } catch(Exception ex) {}
+                    }
+                    
+                    grabber = new FFmpegFrameGrabber(videoFile);
+                    grabber.setPixelFormat(avutil.AV_PIX_FMT_BGR24);
+                    // Do NOT set hwaccel options here
+                    
+                    grabber.start();
+                    System.out.println("[VideoDecoder] Software Decoding fallback SUCCESS.");
+                } catch (Exception e2) {
+                    System.err.println("[VideoDecoder] Critical: Software Decoding also failed: " + e2.getMessage());
+                    e2.printStackTrace();
+                    return false;
+                }
+            }
             
             return true;
         } catch (Exception e) {

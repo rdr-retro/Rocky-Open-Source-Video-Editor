@@ -12,17 +12,17 @@ import rocky.core.media.ClipMask;
  * Represents a clip on the timeline.
  */
 public class TimelineClip {
-    private String name;
-    private long startFrame;
-    private long durationFrames;
-    private int trackIndex;
-    private String mediaSourceId;
-    private long sourceOffsetFrames;
-    private ClipTransform transform;
+    private volatile String name;
+    private volatile long startFrame;
+    private volatile long durationFrames;
+    private volatile int trackIndex;
+    private volatile String mediaSourceId;
+    private volatile long sourceOffsetFrames;
+    private volatile ClipTransform transform;
     private final List<TimelineKeyframe> timeKeyframes;
-    private ClipMask mask;
-    private double startOpacity = 1.0;
-    private double endOpacity = 1.0;
+    private volatile ClipMask mask;
+    private volatile double startOpacity = 1.0;
+    private volatile double endOpacity = 1.0;
 
     // Exact colors from the user's screenshot
     public static final Color HEADER_COLOR = Color.decode("#4b2a6d"); 

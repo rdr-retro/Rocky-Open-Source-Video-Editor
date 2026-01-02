@@ -52,7 +52,8 @@ public class MediaSource {
                        lower.endsWith(".gif");
         this.isAudio = lower.endsWith(".mp3") || lower.endsWith(".wav") || 
                        lower.endsWith(".aac") || lower.endsWith(".m4a") ||
-                       lower.endsWith(".ogg") || lower.endsWith(".flac");
+                       lower.endsWith(".ogg") || lower.endsWith(".flac") ||
+                       lower.endsWith(".caf");
         
         if (isVideo) {
             this.videoDecoder = new VideoDecoder(new File(filePath), 1920, 1080);
