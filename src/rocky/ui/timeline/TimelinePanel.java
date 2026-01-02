@@ -128,6 +128,28 @@ public class TimelinePanel extends JPanel {
         synchronized (clips) {
             clips.add(clip);
         }
+        
+        // --- AUTO PROXY ON INSERT ---
+        MediaSource source = mediaPool.getSource(clip.getMediaSourceId());
+        if (source != null && source.isVideo()) {
+            if (source.getProxyFilePath() != null) {
+                // Proxy already exists, apply it
+                source.setProxyUsed(true);
+            } else if (!source.isGeneratingProxy()) {
+                // Trigger generation
+                source.setGeneratingProxy(true);
+                rocky.core.media.ProxyGenerator.generateProxy(new java.io.File(source.getFilePath()), (path) -> {
+                    javax.swing.SwingUtilities.invokeLater(() -> {
+                        source.setupProxy(path);
+                        source.setGeneratingProxy(false);
+                        source.setProxyUsed(true);
+                        repaint();
+                        updatePlayheadFromFrame(getPlayheadFrame(), true);
+                    });
+                });
+            }
+        }
+
         layoutRevision.incrementAndGet();
         fireTimelineUpdated();
     }
