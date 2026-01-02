@@ -37,17 +37,24 @@ public class VideoDecoder {
 
             // Cross-Platform Hardware Acceleration Detection
             String os = System.getProperty("os.name").toLowerCase();
-            if (os.contains("mac")) {
-                grabber.setVideoOption("hwaccel", "videotoolbox");
-                System.out.println("[VideoDecoder] Using Hardware Accel: VideoToolbox (macOS)");
-            } else if (os.contains("win")) {
-                grabber.setVideoOption("hwaccel", "dxva2"); // Or d3d11va
-                System.out.println("[VideoDecoder] Using Hardware Accel: DXVA2 (Windows)");
-            } else if (os.contains("nix") || os.contains("nux")) {
-                grabber.setVideoOption("hwaccel", "vaapi");
-                System.out.println("[VideoDecoder] Using Hardware Accel: VAAPI (Linux)");
+            boolean isWebP = videoFile.getName().toLowerCase().endsWith(".webp");
+
+            if (!isWebP) {
+                if (os.contains("mac")) {
+                    grabber.setVideoOption("hwaccel", "videotoolbox");
+                    System.out.println("[VideoDecoder] Using Hardware Accel: VideoToolbox (macOS)");
+                } else if (os.contains("win")) {
+                    grabber.setVideoOption("hwaccel", "dxva2"); // Or d3d11va
+                    System.out.println("[VideoDecoder] Using Hardware Accel: DXVA2 (Windows)");
+                } else if (os.contains("nix") || os.contains("nux")) {
+                    grabber.setVideoOption("hwaccel", "vaapi");
+                    System.out.println("[VideoDecoder] Using Hardware Accel: VAAPI (Linux)");
+                }
+            } else {
+                System.out.println("[VideoDecoder] WebP detected: Disabling Hardware Accel for compatibility.");
             }
             
+            // Reverting to BGR24 as it matches Java's default pixel order for INT_RGB on Little Endian
             grabber.setPixelFormat(avutil.AV_PIX_FMT_BGR24); 
             grabber.start();
 
@@ -82,8 +89,7 @@ public class VideoDecoder {
             if (grabber == null) return null;
             
             // Optimization: If it's the next frame, don't seek! 
-            // Just grab. This is HUGE for performance during playback.
-            if (frameNumber != lastFrameNumber + 1) {
+            if (frameNumber != lastFrameNumber + 1 && frameNumber != 0) {
                 long timestamp = (long)((frameNumber / videoFPS) * 1000000);
                 grabber.setTimestamp(timestamp);
             }

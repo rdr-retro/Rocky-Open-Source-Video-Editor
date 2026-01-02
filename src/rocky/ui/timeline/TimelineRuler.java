@@ -5,7 +5,6 @@ import java.awt.*;
 import java.awt.event.*;
 
 public class TimelineRuler extends JPanel {
-    private final int FPS = 30;
     
     // Reference to main timeline for shared state
     private TimelinePanel timeline;
@@ -87,10 +86,9 @@ public class TimelineRuler extends JPanel {
         int labelWidth = fm.stringWidth(exampleText);
         int minSpacing = labelWidth + 20; // Min spacing in pixels
         
-        // Find smallest logical time interval that fits in minSpacing pixels
-        // Candidates (seconds): 1 frame (1/30), 0.1, 0.5, 1, 2, 5, 10, 15, 30, 60 (1m), 120 (2m), 300 (5m), 600 (10m)...
+        double fps = timeline.getFPS();
         double[] candidates = { 
-            1.0/FPS, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 
+            1.0/fps, 2.0/fps, 5.0/fps, 10.0/fps, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 
             60.0, 120.0, 300.0, 600.0, 1800.0, 3600.0 
         };
         
@@ -126,7 +124,7 @@ public class TimelineRuler extends JPanel {
             g2d.drawLine(tx, 15, tx, height);
             
             // Label
-            long totalFrames = (long) Math.round(t * FPS);
+            long totalFrames = (long) Math.round(t * fps);
             String timeStr = formatTimecode(totalFrames);
             g2d.setColor(TEXT_COLOR);
             g2d.drawString(timeStr, tx + 5, 25);
@@ -162,7 +160,7 @@ public class TimelineRuler extends JPanel {
         
         // Playhead (Head)
         long playheadFrame = timeline.getPlayheadFrame();
-        int playheadX = timeline.timeToScreen(playheadFrame / (double) FPS);
+        int playheadX = timeline.timeToScreen(playheadFrame / fps);
         
         if (playheadX >= -10 && playheadX <= width + 10) {
             g2d.setColor(timeline.getPlayheadColor());

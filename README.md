@@ -2,204 +2,149 @@
 
 **Rocky Open Source Video Editor** es un motor de edición de vídeo cinematográfico y profesional desarrollado íntegramente en **Java**. Diseñado para ofrecer una arquitectura de alta fidelidad, Rocky separa los conceptos de datos brutos, composición lógica y visualización dinámica para garantizar que tu visión creativa nunca se vea comprometida por limitaciones técnicas.
 
-Este proyecto nace de la necesidad de un editor de código abierto que priorice el rendimiento en tiempo real y la precisión de color, utilizando tecnologías modernas de procesamiento de señales y gráficos vectoriales.
+Este proyecto prioriza el rendimiento en tiempo real, la edición fluida (estilo Sony Vegas) y la precisión de color mediante un motor hibridado de Java y FFmpeg.
 
 ---
 
-## Arquitectura de Vanguardia: El Sistema de 3 Espacios
+## 🏗 Arquitectura de Vanguardia: El Sistema de 3 Espacios
 
-A diferencia de editores básicos que estiran las imágenes para que encajen en el visor, Rocky implementa un sistema vectorial de transformación inspirado en software de gama alta (Premiere, DaVinci Resolve, Vegas):
+A diferencia de editores básicos que simplemente ajustan imágenes a una ventana, Rocky implementa un sistema vectorial de transformación inspirado en software de gama alta como Premiere Pro, DaVinci Resolve y Sony Vegas.
 
 ### 1. Espacio del Asset (Local)
-Maneja la resolución real del medio original.
-- **Independencia de Resolución**: Ya sea que trabajes con fotos 4K o vídeos 720p, Rocky mantiene los datos originales intactos.
-- **Metadatos de Media**: Almacenamos el aspect ratio nativo para calcular escalas correctas en los pasos siguientes.
+Maneja la resolución y el formato real del medio original.
+- **Independencia Total**: Rocky no modifica tus archivos. Lee los metadatos nativos para calcular escalas correctas en los pasos siguientes.
+- **Precisión de Color**: Los frames se extraen en el espacio de color nativo y se procesan internamente en formato de alta profundidad antes de cualquier conversión para visor.
 
 ### 2. Espacio del Proyecto (Lienzo Lógico)
-Es el espacio donde ocurre la magia. Todo se compone sobre un lienzo definido por la resolución del proyecto (ej. 1080p).
-- **Transformaciones Lógicas**: Las coordenadas de posición, escala y rotación se guardan relativas al tamaño del proyecto, no al tamaño de la ventana.
-- **Composición Multi-Capa**: El motor procesa todas las pistas activas en este espacio antes de enviarlas al visor.
+Es el "cerebro" donde ocurre la composición. Todo se compone sobre un lienzo definido por la resolución del proyecto (ej. 4K, 1080p).
+- **Transformaciones Lógicas**: Las coordenadas de posición, escala y rotación se guardan relativas al tamaño del proyecto, permitiendo que tu edición sea reproducible en cualquier resolución de salida.
+- **Composición Multi-Capa**: El motor procesa todas las pistas activas, aplicando opacidades, modos de mezcla y transformaciones afines de forma jerárquica.
 
 ### 3. Espacio del Visor (Viewport)
-Una ventana inteligente que escala el lienzo del proyecto para que quepa en tu pantalla.
-- **Letterboxing/Pillarboxing**: Si cambias el tamaño de la ventana, Rocky añade barras negras automáticamente para preservar la composición cinematográfica.
-- **Pipeline de Visualización**: Convierte las coordenadas del ratón en el visor a coordenadas del proyecto para una interacción 1:1.
+Una capa de visualización inteligente que escala el lienzo del proyecto para que quepa en tu interfaz física de usuario.
+- **Letterboxing / Pillarboxing**: Gestión automática de barras negras para preservar el aspecto cinematográfico original sin importar el tamaño de la ventana.
+- **Interacción 1:1**: El sistema de coordenadas del ratón se traduce instantáneamente al espacio del proyecto, permitiendo una edición táctil y precisa sobre los elementos visuales.
 
 ---
 
-## Características Principales
+## ⚡️ Motor de Alto Rendimiento "Vegas-Style"
 
-### Línea de Tiempo Profesional (Core B)
-- **Multitrack Dinámico**: Capas ilimitadas de vídeo y audio con gestión de profundidad.
-- **Visualización de Ondas**: Renderizado de picos de audio asíncrono. El `PeakManager` escanea los archivos en hilos paralelos para mostrar la forma de onda sin ralentizar la UI.
-- **Sistema de Fundidos (Fades)**: Control de opacidad avanzado con curvas de velocidad matemáticas.
-- **Dithering de Transición**: Implementación de un patrón de *stippling* (punteado) en las áreas de fade para una visualización técnica y estética superior en el timeline.
-- **Control de Clips**: Menú contextual de propiedades y botón de acceso rápido "fx" para ajustes de transformación.
+Hemos rediseñado el núcleo de Rocky para ser uno de los editores más rápidos y estables escritos en Java.
 
-### Motor de Renderizado & Review (Engine)
-- **Layered Composition**: El `FrameServer` procesa y compone las imágenes. Las pistas inferiores en el índice (V1, V2...) se dibujan como capas superiores.
-- **Transformaciones Vectoriales**:
-    - **Posición**: Movimiento libre en píxeles de proyecto.
-    - **Escala**: Ampliación uniforme sin pérdida de nitidez lógica.
-    - **Rotación**: Rotación completa en grados sobre un punto de anclaje definido.
-- **Espacio de Expansión**: Interfaz rediseñada con un panel de **550px** lateral para herramientas de efectos y corrección de color.
+### El Motor de Previsualización (FrameServer)
+El `FrameServer` es el corazón de la fluidez en Rocky. Implementa técnicas avanzadas de streaming de video:
+- **Background Pre-fetching**: Utiliza un `ExecutorService` con un pool de hilos dinámico que analiza la posición del cabezal de reproducción y comienza a renderizar los próximos 15-30 fotogramas antes de que llegues a ellos.
+- **Caché Inteligente (LRU-style)**: Un `ConcurrentHashMap` mantiene en memoria los últimos 60 fotogramas generados. Esto permite hacer "scrubbing" (arrastrar el cabezal) hacia atrás y adelante con latencia cero en zonas ya procesadas.
+- **Calidad Multinivel**:
+    - **Draft / Preview**: Optimizado para velocidad. Usa interpolación *Nearest Neighbor* y reduce la carga computacional sacrificando nitidez temporal.
+    - **Good / Best**: Optimizado para fidelidad. Usa interpolación *Bicubic* y activa todos los procesadores de color para una visión exacta del resultado final.
 
----
-
-## Sistema de Undo/Redo (Historial Infinito)
-
-Rocky implementa un sistema de gestión de estado basado en el patrón **Command**. Cada acción significativa en el timeline se encapsula en un objeto que sabe cómo aplicarse y cómo revertirse.
-
-### Arquitectura del HistoryManager
-El `HistoryManager` gestiona dos pilas (vía `java.util.Stack`):
-1.  **Undo Stack**: Almacena acciones realizadas.
-2.  **Redo Stack**: Almacena acciones revertidas.
-
-### Acciones Soportadas
-- **Clip Movement**: Movimiento horizontal (tiempo) y vertical (cambio de pista).
-- **Media Ingestion**: Adición de nuevos archivos mediante drag-and-drop.
-- **Property Changes**: Ajustes en curvas de fade, transformaciones y nombres de clips.
-
-> [!NOTE]
-> El sistema de Undo es atómico. Si una acción de movimiento desplaza múltiples clips, se trata como un único evento en el historial.
+### Renderizado Paralelo y Exportación
+El motor de exportación ya no es secuencial.
+- **Pipeline de Paso Triple**: Mientras el hilo principal gestiona la interfaz, un grupo de hilos "productores" genera los fotogramas de la composición y un hilo "consumidor" alimenta el encoder de FFmpeg en tiempo real.
+- **Aceleración Hardware Nativa**: Integración profunda con los motores de codificación del sistema operativo (VideoToolbox en macOS, NVENC/DXVA en Windows).
 
 ---
 
-## Persistencia: El Formato .rocky
+## 🎨 Características de Edición Profesional
 
-Hemos abandonado los formatos genéricos para implementar nuestra propia estructura de serialización basada en archivos `.rocky`.
+### Línea de Tiempo de Nueva Generación
+- **Miniaturas Dinámicas (Thumbnails)**: Cada clip de vídeo muestra visualmente su contenido inicial directamente en el timeline, facilitando la organización visual de proyectos complejos.
+- **Zoom Infinito Vegas System**: Navega por tu proyecto con precisión quirúrgica. Usa las teclas `+` y `-` para acercarte hasta el nivel de fotograma individual o alejarte para ver horas de contenido en un solo vistazo.
+- **Magnetismo Adaptativo (Smart Snapping)**: El sistema de snapping se ajusta dinámicamente según tu nivel de zoom. No más clips que se "pegan" a donde no quieres; la atracción ahora es puramente basada en píxeles visuales para una sensación orgánica.
 
-### Estructura del Archivo
-Los archivos `.rocky` (anteriormente `.berga`) son archivos XML/JSON estructurados que contienen:
--   **Project Metadata**: Resolución base (1920x1080), FPS nativo y duración total.
--   **Track Definitions**: Listado de pistas de vídeo y audio con sus estados (Mute, Solo, Lock).
--   **Clip Data**: Referencias absolutas a archivos de media, puntos de entrada/salida (In/Out points) y su posición en el timeline.
--   **Transformation Keyframes**: Datos de animación para posición, escala y rotación.
+### Herramientas de Manipulación de Clips
+- **Sistema de Copiado/Pegado**: Duplica estructuras de edición completas. El comando Pegar inserta el clip exactamente en la posición del ratón en la pista seleccionada.
+- **División Instantánea (Split)**: Corta clips en tiempo real sin interrumpir la reproducción.
+- **Opacidad y Fades**: Curvas de fundido suaves con representación visual de *dithering* táctico en el timeline.
 
-### ProjectManager
-El `ProjectManager` es la clase encargada de:
--   **Auto-Save**: Sistema de guardado preventivo cada 5 minutos.
--   **Relative Path Mapping**: Intenta resolver rutas de archivos si el proyecto se mueve de carpeta o unidad de disco.
-
----
-
-## Guía Interna para Desarrolladores (Internal API)
-
-Para extender Rocky, es fundamental entender los tres niveles de interacción:
-
-### 1. El Nivel de Datos (`egine.media`)
-Para añadir soporte a un nuevo formato de archivo, debes extender `MediaDecoder`.
--   `decodeFrame(long microsecond)`: Debe devolver un `BufferedImage` o un frame nativo de FFmpeg.
--   `getDuration()`: Precisión necesaria en microsegundos.
-
-### 2. El Nivel de Interacción (`b.timeline`)
-La lógica de la línea de tiempo se divide en:
--   **`TimelinePanel`**: El lienzo principal de dibujo.
--   **`TimelineInteractionHandler`**: Gestiona los clics, drags y selecciones.
--   **`TimelineRenderer`**: Optimiza el dibujo de clips visibles (Culling).
-
-### 3. El Nivel de Playback (`egine.blueline`)
-Si deseas controlar el playhead programáticamente:
-```java
-Blueline master = Blueline.getInstance();
-master.seek(5000000); // Salta a los 5 segundos
-master.play();        // Inicia la reproducción
-```
+### Gestión de Audio de Alta Fidelidad
+- **Visualización de Ondas (Waveforms)**: El `PeakManager` procesa el audio de forma asíncrona, extrayendo los picos de intensidad sin congelar la interfaz de usuario.
+- **Sincronía Maestro-Reloj**: Rocky usa el stream de audio como el reloj maestro del sistema. Si el vídeo se retrasa, el `FrameServer` realiza saltos inteligentes de fotogramas (frame-drop controlado) para mantener la sincronía labial perfecta.
 
 ---
 
-## Estructura de Archivos del Proyecto
+## 🎞 Compatibilidad y Formatos
 
-| Directorio | Propósito |
-| :--- | :--- |
-| `src/rocky/core` | Lógica de negocio, motores de audio/video y persistencia. |
-| `src/rocky/ui` | Componentes Swing, paneles de timeline y visor. |
-| `bin/` | Clases compiladas organizadas por paquetes. |
-| `lib/` | Dependencias externas (JavaCV, FFmpeg, FlatLaf). |
-| `egine/` | Paquete histórico que contiene el "Engine" (legacy/core mix). |
+Rocky aprovecha la potencia de FFmpeg integrado a través de JavaCV para ofrecer una compatibilidad sin precedentes:
+
+- **Formatos de Vídeo**: MP4 (H.264/H.265), MOV (ProRes), MKV, AVI, WebM, FLV.
+- **Formatos de Imagen**: WebP (Soporte total estático/animado), PNG (con Alpha), JPG, GIF (con bucle automático).
+- **Formatos de Audio**: MP3, WAV (PCM), AAC, M4A, OGG, FLAC.
+- **Transparencia Nativa**: Soporte completo para canales Alpha en WebP y PNG, permitiendo superposiciones gráficas complejas y títulos.
 
 ---
 
-## Especificaciones Técnicas y Compilación
+## 🛠 Especificaciones Técnicas y Desarrollo
 
-### Requisitos del Sistema
-- **Java**: JDK 17 o superior.
-- **Memoria**: Mínimo 8GB RAM (Recomendado 16GB).
-- **Procesador**: Optimizado para Apple Silicon (M1-M4) vía hardware acceleration.
+### Requisitos Técnicos
+- **Java**: JDK 17 o 21 (Recomendado para optimizaciones de ZGC).
+- **OS**: macOS (Universal/Apple Silicon), Windows 10/11, Linux (Ubuntu/Fedora).
+- **Hardware**: Se recomienda GPU con soporte para OpenGL para el renderizado del visor.
 
-### Guía de Compilación
+### Estructura del Código Source
+- `rocky.core.media`: Gestión de decodificadores y fuentes de medios originales.
+- `rocky.core.engine`: El motor de composición, pre-fetching y renderizado final.
+- `rocky.ui.timeline`: Implementación Swing de la línea de tiempo, interacción de ratón y renderizado de clips.
+- `rocky.ui.viewer`: Panel de visualización con escalado afín y lógica de previsualización.
+
+### Compilación para Desarrolladores
+El proyecto incluye scripts optimizados para una compilación rápida:
 ```bash
-# 1. Limpiar versiones previas
-sudo find . -name "*.class" -delete
+# Otorgar permisos si es necesario
+chmod +x compile.sh run.sh
 
-# 2. Otorgar permisos
-chmod +x compile.sh
-
-# 3. Compilar
+# Compilar proyecto completo
 ./compile.sh
+
+# Ejecutar el editor
+./run.sh
 ```
 
 ---
 
-## Hoja de Ruta (Roadmap)
+## 🚀 Hoja de Ruta (Roadmap)
 
-### Fase 2: Edición Avanzada (En progreso [/])
-- [x] **Undo/Redo System**: Integración total de acciones.
-- [x] **Visual Dithering**: Estética de fades mejorada.
-- [ ] **Efectos en Tiempo Real**: Blur y corrección gamma básica.
-- [ ] **Multi-Select**: Selección de varios clips para movimiento en bloque.
+### Fase Actualmente en Desarrollo: "The Creative Update"
+- [x] **Vegas Engine**: Sistema de pre-fetching y caché de 60 frames.
+- [x] **Multi-threaded Rendering**: Exportación paralela Java-to-FFmpeg.
+- [x] **Clip Thumbnails**: Miniaturas visuales en el timeline.
+- [x] **Precision Snapping**: Magnetismo basado en píxeles.
+- [x] **WebP & Color Fix**: Soporte total de WebP con precisión de color BGRA en Mac.
+- [/] **Efectos de Capa**: Implementación de Blur Gaussiano y Corrección Gamma.
+- [ ] **Multi-Select**: Selección de múltiples clips con la tecla Shift/Ctrl.
 
-### Fase 3: Post-Producción (Próximamente [.])
-- [ ] **Generador de Títulos**: Capas de texto enriquecido.
-- [ ] **Exportación ProRes/H264**: Pipeline de renderizado final.
-- [ ] **Audio Mixer**: Mezcla por bus y efectos de audio (EQ/Reverb).
+### Fase Futura: "Professional Mastering"
+- [ ] **Generador de Títulos**: Sistema de texto enriquecido con sombras y bordes.
+- [ ] **Modos de Fusión**: Screen, Multiply, Overlay por cada clip.
+- [ ] **Audio Mixer**: Mezclador de canales con EQ y soporte para plugins de efectos.
+- [ ] **Proxy System**: Creación automática de archivos de baja resolución para edición en máquinas menos potentes.
 
 ---
 
-## Licencia y Créditos
+## ❓ Preguntas Frecuentes (FAQ)
 
-Este proyecto se distribuye bajo la licencia Open Source propia del equipo Rocky.
--   **Core Lead**: Desarrollado con tecnología Java Modern.
--   **Librerías**: JavaCV, FFmpeg, y FlatLaf para la UI.
+**¿Por qué elegir Rocky frente a otros editores open source?**
+Rocky está diseñado para ser ligero y predecible. Al estar escrito en Java, ofrece una seguridad de memoria superior y una portabilidad real entre Windows, Mac y Linux sin las pesadillas de dependencias de C++.
+
+**¿Puedo editar video 4K en un portátil normal?**
+Sí, gracias al sistema de "Calidad de Previsualización". Puedes poner el visor en modo "Draft" para editar fluídamente y solo subir a "Best" cuando necesites revisar detalles finos o exportar.
+
+**¿Cómo gestiona Rocky los colores en Mac M1/M2/M3/M4?**
+Hemos implementado un pipeline específico para Little Endian que mapea los canales de color directamente a los formatos nativos de macOS (BGRA), evitando los típicos problemas de "colores lavados" o amarillos que se ven rosáceos.
+
+---
+
+## 🤝 Contribución y Comunidad
+
+Rocky es un esfuerzo comunitario para democratizar la edición de vídeo de alta calidad. Si deseas contribuir:
+1. Revisa las tareas pendientes en el Roadmap.
+2. Asegúrate de seguir las guías de estilo de código (Java Standard).
+3. Envía tus Pull Requests enfocadas en el rendimiento del `FrameServer` o nuevos filtros en `MediaDecoder`.
+
+---
 
 **Rocky Open Source Video Editor** - *Simplificando la complejidad del cine digital.*
 
-© 2026 Rocky Project Team. *Desarrollado para la comunidad creativa mundial.*
-
----
-
-## Notas de Desarrollo Adicionales
-
-### El Desafío de la Sincronía
-Rocky utiliza el `AudioServer` como reloj de referencia. Si el sistema detecta un retraso en el renderizado de vídeo superior a 50ms, el `FrameServer` saltará automáticamente al siguiente fotograma clave disponible para re-sincronizar el flujo visual.
-
-### Renderizado de Ondas de Audio
-Para evitar bloqueos en la interfaz (UI Freezing), el `PeakManager` utiliza un pool de hilos (`FixedThreadPool`) proporcional al número de núcleos de la CPU. Las ondas se dibujan mediante un sistema de caché de memoria de dos niveles:
-1.  **L1 Cache**: Datos de picos en memoria RAM.
-2.  **L2 Cache**: Archivos binarios temporales en disco.
-
----
-
-## Preguntas Frecuentes (FAQ)
-
-**¿Por qué Java para un editor de vídeo?**
-Java ofrece una portabilidad excelente y, gracias a librerías como JavaCV (Ffmpeg wrapper), podemos acceder a aceleración por hardware nativa mientras mantenemos una lógica de UI segura y fácil de mantener.
-
-**¿Cómo funciona el escalado en el visor?**
-El `VisualizerPanel` calcula una matriz de transformación afín basada en el ratio del proyecto vs. el ratio del componente Swing. Esto asegura que los píxeles siempre se interpelen de forma correcta, ya sea usando *Nearest Neighbor* para velocidad o *Bicubic* para calidad final.
-
-**¿Puedo usar plugins externos?**
-Próximamente implementaremos un sistema de carga dinámica de clases (.jar) que permitirá crear filtros y exportadores personalizados sin modificar el núcleo del motor.
-
----
-
-### Mantenimiento y Limpieza
-Para mantener el repositorio limpio de binarios, se recomienda ejecutar el siguiente comando antes de realizar cualquier commit:
-```bash
-# Elimina todos los archivos compilados en bin y src
-find . -type f -name "*.class" -delete
-```
-
----
-
-*Fin del documento de especificaciones de Rocky Open Source Video Editor.*
+Desarrollado con ❤️ para la comunidad creativa mundial. 
+© 2026 Rocky Project Team.

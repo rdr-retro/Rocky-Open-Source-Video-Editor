@@ -59,7 +59,7 @@ public class VisualizerPanel extends JPanel {
                 }
             }
         };
-        videoArea.setBackground(Color.BLACK);
+        videoArea.setBackground(new Color(30,30,30)); // DEBUG: Non-black to see transparent clips
         
         frameDisplayLabel = new JLabel("", SwingConstants.CENTER);
         frameDisplayLabel.setForeground(ACCENT_LILAC);

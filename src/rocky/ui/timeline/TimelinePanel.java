@@ -16,7 +16,7 @@ public class TimelinePanel extends JPanel {
     private static TimelineClip copiedClip = null;
     private rocky.core.blueline.Blueline blueline = new rocky.core.blueline.Blueline();
 
-    private double getFPS() {
+    public double getFPS() {
         return (projectProps != null) ? projectProps.getFPS() : 30.0;
     }
 
@@ -24,9 +24,9 @@ public class TimelinePanel extends JPanel {
     private double pixelsPerSecond = 100.0; // Dynamic Zoom Scale
     private double visibleStartTime = 0.0; // Time at X=0 (in seconds)
 
-    // Limits
-    private final double MIN_ZOOM = 1.0;
-    private final double MAX_ZOOM = 1000.0;
+    // Limits (Sony Vegas style)
+    private final double MIN_ZOOM = 0.5; // Comprimid (overview)
+    private final double MAX_ZOOM = 5000.0; // Detalle (frame level)
 
     // Project Settings
     private double projectDuration = 300.0; // Seconds (Default 5 mins)
@@ -236,6 +236,7 @@ public class TimelinePanel extends JPanel {
 
     public TimelinePanel() {
         setBackground(BG_COLOR);
+        setFocusable(true);
         
         // Debounce PeakManager repaints (max 30 FPS for UI updates)
         repaintTimer = new Timer(33, e -> repaint());
@@ -800,6 +801,21 @@ public class TimelinePanel extends JPanel {
         addMouseListener(interactionHandler);
         addMouseMotionListener(interactionHandler);
 
+        // Keyboard Shortcuts (Sony Vegas: + / - zoom)
+        addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                double zoomFactor = 1.25;
+                double mouseTime = (mouseX >= 0) ? screenToTime(mouseX) : screenToTime(getWidth() / 2);
+
+                if (e.getKeyChar() == '+' || e.getKeyCode() == KeyEvent.VK_PLUS || e.getKeyCode() == KeyEvent.VK_ADD) {
+                    zoomIn(mouseTime, zoomFactor);
+                } else if (e.getKeyChar() == '-' || e.getKeyCode() == KeyEvent.VK_MINUS || e.getKeyCode() == KeyEvent.VK_SUBTRACT) {
+                    zoomOut(mouseTime, zoomFactor);
+                }
+            }
+        });
+
         // ZOOM / PAN - Simplified (Only Zoom)
         addMouseWheelListener(e -> {
             boolean isCtrl = e.isControlDown() || e.isMetaDown();
@@ -808,22 +824,9 @@ public class TimelinePanel extends JPanel {
             if (isCtrl) {
                 double zoomFactor = 1.1;
                 if (e.getPreciseWheelRotation() > 0)
-                    pixelsPerSecond /= zoomFactor;
+                    zoomOut(mouseTime, zoomFactor);
                 else
-                    pixelsPerSecond *= zoomFactor;
-
-                if (pixelsPerSecond < MIN_ZOOM)
-                    pixelsPerSecond = MIN_ZOOM;
-                if (pixelsPerSecond > MAX_ZOOM)
-                    pixelsPerSecond = MAX_ZOOM;
-
-                visibleStartTime = mouseTime - (e.getX() / pixelsPerSecond);
-                if (visibleStartTime < 0)
-                    visibleStartTime = 0;
-
-                if (timeListener != null)
-                    timeListener.onTimelineUpdated();
-                repaint();
+                    zoomIn(mouseTime, zoomFactor);
             } else {
                 // If not locked in JScrollPane, this handles pan. But JScrollPane should handle
                 // Pan?
@@ -1086,21 +1089,17 @@ public class TimelinePanel extends JPanel {
             }
             clips.removeAll(toRemove);
         }
-        repaint();
     }
-
     private long findSnapFrame(long targetFrame, TimelineClip excludeClip) {
         // Dynamic Threshold: proportional to screen distance (e.g. 12 pixels)
         double pixelThreshold = 12.0;
-        long thresholdFrames = (long) ((pixelThreshold / pixelsPerSecond) * getFPS());
-        if (thresholdFrames < 5)
-            thresholdFrames = 5; // Minimum safety
-
+        double thresholdFrames = (pixelThreshold / pixelsPerSecond) * getFPS();
+        
         long closestSnap = -1;
-        long minDelta = thresholdFrames + 1;
+        double minDelta = thresholdFrames + 0.0001; // Tiny margin
 
         // Candidate 1: Start 0
-        long delta0 = Math.abs(targetFrame - 0);
+        double delta0 = Math.abs((double)targetFrame - 0);
         if (delta0 < minDelta) {
             minDelta = delta0;
             closestSnap = 0;
@@ -1108,7 +1107,7 @@ public class TimelinePanel extends JPanel {
 
         // Candidate 2: Playhead
         long ph = blueline.getPlayheadFrame();
-        long deltaPH = Math.abs(targetFrame - ph);
+        double deltaPH = Math.abs((double)targetFrame - ph);
         if (deltaPH < minDelta) {
             minDelta = deltaPH;
             closestSnap = ph;
@@ -1122,18 +1121,18 @@ public class TimelinePanel extends JPanel {
 
                 // Other clip's start
                 long s = clip.getStartFrame();
-                long ds = Math.abs(targetFrame - s);
+                double ds = Math.abs((double)targetFrame - s);
                 if (ds < minDelta) {
                     minDelta = ds;
                     closestSnap = s;
                 }
 
                 // Other clip's end
-                long e = clip.getStartFrame() + clip.getDurationFrames();
-                long de = Math.abs(targetFrame - e);
+                long endIdx = clip.getStartFrame() + clip.getDurationFrames();
+                double de = Math.abs((double)targetFrame - endIdx);
                 if (de < minDelta) {
                     minDelta = de;
-                    closestSnap = e;
+                    closestSnap = endIdx;
                 }
             }
         }
@@ -1450,5 +1449,35 @@ public class TimelinePanel extends JPanel {
 
     private double getOpacity(TimelineClip.FadeType type, double t, boolean isFadeIn) {
         return TimelineClip.getOpacity(type, t, isFadeIn);
+    }
+
+    private void zoomIn(double anchorTime, double factor) {
+        double oldPPS = pixelsPerSecond;
+        pixelsPerSecond *= factor;
+        if (pixelsPerSecond > MAX_ZOOM) pixelsPerSecond = MAX_ZOOM;
+        
+        applyZoomCentering(anchorTime, oldPPS);
+    }
+
+    private void zoomOut(double anchorTime, double factor) {
+        double oldPPS = pixelsPerSecond;
+        pixelsPerSecond /= factor;
+        if (pixelsPerSecond < MIN_ZOOM) pixelsPerSecond = MIN_ZOOM;
+
+        applyZoomCentering(anchorTime, oldPPS);
+    }
+
+    private void applyZoomCentering(double anchorTime, double oldPPS) {
+        // We want anchorTime to stay at the same screen position
+        // ScreenPos = (time - visibleStart) * oldPPS
+        // ScreenPos = (time - newVisibleStart) * newPPS
+        // newVisibleStart = time - (ScreenPos / newPPS)
+        
+        int screenX = (mouseX >= 0) ? mouseX : getWidth() / 2;
+        visibleStartTime = anchorTime - (screenX / pixelsPerSecond);
+        if (visibleStartTime < 0) visibleStartTime = 0;
+        
+        if (timeListener != null) timeListener.onTimelineUpdated();
+        repaint();
     }
 }

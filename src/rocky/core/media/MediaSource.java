@@ -96,6 +96,16 @@ public class MediaSource {
         return new short[]{0, 0};
     }
 
+    private BufferedImage cloneImage(BufferedImage src) {
+        if (src == null) return null;
+        // BGR24 in FFmpeg fits perfectly with TYPE_INT_RGB (stored as BGR in LE memory)
+        BufferedImage dest = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = dest.createGraphics();
+        g.drawImage(src, 0, 0, null);
+        g.dispose();
+        return dest;
+    }
+
     public BufferedImage getFrame(long index) {
         if (isVideo && videoDecoder != null) {
             long finalIndex;
@@ -113,18 +123,48 @@ public class MediaSource {
 
     public BufferedImage getOrLoadImage() {
         if (cachedImage == null) {
-            if (isVideo && videoDecoder != null) {
-                cachedImage = videoDecoder.getFrame(0);
-            } else {
-                try {
-                    cachedImage = ImageIO.read(new File(filePath));
-                    if (cachedImage != null) {
+            String lower = filePath.toLowerCase();
+            boolean isWebP = lower.endsWith(".webp");
+
+            // Strategy 1: Attempt ImageIO (Native Java)
+            try {
+                cachedImage = ImageIO.read(new File(filePath));
+                if (cachedImage != null) {
+                    this.width = cachedImage.getWidth();
+                    this.height = cachedImage.getHeight();
+                    System.out.println("[MediaSource] WebP/Image loaded via ImageIO: " + filePath);
+                }
+            } catch (Exception e) {
+                // Silently move to fallback
+            }
+
+            // Strategy 2: Fallback to FFmpeg (VideoDecoder) for WebP if ImageIO fails
+            if (cachedImage == null && isWebP) {
+                System.out.println("[MediaSource] ImageIO could not read WebP, trying FFmpeg fallback: " + filePath);
+                VideoDecoder fallbackDecoder = new VideoDecoder(new File(filePath), 1920, 1080);
+                if (fallbackDecoder.init()) {
+                    BufferedImage grabbed = fallbackDecoder.getFrame(0);
+                    if (grabbed != null) {
+                        cachedImage = cloneImage(grabbed);
                         this.width = cachedImage.getWidth();
                         this.height = cachedImage.getHeight();
+                        System.out.println("[MediaSource] WebP loaded via FFmpeg successfully (Cloned)!");
+                    } else {
+                        System.err.println("[MediaSource] FFmpeg fallback returned NULL frame for: " + filePath);
                     }
-                } catch (Exception e) {
-                    System.err.println("Error loading image: " + filePath);
+                    fallbackDecoder.close();
+                } else {
+                    System.err.println("[MediaSource] FFmpeg fallback initialization FAILED for: " + filePath);
                 }
+            }
+
+            // Strategy 3: Standard video path
+            if (cachedImage == null && isVideo && videoDecoder != null) {
+                cachedImage = videoDecoder.getFrame(0);
+            }
+
+            if (cachedImage == null) {
+                System.err.println("[MediaSource] CRITICAL: Could not load media file: " + filePath);
             }
         }
         return cachedImage;
