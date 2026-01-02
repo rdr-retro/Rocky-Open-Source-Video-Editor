@@ -1,3 +1,9 @@
 #!/bin/bash
-# Run with bin and lib in classpath
-java -cp "lib/*:bin" MainAB
+# Detect OS to set correct classpath separator
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+  SEP=";"
+else
+  SEP=":"
+fi
+
+java -cp "lib/*${SEP}bin" MainAB
