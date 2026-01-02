@@ -119,21 +119,21 @@ public class TimelinePanel extends JPanel {
         synchronized (clips) {
             clips.clear();
         }
-        repaint();
+        fireTimelineUpdated();
     }
 
     public void addClip(TimelineClip clip) {
         synchronized (clips) {
             clips.add(clip);
         }
-        repaint();
+        fireTimelineUpdated();
     }
 
     public void removeClip(TimelineClip clip) {
         synchronized (clips) {
             clips.remove(clip);
         }
-        repaint();
+        fireTimelineUpdated();
     }
 
     // --- ACCESSORS FOR SCROLLBAR ---
@@ -191,9 +191,9 @@ public class TimelinePanel extends JPanel {
             visibleStartTime = newScroll;
         }
 
-        if (timeListener != null) {
-            timeListener.onTimeUpdate(time, frame, blueline.formatTimecode(frame), force);
-            timeListener.onTimelineUpdated();
+        for (TimelineListener listener : listeners) {
+            listener.onTimeUpdate(time, frame, blueline.formatTimecode(frame), force);
+            listener.onTimelineUpdated();
         }
         repaint();
     }
@@ -448,7 +448,7 @@ public class TimelinePanel extends JPanel {
                 if (activeClip != null) {
                     int deltaX = e.getX() - dragStartX;
                     double deltaSecs = deltaX / pixelsPerSecond;
-                    long deltaFrames = (long) (deltaSecs * getFPS());
+                    long deltaFrames = Math.round(deltaSecs * getFPS());
 
                     if (interactionMode == 1) {
                         long newStart = originalStart + deltaFrames;
@@ -489,8 +489,7 @@ public class TimelinePanel extends JPanel {
                             trackSum += h;
                         }
 
-                        if (timeListener != null)
-                            timeListener.onTimelineUpdated();
+                        fireTimelineUpdated();
                     } else if (interactionMode == 2) {
                         long newStart = originalStart + deltaFrames;
                         long snappedStart = findSnapFrame(newStart, activeClip);
@@ -501,16 +500,14 @@ public class TimelinePanel extends JPanel {
                             activeClip.setStartFrame(finalStart);
                             activeClip.setDurationFrames(endFrame - finalStart);
                         }
-                        if (timeListener != null)
-                            timeListener.onTimelineUpdated();
+                        fireTimelineUpdated();
                     } else if (interactionMode == 6) {
                         // Group Opacity Adjustment
                         int deltaY = - (e.getY() - interactionStartY);
                         double deltaOpacity = deltaY / (double) (activeTrackHeight - 20); // 20 is header
                         activeClip.setStartOpacity(originalStartOpacity + deltaOpacity);
                         activeClip.setEndOpacity(originalEndOpacity + deltaOpacity);
-                        if (timeListener != null)
-                            timeListener.onTimelineUpdated();
+                        fireTimelineUpdated();
                     } else if (interactionMode == 7) {
                         // Start Opacity Adjustment (Vertical)
                         int deltaY = e.getY() - interactionStartY;
@@ -525,8 +522,7 @@ public class TimelinePanel extends JPanel {
                             newFade = activeClip.getDurationFrames() - activeClip.getFadeOutFrames();
                         activeClip.setFadeInFrames(newFade);
 
-                        if (timeListener != null)
-                            timeListener.onTimelineUpdated();
+                        fireTimelineUpdated();
                     } else if (interactionMode == 8) {
                         // End Opacity Adjustment (Vertical)
                         int deltaY = e.getY() - interactionStartY;
@@ -541,8 +537,7 @@ public class TimelinePanel extends JPanel {
                             newFade = activeClip.getDurationFrames() - activeClip.getFadeInFrames();
                         activeClip.setFadeOutFrames(newFade);
 
-                        if (timeListener != null)
-                            timeListener.onTimelineUpdated();
+                        fireTimelineUpdated();
                     } else if (interactionMode == 3) {
                         // Right-Edge Resize (End Trim)
                         long newEnd = originalStart + originalDuration + deltaFrames;
@@ -551,8 +546,7 @@ public class TimelinePanel extends JPanel {
 
                         long newDuration = Math.max(5, finalEnd - originalStart);
                         activeClip.setDurationFrames(newDuration);
-                        if (timeListener != null)
-                            timeListener.onTimelineUpdated();
+                        fireTimelineUpdated();
                     }
 
                     repaint();
@@ -717,9 +711,7 @@ public class TimelinePanel extends JPanel {
                 if (historyManager != null) {
                     historyManager.pushState(TimelinePanel.this, projectProps, mediaPool);
                 }
-                if (timeListener != null)
-                    timeListener.onTimelineUpdated();
-                repaint();
+                fireTimelineUpdated();
             }
 
             private void showGeneralMenu(MouseEvent e, int x, int y) {
@@ -744,7 +736,7 @@ public class TimelinePanel extends JPanel {
                         }
                         
                         newClip.setTrackIndex(trackIndex);
-                        newClip.setStartFrame((long)(screenToTime(x) * getFPS()));
+                        newClip.setStartFrame(Math.round(screenToTime(x) * getFPS()));
                         
                         addClip(newClip);
                         if (historyManager != null) {
@@ -840,9 +832,7 @@ public class TimelinePanel extends JPanel {
                 if (visibleStartTime < 0)
                     visibleStartTime = 0;
 
-                if (timeListener != null)
-                    timeListener.onTimelineUpdated(); // Sync scrollbar
-                repaint();
+                fireTimelineUpdated();
             }
         });
 
@@ -873,7 +863,7 @@ public class TimelinePanel extends JPanel {
 
                         Point loc = dtde.getLocation();
                         double droppedTime = screenToTime(loc.x);
-                        long startFrame = (long) (droppedTime * getFPS());
+                        long startFrame = Math.round(droppedTime * getFPS());
 
                         int currentY = 0;
                         int targetTrackIndex = -1;
@@ -913,7 +903,7 @@ public class TimelinePanel extends JPanel {
                                     mediaPool.addSource(source);
                                 }
 
-                                long duration = (source.getTotalFrames() > 0) ? source.getTotalFrames() : (long)(5 * getFPS()); // Images
+                                long duration = (source.getTotalFrames() > 0) ? source.getTotalFrames() : Math.round(5 * getFPS()); // Images
                                                                                                                    // default
                                                                                                                    // 5s
                                 TrackControlPanel.TrackType trackType = (sidebar != null)
@@ -954,9 +944,7 @@ public class TimelinePanel extends JPanel {
 
                                 TimelineClip clip = new TimelineClip(name, startFrame, duration, targetTrackIndex);
                                 clip.setMediaSourceId(mediaId);
-                                synchronized (clips) {
-                                    clips.add(clip);
-                                }
+                                    addClip(clip);
 
                                 // Rule 3: MP4/Video with audio -> Auto create audio track below
                                 // We check source.hasAudio() which now uses the more reliable AudioDecoder
@@ -979,9 +967,7 @@ public class TimelinePanel extends JPanel {
                                         TimelineClip audioClip = new TimelineClip(name + " (Audio)", startFrame,
                                                 duration, audioTrackIdx);
                                         audioClip.setMediaSourceId(mediaId);
-                                        synchronized (clips) {
-                                            clips.add(audioClip);
-                                        }
+                                        addClip(audioClip);
                                     }
                                 }
                             }
@@ -1003,16 +989,11 @@ public class TimelinePanel extends JPanel {
     private void updatePlayhead(int x) {
         pausePlayback();
         double time = screenToTime(x);
-        long frame = (long) (time * getFPS());
+        long frame = Math.round(time * getFPS());
         if (frame < 0)
             frame = 0;
         blueline.setPlayheadFrame(frame);
-
-        if (timeListener != null) {
-            timeListener.onTimeUpdate(time, frame, blueline.formatTimecode(frame), false);
-            timeListener.onTimelineUpdated(); // Request Repaint of Ruler
-        }
-        repaint();
+        fireTimelineUpdated();
     }
 
     private java.util.List<Integer> trackHeights = new java.util.ArrayList<>();
@@ -1057,7 +1038,7 @@ public class TimelinePanel extends JPanel {
                 }
             }
         }
-        repaint();
+        fireTimelineUpdated();
     }
 
     /**
@@ -1071,7 +1052,7 @@ public class TimelinePanel extends JPanel {
                 }
             }
         }
-        repaint();
+        fireTimelineUpdated();
     }
 
     /**
@@ -1089,6 +1070,7 @@ public class TimelinePanel extends JPanel {
             }
             clips.removeAll(toRemove);
         }
+        fireTimelineUpdated();
     }
     private long findSnapFrame(long targetFrame, TimelineClip excludeClip) {
         // Dynamic Threshold: proportional to screen distance (e.g. 12 pixels)
@@ -1146,9 +1128,16 @@ public class TimelinePanel extends JPanel {
         void onTimelineUpdated(); // For syncing ruler/scrollbar
     }
 
-    private TimelineListener timeListener;
+    private final java.util.List<TimelineListener> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private TimelineListener timeListener; // Keep for backward compatibility if needed, but we'll migrate
+
+    public void addTimelineListener(TimelineListener listener) {
+        listeners.add(listener);
+    }
 
     public void setTimelineListener(TimelineListener listener) {
+        // Migration: Add to list
+        listeners.add(listener);
         this.timeListener = listener;
     }
 
@@ -1477,7 +1466,14 @@ public class TimelinePanel extends JPanel {
         visibleStartTime = anchorTime - (screenX / pixelsPerSecond);
         if (visibleStartTime < 0) visibleStartTime = 0;
         
-        if (timeListener != null) timeListener.onTimelineUpdated();
+        fireTimelineUpdated();
+    }
+
+    public void fireTimelineUpdated() {
+        for (TimelineListener listener : listeners) {
+            listener.onTimeUpdate(getPlayheadTime(), getPlayheadFrame(), blueline.formatTimecode(getPlayheadFrame()), true);
+            listener.onTimelineUpdated();
+        }
         repaint();
     }
 }

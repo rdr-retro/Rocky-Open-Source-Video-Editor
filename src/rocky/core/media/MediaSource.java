@@ -3,6 +3,8 @@ package rocky.core.media;
 import java.io.File;
 import java.awt.image.BufferedImage;
 import javax.imageio.ImageIO;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Represents a physical media file (the "Source" of the 3-layer architecture).
@@ -18,6 +20,25 @@ public class MediaSource {
     private AudioDecoder audioDecoder;
     private boolean isVideo;
     private boolean isAudio;
+    
+    // Performance Optimization for GIFs and short animations
+    private List<BufferedImage> gifFrameCache;
+    private long currentCacheBytes = 0;
+    private final long MAX_CACHE_BYTES = 200 * 1024 * 1024; // 200 MB limit per source
+
+    private final java.util.LinkedHashMap<Long, BufferedImage> lruFrameCache = new java.util.LinkedHashMap<Long, BufferedImage>(32, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(java.util.Map.Entry<Long, BufferedImage> eldest) {
+            if (currentCacheBytes > MAX_CACHE_BYTES) {
+                BufferedImage img = eldest.getValue();
+                if (img != null) {
+                    currentCacheBytes -= (long)img.getWidth() * img.getHeight() * 4;
+                }
+                return true;
+            }
+            return false;
+        }
+    };
 
     public MediaSource(String id, String filePath) {
         this.id = id;
@@ -39,6 +60,21 @@ public class MediaSource {
                 this.totalFrames = this.videoDecoder.getTotalFrames();
                 this.width = 1920; 
                 this.height = 1080;
+                
+                // If it's a GIF, cache all frames to memory (if it fits in a reasonable budget)
+                // Limit: 200 frames AND total pixels < 200MB (approx 50MP)
+                long totalPixels = (long)width * height * totalFrames;
+                if (lower.endsWith(".gif") && totalFrames > 0 && totalFrames < 200 && totalPixels < 50_000_000) {
+                    System.out.println("[MediaSource] Pro-actively caching GIF frames: " + filePath);
+                    gifFrameCache = new ArrayList<>();
+                    for (int i = 0; i < totalFrames; i++) {
+                        BufferedImage frame = videoDecoder.getFrame(i);
+                        if (frame != null) {
+                            gifFrameCache.add(cloneToARGBPre(frame));
+                        }
+                    }
+                    System.out.println("[MediaSource] Cached " + gifFrameCache.size() + " frames for GIF.");
+                }
             }
         }
         
@@ -96,10 +132,10 @@ public class MediaSource {
         return new short[]{0, 0};
     }
 
-    private BufferedImage cloneImage(BufferedImage src) {
+    private BufferedImage cloneToARGBPre(BufferedImage src) {
         if (src == null) return null;
-        // BGR24 in FFmpeg fits perfectly with TYPE_INT_RGB (stored as BGR in LE memory)
-        BufferedImage dest = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_RGB);
+        // Standardize on TYPE_INT_ARGB_PRE for the entire pipe
+        BufferedImage dest = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB_PRE);
         java.awt.Graphics2D g = dest.createGraphics();
         g.drawImage(src, 0, 0, null);
         g.dispose();
@@ -107,16 +143,37 @@ public class MediaSource {
     }
 
     public BufferedImage getFrame(long index) {
+        if (gifFrameCache != null && !gifFrameCache.isEmpty()) {
+            return gifFrameCache.get((int)(index % gifFrameCache.size()));
+        }
+
+        long finalIndex = index;
         if (isVideo && videoDecoder != null) {
-            long finalIndex;
             if (filePath.toLowerCase().endsWith(".gif") && totalFrames > 0) {
-                // Looping for GIFs
                 finalIndex = index % totalFrames;
             } else {
-                // Freeze-frame for standard videos
                 finalIndex = Math.min(index, totalFrames - 1);
             }
-            return videoDecoder.getFrame(finalIndex);
+
+            synchronized(lruFrameCache) {
+                if (lruFrameCache.containsKey(finalIndex)) {
+                    return lruFrameCache.get(finalIndex);
+                }
+            }
+
+            BufferedImage frame;
+            synchronized(videoDecoder) {
+                frame = videoDecoder.getFrame(finalIndex);
+            }
+
+            if (frame != null) {
+                BufferedImage optimized = cloneToARGBPre(frame);
+                synchronized(lruFrameCache) {
+                    lruFrameCache.put(finalIndex, optimized);
+                    currentCacheBytes += (long)optimized.getWidth() * optimized.getHeight() * 4;
+                }
+                return optimized;
+            }
         }
         return getOrLoadImage();
     }
@@ -140,12 +197,12 @@ public class MediaSource {
 
             // Strategy 2: Fallback to FFmpeg (VideoDecoder) for WebP if ImageIO fails
             if (cachedImage == null && isWebP) {
-                System.out.println("[MediaSource] ImageIO could not read WebP, trying FFmpeg fallback: " + filePath);
+                System.out.println("[MediaSource] ImageIO failed for WebP, trying FFmpeg fallback: " + filePath);
                 VideoDecoder fallbackDecoder = new VideoDecoder(new File(filePath), 1920, 1080);
                 if (fallbackDecoder.init()) {
                     BufferedImage grabbed = fallbackDecoder.getFrame(0);
                     if (grabbed != null) {
-                        cachedImage = cloneImage(grabbed);
+                        cachedImage = cloneToARGBPre(grabbed);
                         this.width = cachedImage.getWidth();
                         this.height = cachedImage.getHeight();
                         System.out.println("[MediaSource] WebP loaded via FFmpeg successfully (Cloned)!");

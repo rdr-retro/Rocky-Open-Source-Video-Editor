@@ -63,6 +63,21 @@ public class PanCropEditor extends JPanel {
             }
         });
 
+        // Sync with MAIN timeline
+        if (mainTimeline != null) {
+            mainTimeline.addTimelineListener(new rocky.ui.timeline.TimelinePanel.TimelineListener() {
+                @Override
+                public void onTimeUpdate(double time, long frame, String timecode, boolean force) {
+                    canvas.setPlayheadFrame(frame);
+                    timeline.setPlayheadFrame(frame);
+                    repaint();
+                }
+
+                @Override
+                public void onTimelineUpdated() {}
+            });
+        }
+
         JSplitPane verticalSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, middleSection, timeline);
         verticalSplit.setDividerLocation(350);
         verticalSplit.setDividerSize(5);

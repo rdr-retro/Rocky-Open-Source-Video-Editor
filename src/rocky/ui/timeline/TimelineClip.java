@@ -19,7 +19,7 @@ public class TimelineClip {
     private String mediaSourceId;
     private long sourceOffsetFrames;
     private ClipTransform transform;
-    private List<TimelineKeyframe> timeKeyframes;
+    private final List<TimelineKeyframe> timeKeyframes;
     private ClipMask mask;
     private double startOpacity = 1.0;
     private double endOpacity = 1.0;
@@ -55,35 +55,47 @@ public class TimelineClip {
         return timeKeyframes;
     }
 
+    public void addKeyframe(TimelineKeyframe k) {
+        synchronized(timeKeyframes) {
+            timeKeyframes.add(k);
+            sortKeyframes();
+        }
+    }
+
+    public void sortKeyframes() {
+        synchronized(timeKeyframes) {
+            timeKeyframes.sort(Comparator.comparingLong(TimelineKeyframe::getClipFrame));
+        }
+    }
+
     public long getSourceFrameAt(long clipFrame) {
-        if (timeKeyframes.isEmpty()) {
-            return sourceOffsetFrames + clipFrame;
-        }
-
-        // Sort keyframes just in case
-        timeKeyframes.sort(Comparator.comparingLong(TimelineKeyframe::getClipFrame));
-
-        // Find the bounding keyframes
-        TimelineKeyframe left = null;
-        TimelineKeyframe right = null;
-
-        for (TimelineKeyframe k : timeKeyframes) {
-            if (k.getClipFrame() <= clipFrame) {
-                left = k;
-            } else {
-                right = k;
-                break;
+        synchronized(timeKeyframes) {
+            if (timeKeyframes.isEmpty()) {
+                return sourceOffsetFrames + clipFrame;
             }
+
+            // Find the bounding keyframes (Assumes already sorted for performance)
+            TimelineKeyframe left = null;
+            TimelineKeyframe right = null;
+
+            for (TimelineKeyframe k : timeKeyframes) {
+                if (k.getClipFrame() <= clipFrame) {
+                    left = k;
+                } else {
+                    right = k;
+                    break;
+                }
+            }
+
+            if (left == null)
+                return timeKeyframes.get(0).getSourceFrame();
+            if (right == null)
+                return left.getSourceFrame();
+
+            // Linear interpolation
+            double t = (double) (clipFrame - left.getClipFrame()) / (right.getClipFrame() - left.getClipFrame());
+            return left.getSourceFrame() + Math.round(t * (right.getSourceFrame() - left.getSourceFrame()));
         }
-
-        if (left == null)
-            return timeKeyframes.get(0).getSourceFrame();
-        if (right == null)
-            return left.getSourceFrame();
-
-        // Linear interpolation
-        double t = (double) (clipFrame - left.getClipFrame()) / (right.getClipFrame() - left.getClipFrame());
-        return left.getSourceFrame() + Math.round(t * (right.getSourceFrame() - left.getSourceFrame()));
     }
 
     public ClipTransform getInterpolatedTransform(long clipFrame) {
@@ -92,9 +104,7 @@ public class TimelineClip {
                 return transform;
             }
 
-            // Sort by clipFrame (already done in UI, but safe to repeat or assume sorted)
-            timeKeyframes.sort(java.util.Comparator.comparingLong(TimelineKeyframe::getClipFrame));
-
+            // Assumes already sorted for performance
             TimelineKeyframe left = null;
             TimelineKeyframe right = null;
 

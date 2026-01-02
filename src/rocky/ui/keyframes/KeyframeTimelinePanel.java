@@ -42,6 +42,11 @@ public class KeyframeTimelinePanel extends JPanel {
         this.timelineListener = l;
     }
 
+    public void setPlayheadFrame(long frame) {
+        this.localPlayheadFrame = frame;
+        repaint();
+    }
+
     public KeyframeTimelinePanel(TimelineClip clip) {
         this.clip = clip;
         setBackground(BG_COLOR_DARK);
@@ -90,7 +95,7 @@ public class KeyframeTimelinePanel extends JPanel {
                 } else if (e.getClickCount() == 2 && selectedKeyframe == null && x > SIDEBAR_WIDTH) {
                     long cf = xToClipFrame(x);
                     TimelineKeyframe k = new TimelineKeyframe(cf, cf, clip.getTransform());
-                    clip.getTimeKeyframes().add(k);
+                    clip.addKeyframe(k); // Optimization: Use addKeyframe to handle sorting
                     selectedKeyframe = k;
                     repaint();
                 }
@@ -113,6 +118,7 @@ public class KeyframeTimelinePanel extends JPanel {
                     if (selectedKeyframe.getClipFrame() > 0
                             && selectedKeyframe.getClipFrame() < clip.getDurationFrames()) {
                         selectedKeyframe.setClipFrame(cf);
+                        clip.sortKeyframes(); // Sort only during active dragging
                     }
                     repaint();
                 }
@@ -135,10 +141,12 @@ public class KeyframeTimelinePanel extends JPanel {
         // Navigation: Prev
         if (x >= iconX && x < iconX + 40) {
             TimelineKeyframe prev = null;
-            for (TimelineKeyframe k : clip.getTimeKeyframes()) {
-                if (k.getClipFrame() < localPlayheadFrame) {
-                    if (prev == null || k.getClipFrame() > prev.getClipFrame())
-                        prev = k;
+            synchronized(clip.getTimeKeyframes()) {
+                for (TimelineKeyframe k : clip.getTimeKeyframes()) {
+                    if (k.getClipFrame() < localPlayheadFrame) {
+                        if (prev == null || k.getClipFrame() > prev.getClipFrame())
+                            prev = k;
+                    }
                 }
             }
             if (prev != null) {
@@ -150,10 +158,12 @@ public class KeyframeTimelinePanel extends JPanel {
         // Navigation: Next
         else if (x >= iconX + 40 && x < iconX + 80) {
             TimelineKeyframe next = null;
-            for (TimelineKeyframe k : clip.getTimeKeyframes()) {
-                if (k.getClipFrame() > localPlayheadFrame) {
-                    if (next == null || k.getClipFrame() < next.getClipFrame())
-                        next = k;
+            synchronized(clip.getTimeKeyframes()) {
+                for (TimelineKeyframe k : clip.getTimeKeyframes()) {
+                    if (k.getClipFrame() > localPlayheadFrame) {
+                        if (next == null || k.getClipFrame() < next.getClipFrame())
+                            next = k;
+                    }
                 }
             }
             if (next != null) {
@@ -165,7 +175,7 @@ public class KeyframeTimelinePanel extends JPanel {
         // Add Keyframe at Playhead
         else if (x >= iconX + 80 && x < iconX + 120) {
             if (findKeyframeAt(clipFrameToX(localPlayheadFrame), RULER_HEIGHT + TRACK_HEIGHT / 2) == null) {
-                clip.getTimeKeyframes().add(new TimelineKeyframe(localPlayheadFrame, localPlayheadFrame, clip.getTransform()));
+                clip.addKeyframe(new TimelineKeyframe(localPlayheadFrame, localPlayheadFrame, clip.getTransform()));
             }
         }
         // Remove selected/under playhead keyframe
@@ -185,11 +195,13 @@ public class KeyframeTimelinePanel extends JPanel {
     private TimelineKeyframe findKeyframeAt(int x, int y) {
         if (x < SIDEBAR_WIDTH)
             return null;
-        for (TimelineKeyframe k : clip.getTimeKeyframes()) {
-            int kx = clipFrameToX(k.getClipFrame());
-            int ky = RULER_HEIGHT + (TRACK_HEIGHT / 2);
-            if (Math.abs(x - kx) < 8 && Math.abs(y - ky) < 8)
-                return k;
+        synchronized(clip.getTimeKeyframes()) {
+            for (TimelineKeyframe k : clip.getTimeKeyframes()) {
+                int kx = clipFrameToX(k.getClipFrame());
+                int ky = RULER_HEIGHT + (TRACK_HEIGHT / 2);
+                if (Math.abs(x - kx) < 8 && Math.abs(y - ky) < 8)
+                    return k;
+            }
         }
         return null;
     }
@@ -198,7 +210,7 @@ public class KeyframeTimelinePanel extends JPanel {
         int timelineWidth = getWidth() - SIDEBAR_WIDTH;
         if (timelineWidth <= 0)
             return 0;
-        double ratio = (double) f / clip.getDurationFrames();
+        double ratio = (double) f / Math.max(1, clip.getDurationFrames());
         return SIDEBAR_WIDTH + (int) (ratio * (timelineWidth - 10));
     }
 
@@ -264,10 +276,7 @@ public class KeyframeTimelinePanel extends JPanel {
         g2.setColor(Color.WHITE);
         g2.drawString(clip.getMask().isEnabled() ? "[x] Máscara" : "[ ] Máscara", 10, RULER_HEIGHT + TRACK_HEIGHT + 16);
 
-        // 5. Drawing Keyframe Line (Position)
-        synchronized (clip.getTimeKeyframes()) {
-            clip.getTimeKeyframes().sort(java.util.Comparator.comparingLong(TimelineKeyframe::getClipFrame));
-        }
+        // 5. Drawing Keyframe Line (Position) (Sorting handled optimally by add/drag)
         g2.setColor(new Color(80, 80, 80));
         g2.drawLine(SIDEBAR_WIDTH, RULER_HEIGHT + TRACK_HEIGHT / 2, w, RULER_HEIGHT + TRACK_HEIGHT / 2);
 
@@ -277,10 +286,12 @@ public class KeyframeTimelinePanel extends JPanel {
                 RULER_HEIGHT + TRACK_HEIGHT + TRACK_HEIGHT / 2);
 
         // 6. Diamonds
-        for (TimelineKeyframe k : clip.getTimeKeyframes()) {
-            int x = clipFrameToX(k.getClipFrame());
-            int ky = RULER_HEIGHT + (TRACK_HEIGHT / 2);
-            drawDiamond(g2, x, ky, k == selectedKeyframe);
+        synchronized(clip.getTimeKeyframes()) {
+            for (TimelineKeyframe k : clip.getTimeKeyframes()) {
+                int x = clipFrameToX(k.getClipFrame());
+                int ky = RULER_HEIGHT + (TRACK_HEIGHT / 2);
+                drawDiamond(g2, x, ky, k == selectedKeyframe);
+            }
         }
 
         // 7. Playhead

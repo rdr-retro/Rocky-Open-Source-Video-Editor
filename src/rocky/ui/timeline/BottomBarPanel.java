@@ -10,6 +10,7 @@ public class BottomBarPanel extends JPanel {
     private JLabel speedLabel;
     private JSlider speedSlider;
     private java.util.function.Consumer<Double> onRateChange;
+    private Runnable onRefresh;
     private TimelinePanel timeline;
     
     public BottomBarPanel() {
@@ -97,6 +98,16 @@ public class BottomBarPanel extends JPanel {
         recTimeLabel.setForeground(TEXT_COLOR);
         recTimeLabel.setFont(new Font("SansSerif", Font.PLAIN, 10));
         
+        JButton refreshBtn = new JButton("ACTUALIZAR");
+        refreshBtn.setFont(new Font("SansSerif", Font.BOLD, 10));
+        refreshBtn.setForeground(Color.BLACK);
+        refreshBtn.setBackground(Color.WHITE);
+        refreshBtn.setFocusPainted(false);
+        refreshBtn.addActionListener(e -> {
+            if (onRefresh != null) onRefresh.run();
+        });
+
+        rightPanel.add(refreshBtn);
         rightPanel.add(timeLabel);
         rightPanel.add(recTimeLabel);
 
@@ -107,6 +118,10 @@ public class BottomBarPanel extends JPanel {
 
     public void setOnRateChange(java.util.function.Consumer<Double> callback) {
         this.onRateChange = callback;
+    }
+
+    public void setOnRefresh(Runnable callback) {
+        this.onRefresh = callback;
     }
 
     public void setRate(double rate) {

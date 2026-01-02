@@ -2,6 +2,11 @@ package rocky.ui.timeline;
 
 import rocky.ui.viewer.VisualizerPanel;
 import rocky.core.audio.MasterSoundPanel;
+import rocky.core.media.MediaPool;
+import rocky.ui.timeline.ProjectProperties;
+import rocky.core.persistence.HistoryManager;
+import rocky.core.engine.FrameServer;
+import rocky.core.engine.AudioServer;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
@@ -9,6 +14,14 @@ import java.awt.image.BufferedImage;
 
 public class TimelineApp {
     public static void main(String[] args) {
+        // --- PERFORMANCE: Enable Hardware Acceleration ---
+        System.setProperty("sun.java2d.metal", "true");   // macOS
+        System.setProperty("sun.java2d.opengl", "true");  // Windows/Linux fallback
+        System.setProperty("apple.awt.graphics.UseQuartz", "true");
+        
+        // --- PERFORMANCE: Standardize on ARGB_PRE for UI components ---
+        System.setProperty("sun.java2d.uiScale", "1.0"); // Consistent scaling for buffers
+
         SwingUtilities.invokeLater(() -> {
             try {
                 UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
@@ -23,12 +36,77 @@ public class TimelineApp {
             frame.setLayout(new BorderLayout());
 
             // --- PART B: Timeline Components ---
+            MediaPool mediaPool = new MediaPool();
+            ProjectProperties projectProps = new ProjectProperties();
+            HistoryManager historyManager = new HistoryManager();
+            
             SidebarPanel sidebar = new SidebarPanel();
             TimelinePanel timeline = new TimelinePanel();
             TimelineRuler ruler = new TimelineRuler(timeline);
 
+            timeline.setMediaPool(mediaPool);
+            timeline.setProjectProperties(projectProps);
+            timeline.setHistoryManager(historyManager);
+            timeline.setSidebar(sidebar);
+
             sidebar.setOnAddTrack(() -> {
                 timeline.setTrackHeights(sidebar.getTrackHeights());
+            });
+
+            // --- PART A: Top Section (Visualizer) ---
+            JPanel topPanel = new JPanel(new BorderLayout());
+            topPanel.setBackground(Color.decode("#1e1e1e"));
+
+            // Left placeholder (e.g. for media library)
+            JPanel leftPlaceholder = new JPanel();
+            leftPlaceholder.setBackground(Color.decode("#161616"));
+            leftPlaceholder.setPreferredSize(new Dimension(300, 0));
+            topPanel.add(leftPlaceholder, BorderLayout.WEST);
+
+            // Right Visualizer
+            VisualizerPanel visualizer = new VisualizerPanel();
+            topPanel.add(visualizer, BorderLayout.CENTER);
+
+            // Master Sound (Far Right)
+            MasterSoundPanel masterSound = new MasterSoundPanel();
+            topPanel.add(masterSound, BorderLayout.EAST);
+
+            // --- ENGINE SETUP ---
+            FrameServer frameServer = new FrameServer(timeline, mediaPool, visualizer);
+            frameServer.setProperties(projectProps);
+            
+            AudioServer audioServer = new AudioServer(timeline, mediaPool, masterSound);
+            
+            // Connect Visualizer to Audio/Video
+            visualizer.setOnPlay(timeline::startPlayback);
+            visualizer.setOnPause(timeline::pausePlayback);
+            visualizer.setOnStop(timeline::stopPlayback);
+            visualizer.updateProperties(projectProps);
+
+            // --- LISTENERS ---
+            timeline.setTimelineListener(new TimelinePanel.TimelineListener() {
+                @Override
+                public void onTimeUpdate(double time, long frame, String timecode, boolean force) {
+                    sidebar.setTimecode(timecode);
+                    // REAL-TIME UPDATE: Notify FrameServer to render the frame
+                    if (frameServer != null) {
+                        frameServer.processFrame(time, force);
+                    }
+                }
+
+                @Override
+                public void onTimelineUpdated() {
+                    ruler.repaint();
+                    // FORCE RE-RENDER on state update (clip add/delete/split)
+                    if (frameServer != null) {
+                        frameServer.processFrame(timeline.getPlayheadTime(), true);
+                    }
+                    
+                    long visibleStart = (long) (timeline.getVisibleStartTime() * 1000);
+                    long visibleDuration = (long) (timeline.getVisibleDuration() * 1000);
+                    long projectDuration = (long) (timeline.getProjectDuration() * 1000);
+                    // hScroll update logic...
+                }
             });
 
             JScrollPane scrollPane = new JScrollPane(timeline);
@@ -65,15 +143,13 @@ public class TimelineApp {
             });
             centerContainer.add(scrollbarPanel, BorderLayout.SOUTH);
 
-            timeline.setTimelineListener(new TimelinePanel.TimelineListener() {
+            // Update the TimelineUpdated logic to use hScroll
+            timeline.addTimelineListener(new TimelinePanel.TimelineListener() {
                 @Override
-                public void onTimeUpdate(double time, long frame, String timecode, boolean force) {
-                    sidebar.setTimecode(timecode);
-                }
+                public void onTimeUpdate(double time, long frame, String timecode, boolean force) {}
 
                 @Override
                 public void onTimelineUpdated() {
-                    ruler.repaint();
                     long visibleStart = (long) (timeline.getVisibleStartTime() * 1000);
                     long visibleDuration = (long) (timeline.getVisibleDuration() * 1000);
                     long projectDuration = (long) (timeline.getProjectDuration() * 1000);
@@ -95,24 +171,6 @@ public class TimelineApp {
                 }
             });
 
-            // --- PART A: Top Section (Visualizer) ---
-            JPanel topPanel = new JPanel(new BorderLayout());
-            topPanel.setBackground(Color.decode("#1e1e1e"));
-
-            // Left placeholder (e.g. for media library)
-            JPanel leftPlaceholder = new JPanel();
-            leftPlaceholder.setBackground(Color.decode("#161616"));
-            leftPlaceholder.setPreferredSize(new Dimension(300, 0));
-            topPanel.add(leftPlaceholder, BorderLayout.WEST);
-
-            // Right Visualizer
-            VisualizerPanel visualizer = new VisualizerPanel();
-            topPanel.add(visualizer, BorderLayout.CENTER);
-
-            // Master Sound (Far Right)
-            MasterSoundPanel masterSound = new MasterSoundPanel();
-            topPanel.add(masterSound, BorderLayout.EAST);
-
             // --- MAIN LAYOUT: JSplitPane ---
             JSplitPane mainSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, topPanel, centerContainer);
             mainSplit.setDividerLocation(400);
@@ -122,6 +180,7 @@ public class TimelineApp {
             frame.add(mainSplit, BorderLayout.CENTER);
 
             BottomBarPanel bottomBar = new BottomBarPanel();
+            bottomBar.setOnRefresh(timeline::fireTimelineUpdated);
             frame.add(bottomBar, BorderLayout.SOUTH);
 
             frame.setLocationRelativeTo(null);

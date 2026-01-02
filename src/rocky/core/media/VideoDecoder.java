@@ -37,21 +37,23 @@ public class VideoDecoder {
 
             // Cross-Platform Hardware Acceleration Detection
             String os = System.getProperty("os.name").toLowerCase();
-            boolean isWebP = videoFile.getName().toLowerCase().endsWith(".webp");
+            String lowerName = videoFile.getName().toLowerCase();
+            boolean isWebP = lowerName.endsWith(".webp");
+            boolean isGIF = lowerName.endsWith(".gif");
 
-            if (!isWebP) {
+            if (!isWebP && !isGIF) {
                 if (os.contains("mac")) {
                     grabber.setVideoOption("hwaccel", "videotoolbox");
                     System.out.println("[VideoDecoder] Using Hardware Accel: VideoToolbox (macOS)");
                 } else if (os.contains("win")) {
-                    grabber.setVideoOption("hwaccel", "dxva2"); // Or d3d11va
+                    grabber.setVideoOption("hwaccel", "dxva2"); 
                     System.out.println("[VideoDecoder] Using Hardware Accel: DXVA2 (Windows)");
                 } else if (os.contains("nix") || os.contains("nux")) {
                     grabber.setVideoOption("hwaccel", "vaapi");
                     System.out.println("[VideoDecoder] Using Hardware Accel: VAAPI (Linux)");
                 }
             } else {
-                System.out.println("[VideoDecoder] WebP detected: Disabling Hardware Accel for compatibility.");
+                System.out.println("[VideoDecoder] WebP or GIF detected: Using Software Decoding for stability.");
             }
             
             // Reverting to BGR24 as it matches Java's default pixel order for INT_RGB on Little Endian
@@ -89,12 +91,21 @@ public class VideoDecoder {
             if (grabber == null) return null;
             
             // Optimization: If it's the next frame, don't seek! 
-            if (frameNumber != lastFrameNumber + 1 && frameNumber != 0) {
-                long timestamp = (long)((frameNumber / videoFPS) * 1000000);
+            if (frameNumber != lastFrameNumber + 1) {
+                // If we are seeking BACKWARDS (common in loops), restarting the grabber 
+                // can sometimes be faster than a long seek, but for GIFs, 0-seek is usually fast.
+                long timestamp = Math.round((frameNumber / videoFPS) * 1000000);
                 grabber.setTimestamp(timestamp);
             }
             
             Frame frame = grabber.grabImage();
+            
+            // Loop Handling: If we reached EOF or grabbed nothing, try seeking to 0 if frameNumber is small
+            if (frame == null && frameNumber < 5) {
+                grabber.setTimestamp(0);
+                frame = grabber.grabImage();
+            }
+
             lastFrameNumber = frameNumber;
             
             if (frame != null && frame.image != null) {
@@ -109,7 +120,7 @@ public class VideoDecoder {
     public long getTotalFrames() {
         if (grabber == null) return 0;
         double durationSecs = grabber.getLengthInTime() / 1000000.0;
-        return (long)(durationSecs * videoFPS);
+        return Math.round(durationSecs * videoFPS);
     }
 
     public void close() {

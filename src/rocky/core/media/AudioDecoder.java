@@ -38,11 +38,11 @@ public class AudioDecoder {
     public long getTotalFrames() {
         if (grabber == null) return 0;
         double durationSecs = grabber.getLengthInTime() / 1000000.0;
-        return (long)(durationSecs * PROJECT_FPS);
+        return Math.round(durationSecs * PROJECT_FPS);
     }
 
     public int getSamplesPerFrame() {
-        return (int)((sampleRate / PROJECT_FPS) * channels);
+        return (int) Math.round((sampleRate / PROJECT_FPS) * channels);
     }
 
     private short[] residualBuffer = null;
@@ -135,7 +135,7 @@ public class AudioDecoder {
             if (grabber == null) return null;
             
             // Mapping project frame to microseconds
-            long targetTimestamp = (long)((frameNumber / PROJECT_FPS) * 1000000);
+            long targetTimestamp = Math.round((frameNumber / PROJECT_FPS) * 1000000);
             
             // Optimization: Relax seek threshold to 30ms (approx 1 frame)
             // Smaller thresholds cause constant re-seeking due to minor timestamp jitter.

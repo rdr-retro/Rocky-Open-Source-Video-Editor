@@ -16,16 +16,82 @@ public class FrameServer {
     private MediaPool pool;
     private rocky.ui.viewer.VisualizerPanel visualizer;
     private rocky.ui.timeline.ProjectProperties properties;
-    private final java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors
-            .newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+    private final java.util.concurrent.ThreadPoolExecutor executor;
     private final java.util.concurrent.ConcurrentHashMap<Long, BufferedImage> frameCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentLinkedQueue<BufferedImage> bufferPool = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private final java.util.concurrent.atomic.AtomicLong latestTargetFrame = new java.util.concurrent.atomic.AtomicLong(-1);
+    private BufferedImage currentVisibleBuffer = null;
+    private long lastRequestTime = 0;
+    private double currentScrubbingVelocity = 0; // frames per ms
     private final int MAX_CACHE_SIZE = 60;
+    private final int MAX_POOL_SIZE = 10;
     private long lastSubmittedFrame = -1;
 
     public FrameServer(TimelinePanel timeline, MediaPool pool, rocky.ui.viewer.VisualizerPanel visualizer) {
         this.timeline = timeline;
         this.pool = pool;
         this.visualizer = visualizer;
+
+        int cores = Runtime.getRuntime().availableProcessors();
+        this.executor = new java.util.concurrent.ThreadPoolExecutor(
+            cores, cores, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+            new java.util.concurrent.PriorityBlockingQueue<Runnable>()
+        );
+    }
+
+    private class RenderTask implements Runnable, Comparable<RenderTask> {
+        private final long frame;
+        private final boolean isPrefetch;
+        private final long requestOrder;
+        private static final java.util.concurrent.atomic.AtomicLong orderSource = new java.util.concurrent.atomic.AtomicLong(0);
+
+        public RenderTask(long frame, boolean isPrefetch) {
+            this.frame = frame;
+            this.isPrefetch = isPrefetch;
+            this.requestOrder = orderSource.getAndIncrement();
+        }
+
+        @Override
+        public void run() {
+            if (latestTargetFrame.get() != -1 && !isPrefetch) {
+                if (latestTargetFrame.get() != frame) return;
+            }
+            
+            if (isPrefetch && Math.abs(latestTargetFrame.get() - frame) > 20) return;
+
+            BufferedImage rendered = getFrameAt(frame, false);
+            if (rendered == null) return;
+
+            if (!isPrefetch && latestTargetFrame.get() != frame) {
+                returnCanvasToPool(rendered);
+                return;
+            }
+
+            frameCache.put(frame, rendered);
+            manageCacheSize(frame);
+
+            if (!isPrefetch) {
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    // Recycle the OLD visible buffer now that it's being replaced
+                    if (currentVisibleBuffer != null && currentVisibleBuffer != rendered) {
+                        returnCanvasToPool(currentVisibleBuffer);
+                    }
+                    currentVisibleBuffer = rendered;
+                    visualizer.updateFrame(rendered);
+                });
+            }
+        }
+
+        @Override
+        public int compareTo(RenderTask other) {
+            long target = latestTargetFrame.get();
+            long distA = Math.abs(this.frame - target);
+            long distB = Math.abs(other.frame - target);
+
+            if (distA != distB) return Long.compare(distA, distB);
+            if (this.isPrefetch != other.isPrefetch) return this.isPrefetch ? 1 : -1;
+            return Long.compare(other.requestOrder, this.requestOrder); // Newer first
+        }
     }
 
     public void setProperties(rocky.ui.timeline.ProjectProperties props) {
@@ -46,48 +112,37 @@ public class FrameServer {
 
     public void processFrame(double timeInSeconds, boolean force) {
         double fps = (properties != null) ? properties.getFPS() : 30.0;
-        long targetFrame = (long) (timeInSeconds * fps);
+        long targetFrame = Math.round(timeInSeconds * fps);
 
-        if (!force && targetFrame == lastSubmittedFrame)
-            return;
-        lastSubmittedFrame = targetFrame;
-
-        // Sony-Vegas Style: Return cached frame immediately if available
-        if (frameCache.containsKey(targetFrame)) {
+        if (force) {
+            BufferedImage removed = frameCache.remove(targetFrame);
+            if (removed != null) returnCanvasToPool(removed);
+        } else if (frameCache.containsKey(targetFrame)) {
             visualizer.updateFrame(frameCache.get(targetFrame));
-            prefetchNextFrames(targetFrame, 15); // Pre-fetch 15 frames ahead
+            prefetchNextFrames(targetFrame, 15);
             return;
         }
 
-        executor.submit(() -> {
-            BufferedImage rendered = getFrameAt(targetFrame, false);
-            if (rendered == null)
-                return;
+        long now = System.currentTimeMillis();
+        if (lastRequestTime > 0) {
+            long dt = now - lastRequestTime;
+            if (dt > 0) {
+                double vel = (double) Math.abs(targetFrame - latestTargetFrame.get()) / dt;
+                currentScrubbingVelocity = 0.8 * currentScrubbingVelocity + 0.2 * vel;
+            }
+        }
+        lastRequestTime = now;
+        latestTargetFrame.set(targetFrame);
 
-            // We put it in cache and notify visualizer
-            frameCache.put(targetFrame, rendered);
-            manageCacheSize(targetFrame);
-
-            javax.swing.SwingUtilities.invokeLater(() -> {
-                visualizer.updateFrame(rendered);
-            });
-            
-            prefetchNextFrames(targetFrame, 15);
-        });
+        executor.execute(new RenderTask(targetFrame, false));
+        prefetchNextFrames(targetFrame, 15);
     }
 
     private void prefetchNextFrames(long startFrame, int count) {
         for (int i = 1; i <= count; i++) {
             final long f = startFrame + i;
             if (!frameCache.containsKey(f)) {
-                executor.submit(() -> {
-                    if (frameCache.size() < MAX_CACHE_SIZE) {
-                        BufferedImage prefetched = getFrameAt(f, false);
-                        if (prefetched != null) {
-                            frameCache.put(f, prefetched);
-                        }
-                    }
-                });
+                executor.execute(new RenderTask(f, true));
             }
         }
     }
@@ -95,16 +150,32 @@ public class FrameServer {
     private void manageCacheSize(long currentFrame) {
         if (frameCache.size() > MAX_CACHE_SIZE) {
             // Remove frames far away from current
-            frameCache.keySet().removeIf(f -> Math.abs(f - currentFrame) > MAX_CACHE_SIZE / 2);
+            java.util.Iterator<java.util.Map.Entry<Long, BufferedImage>> it = frameCache.entrySet().iterator();
+            while (it.hasNext()) {
+                java.util.Map.Entry<Long, BufferedImage> entry = it.next();
+                if (Math.abs(entry.getKey() - currentFrame) > MAX_CACHE_SIZE * 2) {
+                    // DON'T recycle if it's currently on screen!
+                    if (entry.getValue() != currentVisibleBuffer) {
+                        returnCanvasToPool(entry.getValue());
+                    }
+                    it.remove();
+                }
+            }
         }
     }
 
-    private BufferedImage cloneImage(BufferedImage src) {
-        BufferedImage dest = new BufferedImage(src.getWidth(), src.getHeight(), src.getType());
-        java.awt.Graphics2D g = dest.createGraphics();
-        g.drawImage(src, 0, 0, null);
-        g.dispose();
-        return dest;
+    private BufferedImage getCanvasFromPool(int w, int h) {
+        BufferedImage img = bufferPool.poll();
+        if (img == null || img.getWidth() != w || img.getHeight() != h) {
+            return new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB_PRE);
+        }
+        return img;
+    }
+
+    private void returnCanvasToPool(BufferedImage img) {
+        if (bufferPool.size() < MAX_POOL_SIZE) {
+            bufferPool.offer(img);
+        }
     }
 
 
@@ -120,13 +191,16 @@ public class FrameServer {
             canvasH = properties.getPreviewHeight();
         }
 
-        BufferedImage canvas = new BufferedImage(canvasW, canvasH, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage canvas = getCanvasFromPool(canvasW, canvasH);
         java.awt.Graphics2D g2 = canvas.createGraphics();
         
         // Quality Presets
         String quality = properties.getPreviewQuality(); // Draft, Preview, Good, Best
         
-        if (quality.equals("Best") || quality.equals("Good")) {
+        boolean isScrubbingFast = currentScrubbingVelocity > 0.5; // > 0.5 frames/ms is approx > 15 fps movement
+        boolean adaptiveLowQuality = isScrubbingFast;
+
+        if ((quality.equals("Best") || quality.equals("Good")) && !adaptiveLowQuality) {
             g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
             g2.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BICUBIC);
             g2.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_QUALITY);
@@ -171,7 +245,7 @@ public class FrameServer {
         g2.dispose();
         
         // --- ACES COLOR MANAGEMENT ---
-        if (properties.isAcesEnabled()) {
+        if (properties.isAcesEnabled() && !isScrubbingFast) {
             ColorManagement.applyAces(canvas);
         }
         
@@ -199,6 +273,15 @@ public class FrameServer {
         double centerX = (canvasW / 2.0) + transform.getX();
         double centerY = (canvasH / 2.0) + transform.getY();
 
+        float opacity = (float) clip.getOpacityAt(frameInClip);
+
+        // Identity Transform Optimization
+        if (transform.getRotation() == 0 && transform.getScaleX() == 1.0 && transform.getScaleY() == 1.0 && 
+            transform.getX() == 0 && transform.getY() == 0 && fitScale == 1.0 && opacity >= 1.0f) {
+            g2.drawImage(asset, (canvasW - assetW) / 2, (canvasH - assetH) / 2, null);
+            return;
+        }
+
         java.awt.geom.AffineTransform at = new java.awt.geom.AffineTransform();
         at.translate(centerX, centerY);
         at.rotate(Math.toRadians(transform.getRotation()));
@@ -206,7 +289,6 @@ public class FrameServer {
         // Anchor point (default center of the image)
         at.translate(-assetW * transform.getAnchorX(), -assetH * transform.getAnchorY());
 
-        float opacity = (float) clip.getOpacityAt(frameInClip);
         java.awt.Composite oldComp = g2.getComposite();
         if (opacity < 1.0f) {
             g2.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, Math.max(0.0f, opacity)));

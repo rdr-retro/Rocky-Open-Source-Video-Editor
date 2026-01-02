@@ -160,17 +160,20 @@ public class VisualCanvas extends JPanel {
 
         // Auto-Keying Logic: If there is at least ONE keyframe, we continue auto-keying
         TimelineKeyframe existing = null;
-        for (TimelineKeyframe k : clip.getTimeKeyframes()) {
-            if (k.getClipFrame() == localPlayheadFrame) {
-                existing = k;
-                break;
+        synchronized(clip.getTimeKeyframes()) {
+            for (TimelineKeyframe k : clip.getTimeKeyframes()) {
+                if (k.getClipFrame() == localPlayheadFrame) {
+                    existing = k;
+                    break;
+                }
             }
         }
 
         if (existing != null) {
             existing.setTransform(new rocky.ui.timeline.ClipTransform(clip.getTransform()));
         } else {
-            clip.getTimeKeyframes().add(new TimelineKeyframe(
+            // Performance: Use addKeyframe to ensure sorting is only done once
+            clip.addKeyframe(new TimelineKeyframe(
                     localPlayheadFrame, localPlayheadFrame, new rocky.ui.timeline.ClipTransform(clip.getTransform())));
         }
 
@@ -345,8 +348,9 @@ public class VisualCanvas extends JPanel {
         if (pool != null) {
             rocky.core.media.MediaSource source = pool.getSource(clip.getMediaSourceId());
             if (source != null) {
-                // For preview, we use frame 0 or current project frame (simulated as 0 for now)
-                BufferedImage img = source.getFrame(0);
+                // For preview, use the actual source frame at current playhead
+                long sourceFrame = clip.getSourceFrameAt(localPlayheadFrame);
+                BufferedImage img = source.getFrame(sourceFrame);
                 if (img != null) {
                     g2.drawImage(img, (int) (-w / 2), (int) (-h / 2), (int) w, (int) h, null);
                 }
