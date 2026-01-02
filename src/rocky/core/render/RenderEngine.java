@@ -109,10 +109,10 @@ public class RenderEngine {
 
     private void renderAudioToWav(File wavFile, long totalFrames, rocky.ui.timeline.ProjectProperties props) throws Exception {
         int sampleRate = props.getAudioSampleRate();
-        double fps = props.getFPS();
+        double fps = 30.0; // Standardized
         int channels = props.getAudioChannels();
         int framesPerProjectFrame = (int)(sampleRate / fps);
-        javax.sound.sampled.AudioFormat format = new javax.sound.sampled.AudioFormat(sampleRate, 16, channels, true, true);
+        javax.sound.sampled.AudioFormat format = new javax.sound.sampled.AudioFormat(sampleRate, 16, channels, true, false);
         
         long totalSamples = totalFrames * framesPerProjectFrame;
         java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
@@ -125,8 +125,8 @@ public class RenderEngine {
                 else if (val < -1.0f) val = -1.0f;
                 
                 short s = (short) (val * 32767);
-                baos.write((byte) (s >> 8));
                 baos.write((byte) (s & 0xFF));
+                baos.write((byte) (s >> 8));
             }
         }
         
@@ -141,7 +141,7 @@ public class RenderEngine {
         java.util.List<rocky.ui.timeline.TimelineClip> allClips = timeline.getClips();
         rocky.ui.timeline.ProjectProperties props = timeline.getProjectProperties();
         int sampleRate = props.getAudioSampleRate();
-        double fps = props.getFPS();
+        double fps = 30.0; // Standardized
         int channels = props.getAudioChannels();
         int samplesPerFrame = (int)((sampleRate / fps) * channels);
         float[] mixedBuffer = new float[samplesPerFrame];
