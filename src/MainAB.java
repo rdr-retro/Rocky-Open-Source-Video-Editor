@@ -188,6 +188,14 @@ public class MainAB {
 
             // Navigation Panel (Left Side of Visualizer)
             NavigationPanel navPanel = new NavigationPanel();
+            navPanel.setProjectProperties(projectProps, () -> {
+                // Refresh everything when a template is clicked
+                visualizer.updateProperties(projectProps);
+                frameServer.setProperties(projectProps);
+                frameServer.processFrame(timeline.getPlayheadTime(), true);
+                timeline.repaint();
+                ruler.repaint();
+            });
             navPanel.setMinimumSize(new Dimension(200, 0));
             navPanel.setPreferredSize(new Dimension(350, 0));
 
