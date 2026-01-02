@@ -128,6 +128,20 @@ public class FrameServer {
         return pool;
     }
 
+    /**
+     * Invalidates the frame cache. Should be called when timeline structure changes
+     * (clips moved, added, or deleted) to prevent ghost images.
+     */
+    public void invalidateCache() {
+        // Return all cached frames to the pool
+        for (BufferedImage img : frameCache.values()) {
+            if (img != null && img != currentVisibleBuffer) {
+                returnCanvasToPool(img);
+            }
+        }
+        frameCache.clear();
+    }
+
     public void processFrame(double timeInSeconds) {
         processFrame(timeInSeconds, false);
     }

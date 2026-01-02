@@ -134,6 +134,10 @@ public class MainAB {
 
                 @Override
                 public void onTimelineUpdated() {
+                    // Invalidate cache to prevent ghost images when clips are moved/deleted
+                    frameServer.invalidateCache();
+                    frameServer.processFrame(timeline.getPlayheadTime(), true);
+                    
                     ruler.repaint();
                     long visibleStart = (long) (timeline.getVisibleStartTime() * 1000);
                     long visibleDuration = (long) (timeline.getVisibleDuration() * 1000);
