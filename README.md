@@ -88,17 +88,26 @@ Rocky aprovecha la potencia de FFmpeg integrado a través de JavaCV para ofrecer
 - `rocky.ui.timeline`: Implementación Swing de la línea de tiempo, interacción de ratón y renderizado de clips.
 - `rocky.ui.viewer`: Panel de visualización con escalado afín y lógica de previsualización.
 
-### Compilación para Desarrolladores
-El proyecto incluye scripts optimizados para una compilación rápida:
+### Compilación para Desarrolladores (Linux / macOS)
+El proyecto incluye scripts optimizados para una compilación rápida. Si usas Linux o macOS, asegúrate de otorgar permisos de ejecución por única vez:
+
 ```bash
-# Otorgar permisos si es necesario
-chmod +x compile.sh run.sh
+# Otorgar permisos de ejecución
+chmod +x compile.sh
+chmod +x run.sh
 
 # Compilar proyecto completo
 ./compile.sh
 
 # Ejecutar el editor
 ./run.sh
+```
+
+### Compilación en Windows
+Simplemente ejecuta los archivos `.bat`:
+```cmd
+compile.bat
+run.bat
 ```
 
 ---
