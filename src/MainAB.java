@@ -128,6 +128,7 @@ public class MainAB {
                 @Override
                 public void onTimeUpdate(double time, long frame, String timecode, boolean force) {
                     sidebar.setTimecode(timecode);
+                    visualizer.setFrameNumber(frame);
                     frameServer.processFrame(time, force);
                     audioServer.processAudio(frame);
                 }
@@ -262,9 +263,21 @@ public class MainAB {
                     
                     // Force components to acknowledge new settings
                     visualizer.updateProperties(projectProps);
-                    frameServer.setProperties(projectProps); // Re-set just in case
-                    frameServer.processFrame(timeline.getPlayheadTime(), true);
+                    frameServer.setProperties(projectProps);
                     
+                    // Re-init decoders with new scaling (improves performance for 4K)
+                    double scale = projectProps.getPreviewScale();
+                    // VEGAS PROXY MODEL: Cap scale at 0.25 (1/4) if Proxy Mode is enabled
+                    if (projectProps.isProxyModeEnabled() && scale > 0.25) {
+                        scale = 0.25;
+                    }
+                    
+                    for (rocky.core.media.MediaSource source : mediaPool.getAllSources().values()) {
+                        source.reinitDecoder(scale);
+                    }
+                    frameServer.invalidateCache();
+                    
+                    frameServer.processFrame(timeline.getPlayheadTime(), true);
                     timeline.repaint();
                 }
             });

@@ -24,6 +24,7 @@ public class VisualizerPanel extends JPanel {
     private JPanel videoArea;
     private JLabel frameDisplayLabel;
     private BufferedImage currentFrame;
+    private long bluelineFrame = 0;
     private Runnable onPlay;
     private Runnable onPause;
     private Runnable onStop;
@@ -56,6 +57,10 @@ public class VisualizerPanel extends JPanel {
                     int y = (panelH - drawH) / 2;
                     
                     g2d.drawImage(currentFrame, x, y, drawW, drawH, null);
+                    
+                    // Update display labels to show actual current state
+                    displayVal.setText(drawW + "x" + drawH + "x32");
+                    frameVal.setText(String.valueOf(bluelineFrame)); 
                 }
             }
         };
@@ -140,6 +145,11 @@ public class VisualizerPanel extends JPanel {
 
     public void updateFrame(BufferedImage img) {
         this.currentFrame = img;
+        videoArea.repaint();
+    }
+
+    public void setFrameNumber(long frame) {
+        this.bluelineFrame = frame;
         videoArea.repaint();
     }
 

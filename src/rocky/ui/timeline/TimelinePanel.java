@@ -280,8 +280,8 @@ public class TimelinePanel extends JPanel {
                                 int headerH = 20;
                                 int bodyTopY = currentY + headerH;
 
-                                // FX label hover
-                                if (mouseY < currentY + 20 && e.getX() >= clipX + clipW - 30
+                                // FX / Proxy labels hover
+                                if (mouseY < currentY + 20 && e.getX() >= clipX + clipW - 60
                                         && e.getX() <= clipX + clipW) {
                                     setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
                                     cursorSet = true;
@@ -360,15 +360,41 @@ public class TimelinePanel extends JPanel {
                             if (mouseY >= currentY && mouseY < currentY + trackH) {
                                 // REMOVED: Immediate pushState here (we'll push on mouseReleased if something changed)
 
-                                // Check for "fx" label click (top-right of clip header)
-                                if (mouseY < currentY + 20 && mouseX >= clipX + clipW - 30 && mouseX <= clipX + clipW) {
-                                    PropertiesWindow pw = new PropertiesWindow(TimelinePanel.this, projectProps, clip,
-                                            mediaPool, () -> {
+                                // Check for labels click
+                                if (mouseY < currentY + 20 && mouseX >= clipX + clipW - 60 && mouseX <= clipX + clipW) {
+                                    if (mouseX >= clipX + clipW - 30) {
+                                        // FX Button
+                                        PropertiesWindow pw = new PropertiesWindow(TimelinePanel.this, projectProps, clip,
+                                                mediaPool, () -> {
+                                                    updatePlayheadFromFrame(getPlayheadFrame(), true);
+                                                }, historyManager);
+                                        if (timeListener != null)
+                                            timeListener.onTimelineUpdated();
+                                        pw.setVisible(true);
+                                    } else {
+                                        // Proxy (px) Button
+                                        MediaSource source = mediaPool.getSource(clip.getMediaSourceId());
+                                        if (source != null) {
+                                            if (source.getProxyFilePath() != null) {
+                                                // Toggle proxy
+                                                source.setProxyUsed(!source.isProxyActive());
+                                                repaint();
                                                 updatePlayheadFromFrame(getPlayheadFrame(), true);
-                                            }, historyManager);
-                                    if (timeListener != null)
-                                        timeListener.onTimelineUpdated();
-                                    pw.setVisible(true);
+                                            } else if (!source.isGeneratingProxy()) {
+                                                source.setGeneratingProxy(true);
+                                                rocky.core.media.ProxyGenerator.generateProxy(new java.io.File(source.getFilePath()), (path) -> {
+                                                    javax.swing.SwingUtilities.invokeLater(() -> {
+                                                        source.setupProxy(path);
+                                                        source.setGeneratingProxy(false);
+                                                        source.setProxyUsed(true);
+                                                        repaint();
+                                                        updatePlayheadFromFrame(getPlayheadFrame(), true);
+                                                    });
+                                                });
+                                                repaint();
+                                            }
+                                        }
+                                    }
                                     return;
                                 }
 
@@ -904,7 +930,7 @@ public class TimelinePanel extends JPanel {
                             if (mediaPool != null) {
                                 rocky.core.media.MediaSource source = mediaPool.getSource(mediaId);
                                 if (source == null) {
-                                    source = new rocky.core.media.MediaSource(mediaId, file.getAbsolutePath());
+                                    source = new rocky.core.media.MediaSource(mediaId, file.getAbsolutePath(), projectProps.getPreviewScale());
                                     mediaPool.addSource(source);
                                 }
 
@@ -1282,12 +1308,39 @@ public class TimelinePanel extends JPanel {
                 int iconH = 14;
                 int iconX = x + w - iconW - 5;
                 if (iconX > x + 5) {
+                    // FX Label
                     g2d.setColor(Color.decode("#1a0b2e"));
                     g2d.fillRoundRect(iconX, trackY + 3, iconW, iconH, 4, 4);
                     g2d.setColor(Color.WHITE);
                     g2d.drawRoundRect(iconX, trackY + 3, iconW, iconH, 4, 4);
                     g2d.setFont(new Font("SansSerif", Font.BOLD, 10));
                     g2d.drawString("fx", iconX + 6, trackY + 14);
+
+                    // Proxy (px) Label
+                    int pxX = iconX - iconW - 5;
+                    if (pxX > x + 5) {
+                        MediaSource source = mediaPool.getSource(clip.getMediaSourceId());
+                        Color pxCol = Color.GRAY;
+                        boolean filled = false;
+
+                        if (source != null) {
+                            if (source.isProxyActive()) {
+                                pxCol = Color.GREEN;
+                                filled = true;
+                            } else if (source.getProxyFilePath() != null) {
+                                pxCol = Color.GREEN;
+                            } else if (source.isGeneratingProxy()) {
+                                pxCol = Color.YELLOW;
+                                filled = true;
+                            }
+                        }
+
+                        g2d.setColor(filled ? pxCol.darker().darker() : Color.decode("#1a0b2e"));
+                        g2d.fillRoundRect(pxX, trackY + 3, iconW, iconH, 4, 4);
+                        g2d.setColor(pxCol);
+                        g2d.drawRoundRect(pxX, trackY + 3, iconW, iconH, 4, 4);
+                        g2d.drawString("px", pxX + 6, trackY + 14);
+                    }
                 }
 
                 int cornerR = 8;

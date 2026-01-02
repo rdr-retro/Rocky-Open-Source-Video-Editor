@@ -8,6 +8,10 @@ Rocky Video Editor es un editor de video gratuito y de codigo abierto diseñado 
 - **Formatos Compatibles**: Acepta la mayoria de formatos populares como MP4, MOV, MP3, WAV y ahora tambien archivos de audio CAF.
 - **Linea de Tiempo Intuitiva**: Arrastra y suelta tus archivos directamente para empezar a editar.
 - **Control Total**: Ajusta la opacidad, realiza cortes precisos y añade efectos de fundido (fade in/out) facilmente.
+- **Motor de Alto Rendimiento**: Sistema inspirado en Sony Vegas con RAM Preview dinámico y calidad adaptativa para una edición fluida incluso en 4K.
+- **Sistema de Proxies "Hard"**: Genera versiones ligeras de tus videos con un solo clic (botón "px") para editar sin lag, manteniendo la máxima calidad en el render final.
+- **Sincronización de Audio Perfecta**: Motor de audio *jitter-aware* que garantiza una alineación perfecta entre audio y vídeo en exportaciones largas.
+- **Gestión de Color ACES**: Previsualización con gestión de color profesional para un look cinematográfico instantáneo.
 - **Animaciones**: Sistema de fotogramas clave (keyframes) para animar tus clips.
 - **Previsualizacion en Tiempo Real**: Reproductor integrado para ver tus cambios al instante.
 

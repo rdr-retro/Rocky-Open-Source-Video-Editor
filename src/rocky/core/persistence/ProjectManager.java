@@ -177,7 +177,7 @@ public class ProjectManager {
                 String[] data = line.substring(6).split("\\|");
                 if (data.length >= 2) {
                     if (!pool.getAllSources().containsKey(data[0])) {
-                        pool.addSource(new MediaSource(data[0], data[1]));
+                        pool.addSource(new MediaSource(data[0], data[1], props.getPreviewScale()));
                     }
                 }
             } else if (line.startsWith("CLIP:")) {

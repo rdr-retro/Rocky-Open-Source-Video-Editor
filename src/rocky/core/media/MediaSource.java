@@ -22,9 +22,15 @@ public class MediaSource {
     private boolean isAudio;
     
     // Performance Optimization for GIFs and short animations
-    private List<BufferedImage> gifFrameCache;
+    private java.util.List<java.awt.image.BufferedImage> gifFrameCache;
     private long currentCacheBytes = 0;
     private final long MAX_CACHE_BYTES = 200 * 1024 * 1024; // 200 MB limit per source
+    
+    // Proxy support (Dual-stream architecture)
+    private String proxyFilePath;
+    private VideoDecoder proxyDecoder;
+    private boolean proxyUsed = false;
+    private boolean generatingProxy = false;
 
     private final java.util.LinkedHashMap<Long, BufferedImage> lruFrameCache = new java.util.LinkedHashMap<Long, BufferedImage>(32, 0.75f, true) {
         @Override
@@ -40,7 +46,7 @@ public class MediaSource {
         }
     };
 
-    public MediaSource(String id, String filePath) {
+    public MediaSource(String id, String filePath, double previewScale) {
         this.id = id;
         this.filePath = filePath;
         
@@ -56,11 +62,16 @@ public class MediaSource {
                        lower.endsWith(".caf");
         
         if (isVideo) {
-            this.videoDecoder = new VideoDecoder(new File(filePath), 1920, 1080);
+            this.videoDecoder = new VideoDecoder(new File(filePath), -1, -1);
+            double scale = previewScale;
+            // Native Proxy cap for initial load if we had access to props (but we don't here easily)
+            // Strategy: MediaSource is usually created from TimelinePanel or ProjectManager which passes props.getPreviewScale()
+            // We trust the caller but we can add an extra safety check if needed.
+            this.videoDecoder.setScaleFactor(scale);
             if (this.videoDecoder.init()) {
                 this.totalFrames = this.videoDecoder.getTotalFrames();
-                this.width = 1920; 
-                this.height = 1080;
+                this.width = this.videoDecoder.getWidth(); 
+                this.height = this.videoDecoder.getHeight();
                 
                 // If it's a GIF, cache all frames to memory (if it fits in a reasonable budget)
                 // Limit: 200 frames AND total pixels < 200MB (approx 50MP)
@@ -143,7 +154,68 @@ public class MediaSource {
         return dest;
     }
 
+    public void reinitDecoder(double scale) {
+        if (!isVideo) return;
+        
+        System.out.println("[MediaSource] Re-initializing decoder for " + id + " with scale " + scale);
+        
+        if (videoDecoder != null) {
+            videoDecoder.close();
+        }
+        if (proxyDecoder != null) {
+            proxyDecoder.close();
+            proxyDecoder = null;
+        }
+        
+        synchronized(lruFrameCache) {
+            lruFrameCache.clear();
+            currentCacheBytes = 0;
+        }
+        
+        this.videoDecoder = new VideoDecoder(new File(filePath), -1, -1);
+        this.videoDecoder.setScaleFactor(scale);
+        if (this.videoDecoder.init()) {
+            this.width = this.videoDecoder.getWidth();
+            this.height = this.videoDecoder.getHeight();
+        }
+
+        // Re-load proxy if it was active
+        if (proxyFilePath != null) {
+            setupProxy(proxyFilePath);
+        }
+    }
+
+    public void setupProxy(String path) {
+        this.proxyFilePath = path;
+        if (proxyDecoder != null) proxyDecoder.close();
+        
+        this.proxyDecoder = new VideoDecoder(new File(path), -1, -1);
+        // Usually proxies are already low-res, so scaleFactor 1.0 is fine
+        this.proxyDecoder.setScaleFactor(1.0); 
+        if (this.proxyDecoder.init()) {
+            System.out.println("[MediaSource] Proxy decoder initialized: " + path);
+        }
+    }
+
+    public void setProxyUsed(boolean used) {
+        this.proxyUsed = used;
+        // Clear cache when switching modes to prevent visual mixed-resolution artifacts
+        synchronized(lruFrameCache) {
+            lruFrameCache.clear();
+            currentCacheBytes = 0;
+        }
+    }
+
+    public boolean isProxyActive() { return proxyUsed && proxyDecoder != null; }
+    public String getProxyFilePath() { return proxyFilePath; }
+    public boolean isGeneratingProxy() { return generatingProxy; }
+    public void setGeneratingProxy(boolean b) { this.generatingProxy = b; }
+
     public BufferedImage getFrame(long index) {
+        return getFrame(index, false);
+    }
+
+    public BufferedImage getFrame(long index, boolean forceOriginal) {
         if (gifFrameCache != null && !gifFrameCache.isEmpty()) {
             return gifFrameCache.get((int)(index % gifFrameCache.size()));
         }
@@ -164,7 +236,11 @@ public class MediaSource {
 
             BufferedImage frame;
             synchronized(videoDecoder) {
-                frame = videoDecoder.getFrame(finalIndex);
+                if (!forceOriginal && proxyUsed && proxyDecoder != null) {
+                    frame = proxyDecoder.getFrame(finalIndex);
+                } else {
+                    frame = videoDecoder.getFrame(finalIndex);
+                }
             }
 
             if (frame != null) {

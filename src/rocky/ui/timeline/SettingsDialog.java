@@ -15,7 +15,8 @@ public class SettingsDialog extends JDialog {
     private JComboBox<String> templateCombo, fieldOrderCombo, pixelAspectCombo, fpsCombo, previewResCombo, qualityComboVisor;
     private JComboBox<String> pixelFormatCombo, gammaCombo, qualityCombo, blurTypeCombo, deinterlaceCombo, resampleCombo, acesCombo;
     private JTextField widthField, heightField, renderFolderField;
-    private JCheckBox out360Check, adjustSourceCheck, startDefaultCheck;
+    private JCheckBox out360Check, adjustSourceCheck, startDefaultCheck, proxyModeCheck, autoDraftCheck;
+    private JSlider ramCacheSlider;
     private boolean approved = false;
 
     public SettingsDialog(Frame parent, ProjectProperties props) {
@@ -148,7 +149,7 @@ public class SettingsDialog extends JDialog {
         p.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.insets = new Insets(10, 5, 10, 5);
         gbc.anchor = GridBagConstraints.WEST;
 
         gbc.gridx = 0; gbc.gridy = 0;
@@ -176,8 +177,34 @@ public class SettingsDialog extends JDialog {
         qualityComboVisor = createStyledCombo(qualityOptions, props.getPreviewQuality());
         p.add(qualityComboVisor, gbc);
 
-        // Add glue to push everything up
-        gbc.gridy = 2; gbc.weighty = 1.0;
+        // --- NEW VEGAS PERFORMANCE OPTIONS ---
+        gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 2;
+        p.add(new JSeparator(), gbc);
+        gbc.gridwidth = 1;
+
+        gbc.gridx = 0; gbc.gridy = 3;
+        p.add(createLabel("Límite de RAM para previsualización (MB):"), gbc);
+        gbc.gridx = 1;
+        ramCacheSlider = new JSlider(128, 4096, props.getRamCacheLimitMB());
+        ramCacheSlider.setOpaque(false);
+        ramCacheSlider.setMajorTickSpacing(1024);
+        ramCacheSlider.setPaintTicks(true);
+        p.add(ramCacheSlider, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 4;
+        proxyModeCheck = new JCheckBox("Modo Proxy automático (Baja resolución)");
+        proxyModeCheck.setOpaque(false); proxyModeCheck.setForeground(TEXT_COLOR);
+        proxyModeCheck.setSelected(props.isProxyModeEnabled());
+        p.add(proxyModeCheck, gbc);
+
+        gbc.gridx = 1;
+        autoDraftCheck = new JCheckBox("Calidad adaptativa (Auto-Draft)");
+        autoDraftCheck.setOpaque(false); autoDraftCheck.setForeground(TEXT_COLOR);
+        autoDraftCheck.setSelected(props.isAutoDraftQualityEnabled());
+        p.add(autoDraftCheck, gbc);
+
+        // Add glue
+        gbc.gridy = 5; gbc.weighty = 1.0;
         p.add(Box.createVerticalGlue(), gbc);
 
         return p;
@@ -234,5 +261,10 @@ public class SettingsDialog extends JDialog {
         props.setRenderingQuality((String) qualityCombo.getSelectedItem());
         props.setDeinterlaceMethod((String) deinterlaceCombo.getSelectedItem());
         props.setResampleMode((String) resampleCombo.getSelectedItem());
+        
+        // Vegas model performance fields
+        props.setRamCacheLimitMB(ramCacheSlider.getValue());
+        props.setProxyModeEnabled(proxyModeCheck.isSelected());
+        props.setAutoDraftQualityEnabled(autoDraftCheck.isSelected());
     }
 }

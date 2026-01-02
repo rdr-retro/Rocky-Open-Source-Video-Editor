@@ -23,9 +23,12 @@ public class FrameServer {
     private BufferedImage currentVisibleBuffer = null;
     private long lastRequestTime = 0;
     private double currentScrubbingVelocity = 0; // frames per ms
-    private final int MAX_CACHE_SIZE = 60;
     private final int MAX_POOL_SIZE = 10;
     private long lastSubmittedFrame = -1;
+    
+    // Vegas Adaptive Quality
+    private double currentAdaptiveScale = 1.0;
+    private long lastFrameRenderTime = 0;
 
     public FrameServer(TimelinePanel timeline, MediaPool pool, rocky.ui.viewer.VisualizerPanel visualizer) {
         this.timeline = timeline;
@@ -37,6 +40,19 @@ public class FrameServer {
             cores, cores, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
             new java.util.concurrent.PriorityBlockingQueue<Runnable>()
         );
+    }
+
+    private int getRamCacheLimitFrames() {
+        if (properties == null) return 60;
+        int mbLimit = properties.getRamCacheLimitMB();
+        int width = properties.getPreviewWidth();
+        int height = properties.getPreviewHeight();
+        // Bytes per frame = width * height * 4 (RGBA)
+        long bytesPerFrame = (long)width * height * 4;
+        if (bytesPerFrame == 0) return 60;
+        
+        long totalBytes = (long)mbLimit * 1024 * 1024;
+        return (int) (totalBytes / bytesPerFrame);
     }
 
     private class RenderTask implements Runnable, Comparable<RenderTask> {
@@ -133,13 +149,30 @@ public class FrameServer {
      * (clips moved, added, or deleted) to prevent ghost images.
      */
     public void invalidateCache() {
-        // Return all cached frames to the pool
+        // Clear the current visible frame immediately to prevent ghost images
+        long currentFrame = latestTargetFrame.get();
+        if (currentFrame >= 0) {
+            BufferedImage removed = frameCache.remove(currentFrame);
+            if (removed != null && removed != currentVisibleBuffer) {
+                returnCanvasToPool(removed);
+            }
+        }
+        
+        // Clear the entire cache for a clean slate
         for (BufferedImage img : frameCache.values()) {
             if (img != null && img != currentVisibleBuffer) {
                 returnCanvasToPool(img);
             }
         }
         frameCache.clear();
+        
+        // Force the current visible buffer to be black/empty to avoid showing stale content
+        if (currentVisibleBuffer != null) {
+            java.awt.Graphics2D g = currentVisibleBuffer.createGraphics();
+            g.setColor(java.awt.Color.BLACK);
+            g.fillRect(0, 0, currentVisibleBuffer.getWidth(), currentVisibleBuffer.getHeight());
+            g.dispose();
+        }
     }
 
     public void processFrame(double timeInSeconds) {
@@ -184,12 +217,13 @@ public class FrameServer {
     }
 
     private void manageCacheSize(long currentFrame) {
-        if (frameCache.size() > MAX_CACHE_SIZE) {
+        int maxFrames = getRamCacheLimitFrames();
+        if (frameCache.size() > maxFrames) {
             // Remove frames far away from current
             java.util.Iterator<java.util.Map.Entry<Long, BufferedImage>> it = frameCache.entrySet().iterator();
             while (it.hasNext()) {
                 java.util.Map.Entry<Long, BufferedImage> entry = it.next();
-                if (Math.abs(entry.getKey() - currentFrame) > MAX_CACHE_SIZE * 2) {
+                if (Math.abs(entry.getKey() - currentFrame) > maxFrames) {
                     // DON'T recycle if it's currently on screen!
                     if (entry.getValue() != currentVisibleBuffer) {
                         returnCanvasToPool(entry.getValue());
@@ -233,8 +267,15 @@ public class FrameServer {
         // Quality Presets
         String quality = properties.getPreviewQuality(); // Draft, Preview, Good, Best
         
+        long startTime = System.nanoTime();
+
         boolean isScrubbingFast = currentScrubbingVelocity > 0.5; // > 0.5 frames/ms is approx > 15 fps movement
         boolean adaptiveLowQuality = isScrubbingFast;
+        
+        // Dynamic Adaptive Quality (Auto-Draft)
+        if (properties.isAutoDraftQualityEnabled() && lastFrameRenderTime > 40_000_000) { // > 40ms per frame
+            adaptiveLowQuality = true;
+        }
 
         if ((quality.equals("Best") || quality.equals("Good")) && !adaptiveLowQuality) {
             g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
@@ -271,7 +312,7 @@ public class FrameServer {
 
             long frameInClip = targetFrame - clip.getStartFrame();
             long sourceFrame = clip.getSourceFrameAt(frameInClip);
-            BufferedImage asset = source.getFrame(sourceFrame);
+            BufferedImage asset = source.getFrame(sourceFrame, forceFullRes);
             if (asset == null)
                 continue;
 
@@ -281,9 +322,12 @@ public class FrameServer {
         g2.dispose();
         
         // --- ACES COLOR MANAGEMENT ---
-        if (properties.isAcesEnabled() && !isScrubbingFast) {
+        boolean highQuality = quality.equals("Best") || quality.equals("Good");
+        if (properties.isAcesEnabled() && !isScrubbingFast && highQuality) {
             ColorManagement.applyAces(canvas);
         }
+        
+        lastFrameRenderTime = System.nanoTime() - startTime;
         
         return canvas;
     }

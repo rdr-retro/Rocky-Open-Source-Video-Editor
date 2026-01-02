@@ -24,12 +24,37 @@ public class ProjectProperties {
     private boolean out360 = false;
     private boolean acesEnabled = false;
     private String previewQuality = "Preview"; // Draft, Preview, Good, Best
+    
+    // performance / Vegas model fields
+    private int ramCacheLimitMB = 512;
+    private boolean proxyModeEnabled = false;
+    private boolean autoDraftQualityEnabled = true;
+
+    public int getRamCacheLimitMB() { return ramCacheLimitMB; }
+    public void setRamCacheLimitMB(int limit) { this.ramCacheLimitMB = limit; }
+
+    public boolean isProxyModeEnabled() { return proxyModeEnabled; }
+    public void setProxyModeEnabled(boolean b) { this.proxyModeEnabled = b; }
+
+    public boolean isAutoDraftQualityEnabled() { return autoDraftQualityEnabled; }
+    public void setAutoDraftQualityEnabled(boolean b) { this.autoDraftQualityEnabled = b; }
 
     public boolean isAcesEnabled() { return acesEnabled; }
     public void setAcesEnabled(boolean b) { this.acesEnabled = b; }
 
     public String getPreviewQuality() { return previewQuality; }
     public void setPreviewQuality(String q) { this.previewQuality = q; }
+
+    public double getPreviewScale() {
+        if (previewQuality == null) return 0.5;
+        switch (previewQuality) {
+            case "Draft": return 0.125; // 1/8 for extreme speed
+            case "Preview": return 0.25; // 1/4
+            case "Good": return 0.5;    // 1/2
+            case "Best":
+            default: return 1.0;         // Full
+        }
+    }
 
     public String getTemplate() { return template; }
     public void setTemplate(String t) { this.template = t; }
