@@ -54,10 +54,18 @@ public class PanCropEditor extends JPanel {
 
         timeline.setTimelineListener(new rocky.ui.keyframes.KeyframeTimelinePanel.TimelineListener() {
             @Override
-            public void onPlayheadChanged(long frame) {
-                canvas.setPlayheadFrame(frame);
+            public void onPlayheadChanged(long clipLocalFrame) {
+                // Convert clip-local frame to global timeline frame
+                long globalFrame = clip.getStartFrame() + clipLocalFrame;
+                
+                // Update main timeline playhead
+                if (mainTimeline != null) {
+                    mainTimeline.updatePlayheadFromFrame(globalFrame, true);
+                }
+                
+                canvas.setPlayheadFrame(globalFrame);
                 // Update clip's working transform to the interpolated one for preview
-                clip.setTransform(clip.getInterpolatedTransform(frame));
+                clip.setTransform(clip.getInterpolatedTransform(clipLocalFrame));
                 if (onUpdate != null)
                     onUpdate.run();
             }
@@ -68,8 +76,15 @@ public class PanCropEditor extends JPanel {
             mainTimeline.addTimelineListener(new rocky.ui.timeline.TimelinePanel.TimelineListener() {
                 @Override
                 public void onTimeUpdate(double time, long frame, String timecode, boolean force) {
+                    // Convert global timeline frame to clip-local frame
+                    long clipLocalFrame = frame - clip.getStartFrame();
+                    
+                    // Clamp to clip boundaries
+                    if (clipLocalFrame < 0) clipLocalFrame = 0;
+                    if (clipLocalFrame > clip.getDurationFrames()) clipLocalFrame = clip.getDurationFrames();
+                    
                     canvas.setPlayheadFrame(frame);
-                    timeline.setPlayheadFrame(frame);
+                    timeline.setPlayheadFrame(clipLocalFrame);
                     repaint();
                 }
 
@@ -79,7 +94,7 @@ public class PanCropEditor extends JPanel {
         }
 
         JSplitPane verticalSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, middleSection, timeline);
-        verticalSplit.setDividerLocation(350);
+        verticalSplit.setDividerLocation(520);
         verticalSplit.setDividerSize(5);
         verticalSplit.setBorder(null);
 

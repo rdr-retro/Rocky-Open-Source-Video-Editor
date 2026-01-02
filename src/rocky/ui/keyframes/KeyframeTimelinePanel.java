@@ -50,7 +50,7 @@ public class KeyframeTimelinePanel extends JPanel {
     public KeyframeTimelinePanel(TimelineClip clip) {
         this.clip = clip;
         setBackground(BG_COLOR_DARK);
-        setPreferredSize(new Dimension(800, 220));
+        setPreferredSize(new Dimension(800, 150));
 
         MouseAdapter ma = new MouseAdapter() {
             @Override
