@@ -128,7 +128,7 @@ public class TimelinePanel extends JPanel {
         synchronized (clips) {
             clips.add(clip);
         }
-        
+
         // --- AUTO PROXY ON INSERT ---
         MediaSource source = mediaPool.getSource(clip.getMediaSourceId());
         if (source != null && source.isVideo()) {
@@ -138,15 +138,16 @@ public class TimelinePanel extends JPanel {
             } else if (!source.isGeneratingProxy()) {
                 // Trigger generation
                 source.setGeneratingProxy(true);
-                rocky.core.media.ProxyGenerator.generateProxy(new java.io.File(source.getFilePath()), (path) -> {
-                    javax.swing.SwingUtilities.invokeLater(() -> {
-                        source.setupProxy(path);
-                        source.setGeneratingProxy(false);
-                        source.setProxyUsed(true);
-                        repaint();
-                        updatePlayheadFromFrame(getPlayheadFrame(), true);
-                    });
-                });
+                rocky.core.media.ProxyGenerator.generateProxy(new java.io.File(source.getFilePath()),
+                        projectProps.getProxyHeight(), projectProps.getProxyBitrate(), (path) -> {
+                            javax.swing.SwingUtilities.invokeLater(() -> {
+                                source.setupProxy(path);
+                                source.setGeneratingProxy(false);
+                                source.setProxyUsed(true);
+                                repaint();
+                                updatePlayheadFromFrame(getPlayheadFrame(), true);
+                            });
+                        });
             }
         }
 
@@ -263,12 +264,13 @@ public class TimelinePanel extends JPanel {
     public TimelinePanel() {
         setBackground(BG_COLOR);
         setFocusable(true);
-        
+
         // Debounce PeakManager repaints (max 30 FPS for UI updates)
         repaintTimer = new Timer(33, e -> repaint());
         repaintTimer.setRepeats(false);
         PeakManager.getInstance().addUpdateListener(() -> {
-            if (!repaintTimer.isRunning()) repaintTimer.start();
+            if (!repaintTimer.isRunning())
+                repaintTimer.start();
         });
 
         MouseAdapter interactionHandler = new MouseAdapter() {
@@ -314,8 +316,10 @@ public class TimelinePanel extends JPanel {
                                     setCursor(Cursor.getPredefinedCursor(Cursor.E_RESIZE_CURSOR));
                                     cursorSet = true;
                                 } else {
-                                    int opacityY1 = bodyTopY + (int) ((1.0 - clip.getStartOpacity()) * (trackH - headerH - 2));
-                                    int opacityY2 = bodyTopY + (int) ((1.0 - clip.getEndOpacity()) * (trackH - headerH - 2));
+                                    int opacityY1 = bodyTopY
+                                            + (int) ((1.0 - clip.getStartOpacity()) * (trackH - headerH - 2));
+                                    int opacityY2 = bodyTopY
+                                            + (int) ((1.0 - clip.getEndOpacity()) * (trackH - headerH - 2));
 
                                     // Hit detection for handles at TOP EDGE (bodyTopY)
                                     if (Math.abs(mouseY - bodyTopY) <= 10) {
@@ -330,15 +334,16 @@ public class TimelinePanel extends JPanel {
                                             cursorSet = true;
                                         }
                                         // Central Opacity Handle (Center of the ramp)
-                                        else if (e.getX() > clipX + (clipW / 2) - 15 && e.getX() < clipX + (clipW / 2) + 15) {
+                                        else if (e.getX() > clipX + (clipW / 2) - 15
+                                                && e.getX() < clipX + (clipW / 2) + 15) {
                                             setCursor(Cursor.getPredefinedCursor(Cursor.N_RESIZE_CURSOR));
                                             cursorSet = true;
                                         }
                                     }
                                     // Opacity line in general (still detectable by ramp position)
                                     else if (e.getX() > clipX && e.getX() < clipX + clipW) {
-                                        double progress = (double)(e.getX() - clipX) / clipW;
-                                        int lineY = (int)(opacityY1 + progress * (opacityY2 - opacityY1));
+                                        double progress = (double) (e.getX() - clipX) / clipW;
+                                        int lineY = (int) (opacityY1 + progress * (opacityY2 - opacityY1));
                                         if (Math.abs(mouseY - lineY) <= 8) {
                                             setCursor(Cursor.getPredefinedCursor(Cursor.N_RESIZE_CURSOR));
                                             cursorSet = true;
@@ -380,13 +385,15 @@ public class TimelinePanel extends JPanel {
                             int bodyTopY = currentY + headerH;
 
                             if (mouseY >= currentY && mouseY < currentY + trackH) {
-                                // REMOVED: Immediate pushState here (we'll push on mouseReleased if something changed)
+                                // REMOVED: Immediate pushState here (we'll push on mouseReleased if something
+                                // changed)
 
                                 // Check for labels click
                                 if (mouseY < currentY + 20 && mouseX >= clipX + clipW - 60 && mouseX <= clipX + clipW) {
                                     if (mouseX >= clipX + clipW - 30) {
                                         // FX Button
-                                        PropertiesWindow pw = new PropertiesWindow(TimelinePanel.this, projectProps, clip,
+                                        PropertiesWindow pw = new PropertiesWindow(TimelinePanel.this, projectProps,
+                                                clip,
                                                 mediaPool, () -> {
                                                     updatePlayheadFromFrame(getPlayheadFrame(), true);
                                                 }, historyManager);
@@ -404,15 +411,18 @@ public class TimelinePanel extends JPanel {
                                                 updatePlayheadFromFrame(getPlayheadFrame(), true);
                                             } else if (!source.isGeneratingProxy()) {
                                                 source.setGeneratingProxy(true);
-                                                rocky.core.media.ProxyGenerator.generateProxy(new java.io.File(source.getFilePath()), (path) -> {
-                                                    javax.swing.SwingUtilities.invokeLater(() -> {
-                                                        source.setupProxy(path);
-                                                        source.setGeneratingProxy(false);
-                                                        source.setProxyUsed(true);
-                                                        repaint();
-                                                        updatePlayheadFromFrame(getPlayheadFrame(), true);
-                                                    });
-                                                });
+                                                rocky.core.media.ProxyGenerator.generateProxy(
+                                                        new java.io.File(source.getFilePath()),
+                                                        projectProps.getProxyHeight(), projectProps.getProxyBitrate(),
+                                                        (path) -> {
+                                                            javax.swing.SwingUtilities.invokeLater(() -> {
+                                                                source.setupProxy(path);
+                                                                source.setGeneratingProxy(false);
+                                                                source.setProxyUsed(true);
+                                                                repaint();
+                                                                updatePlayheadFromFrame(getPlayheadFrame(), true);
+                                                            });
+                                                        });
                                                 repaint();
                                             }
                                         }
@@ -472,7 +482,7 @@ public class TimelinePanel extends JPanel {
                         pausePlayback();
                         updatePlayhead(mouseX);
                     }
-                    
+
                     if (e.isPopupTrigger() || SwingUtilities.isRightMouseButton(e)) {
                         showGeneralMenu(e, mouseX, mouseY);
                     }
@@ -532,7 +542,8 @@ public class TimelinePanel extends JPanel {
                             if (currentMouseY >= trackSum && currentMouseY < trackSum + h) {
                                 // Check if track type matches
                                 TrackControlPanel.TrackType newTrackType = sidebar.getTrackType(i);
-                                TrackControlPanel.TrackType oldTrackType = sidebar.getTrackType(activeClip.getTrackIndex());
+                                TrackControlPanel.TrackType oldTrackType = sidebar
+                                        .getTrackType(activeClip.getTrackIndex());
                                 if (newTrackType == oldTrackType) {
                                     activeClip.setTrackIndex(i);
                                 }
@@ -555,7 +566,7 @@ public class TimelinePanel extends JPanel {
                         fireTimelineUpdated();
                     } else if (interactionMode == 6) {
                         // Group Opacity Adjustment
-                        int deltaY = - (e.getY() - interactionStartY);
+                        int deltaY = -(e.getY() - interactionStartY);
                         double deltaOpacity = deltaY / (double) (activeTrackHeight - 20); // 20 is header
                         activeClip.setStartOpacity(originalStartOpacity + deltaOpacity);
                         activeClip.setEndOpacity(originalEndOpacity + deltaOpacity);
@@ -652,7 +663,8 @@ public class TimelinePanel extends JPanel {
                                     }
 
                                     // Check Fade Out Area
-                                    int fadeOutW = (int) (clip.getFadeOutFrames() / (double) getFPS() * pixelsPerSecond);
+                                    int fadeOutW = (int) (clip.getFadeOutFrames() / (double) getFPS()
+                                            * pixelsPerSecond);
                                     if (fadeOutW > 5 && mouseX >= clipX + clipW - fadeOutW && mouseX <= clipX + clipW
                                             && mouseY >= bodyTopY) {
                                         showFadeMenu(e, clip, false);
@@ -697,7 +709,8 @@ public class TimelinePanel extends JPanel {
                 menu.addSeparator();
 
                 long phFrame = blueline.getPlayheadFrame();
-                boolean canSplit = phFrame > clip.getStartFrame() && phFrame < (clip.getStartFrame() + clip.getDurationFrames());
+                boolean canSplit = phFrame > clip.getStartFrame()
+                        && phFrame < (clip.getStartFrame() + clip.getDurationFrames());
                 JMenuItem splitItem = new JMenuItem("Dividir");
                 splitItem.setEnabled(canSplit);
                 splitItem.addActionListener(ev -> {
@@ -720,21 +733,22 @@ public class TimelinePanel extends JPanel {
                 }
 
                 long splitOffset = phFrame - clip.getStartFrame();
-                
+
                 // 1. Create right part
                 TimelineClip rightPart = clip.copy();
                 rightPart.setStartFrame(phFrame);
                 rightPart.setDurationFrames(clip.getDurationFrames() - splitOffset);
                 rightPart.setSourceOffsetFrames(rightPart.getSourceOffsetFrames() + splitOffset);
-                
+
                 // Adjust/Remove fades for split point
                 clip.setFadeOutFrames(0);
                 rightPart.setFadeInFrames(0);
 
                 // Adjust keyframes for right part
-                synchronized(rightPart.getTimeKeyframes()) {
-                    java.util.Iterator<rocky.ui.keyframes.TimelineKeyframe> it = rightPart.getTimeKeyframes().iterator();
-                    while(it.hasNext()) {
+                synchronized (rightPart.getTimeKeyframes()) {
+                    java.util.Iterator<rocky.ui.keyframes.TimelineKeyframe> it = rightPart.getTimeKeyframes()
+                            .iterator();
+                    while (it.hasNext()) {
                         rocky.ui.keyframes.TimelineKeyframe k = it.next();
                         if (k.getClipFrame() < splitOffset) {
                             it.remove();
@@ -746,9 +760,9 @@ public class TimelinePanel extends JPanel {
 
                 // 2. Adjust left part (original clip)
                 clip.setDurationFrames(splitOffset);
-                synchronized(clip.getTimeKeyframes()) {
+                synchronized (clip.getTimeKeyframes()) {
                     java.util.Iterator<rocky.ui.keyframes.TimelineKeyframe> it = clip.getTimeKeyframes().iterator();
-                    while(it.hasNext()) {
+                    while (it.hasNext()) {
                         rocky.ui.keyframes.TimelineKeyframe k = it.next();
                         if (k.getClipFrame() > splitOffset) {
                             it.remove();
@@ -756,7 +770,7 @@ public class TimelinePanel extends JPanel {
                     }
                 }
 
-                synchronized(clips) {
+                synchronized (clips) {
                     clips.add(rightPart);
                 }
 
@@ -768,13 +782,13 @@ public class TimelinePanel extends JPanel {
 
             private void showGeneralMenu(MouseEvent e, int x, int y) {
                 JPopupMenu menu = new JPopupMenu();
-                
+
                 JMenuItem pasteItem = new JMenuItem("Pegar");
                 pasteItem.setEnabled(copiedClip != null);
                 pasteItem.addActionListener(ev -> {
                     if (copiedClip != null) {
                         TimelineClip newClip = copiedClip.copy();
-                        
+
                         // Find track under Y
                         int currentY = 0;
                         int trackIndex = 0;
@@ -786,10 +800,10 @@ public class TimelinePanel extends JPanel {
                             }
                             currentY += h;
                         }
-                        
+
                         newClip.setTrackIndex(trackIndex);
                         newClip.setStartFrame(Math.round(screenToTime(x) * getFPS()));
-                        
+
                         addClip(newClip);
                         if (historyManager != null) {
                             historyManager.pushState(TimelinePanel.this, projectProps, mediaPool);
@@ -797,7 +811,7 @@ public class TimelinePanel extends JPanel {
                     }
                 });
                 menu.add(pasteItem);
-                
+
                 menu.show(e.getComponent(), x, y);
             }
 
@@ -823,7 +837,7 @@ public class TimelinePanel extends JPanel {
                             clip.setFadeInType(type);
                         else
                             clip.setFadeOutType(type);
-                        
+
                         if (historyManager != null) {
                             historyManager.pushState(TimelinePanel.this, projectProps, mediaPool);
                         }
@@ -854,7 +868,8 @@ public class TimelinePanel extends JPanel {
 
                 if (e.getKeyChar() == '+' || e.getKeyCode() == KeyEvent.VK_PLUS || e.getKeyCode() == KeyEvent.VK_ADD) {
                     zoomIn(mouseTime, zoomFactor);
-                } else if (e.getKeyChar() == '-' || e.getKeyCode() == KeyEvent.VK_MINUS || e.getKeyCode() == KeyEvent.VK_SUBTRACT) {
+                } else if (e.getKeyChar() == '-' || e.getKeyCode() == KeyEvent.VK_MINUS
+                        || e.getKeyCode() == KeyEvent.VK_SUBTRACT) {
                     zoomOut(mouseTime, zoomFactor);
                 }
             }
@@ -932,14 +947,14 @@ public class TimelinePanel extends JPanel {
                         // track based on media type
                         if (targetTrackIndex == -1 && sidebar != null) {
                             String lower = name.toLowerCase();
-                            boolean isAudioFile = lower.endsWith(".mp3") || lower.endsWith(".wav") || 
-                                                 lower.endsWith(".aac") || lower.endsWith(".m4a") ||
-                                                 lower.endsWith(".ogg") || lower.endsWith(".flac") ||
-                                                 lower.endsWith(".caf");
-                            
-                            TrackControlPanel.TrackType autoType = isAudioFile ? 
-                                    TrackControlPanel.TrackType.AUDIO : TrackControlPanel.TrackType.VIDEO;
-                                    
+                            boolean isAudioFile = lower.endsWith(".mp3") || lower.endsWith(".wav") ||
+                                    lower.endsWith(".aac") || lower.endsWith(".m4a") ||
+                                    lower.endsWith(".ogg") || lower.endsWith(".flac") ||
+                                    lower.endsWith(".caf");
+
+                            TrackControlPanel.TrackType autoType = isAudioFile ? TrackControlPanel.TrackType.AUDIO
+                                    : TrackControlPanel.TrackType.VIDEO;
+
                             sidebar.addTrack(autoType);
                             targetTrackIndex = sidebar.getTrackCount() - 1;
                         }
@@ -952,13 +967,15 @@ public class TimelinePanel extends JPanel {
                             if (mediaPool != null) {
                                 rocky.core.media.MediaSource source = mediaPool.getSource(mediaId);
                                 if (source == null) {
-                                    source = new rocky.core.media.MediaSource(mediaId, file.getAbsolutePath(), projectProps.getPreviewScale());
+                                    source = new rocky.core.media.MediaSource(mediaId, file.getAbsolutePath(),
+                                            projectProps.getPreviewScale());
                                     mediaPool.addSource(source);
                                 }
 
-                                long duration = (source.getTotalFrames() > 0) ? source.getTotalFrames() : Math.round(5 * getFPS()); // Images
-                                                                                                                   // default
-                                                                                                                   // 5s
+                                long duration = (source.getTotalFrames() > 0) ? source.getTotalFrames()
+                                        : Math.round(5 * getFPS()); // Images
+                                // default
+                                // 5s
                                 TrackControlPanel.TrackType trackType = (sidebar != null)
                                         ? sidebar.getTrackType(targetTrackIndex)
                                         : null;
@@ -997,7 +1014,7 @@ public class TimelinePanel extends JPanel {
 
                                 TimelineClip clip = new TimelineClip(name, startFrame, duration, targetTrackIndex);
                                 clip.setMediaSourceId(mediaId);
-                                    addClip(clip);
+                                addClip(clip);
 
                                 // Rule 3: MP4/Video with audio -> Auto create audio track below
                                 // We check source.hasAudio() which now uses the more reliable AudioDecoder
@@ -1125,16 +1142,17 @@ public class TimelinePanel extends JPanel {
         }
         fireTimelineUpdated();
     }
+
     private long findSnapFrame(long targetFrame, TimelineClip excludeClip) {
         // Dynamic Threshold: proportional to screen distance (e.g. 12 pixels)
         double pixelThreshold = 12.0;
         double thresholdFrames = (pixelThreshold / pixelsPerSecond) * getFPS();
-        
+
         long closestSnap = -1;
         double minDelta = thresholdFrames + 0.0001; // Tiny margin
 
         // Candidate 1: Start 0
-        double delta0 = Math.abs((double)targetFrame - 0);
+        double delta0 = Math.abs((double) targetFrame - 0);
         if (delta0 < minDelta) {
             minDelta = delta0;
             closestSnap = 0;
@@ -1142,7 +1160,7 @@ public class TimelinePanel extends JPanel {
 
         // Candidate 2: Playhead
         long ph = blueline.getPlayheadFrame();
-        double deltaPH = Math.abs((double)targetFrame - ph);
+        double deltaPH = Math.abs((double) targetFrame - ph);
         if (deltaPH < minDelta) {
             minDelta = deltaPH;
             closestSnap = ph;
@@ -1156,7 +1174,7 @@ public class TimelinePanel extends JPanel {
 
                 // Other clip's start
                 long s = clip.getStartFrame();
-                double ds = Math.abs((double)targetFrame - s);
+                double ds = Math.abs((double) targetFrame - s);
                 if (ds < minDelta) {
                     minDelta = ds;
                     closestSnap = s;
@@ -1164,7 +1182,7 @@ public class TimelinePanel extends JPanel {
 
                 // Other clip's end
                 long endIdx = clip.getStartFrame() + clip.getDurationFrames();
-                double de = Math.abs((double)targetFrame - endIdx);
+                double de = Math.abs((double) targetFrame - endIdx);
                 if (de < minDelta) {
                     minDelta = de;
                     closestSnap = endIdx;
@@ -1258,7 +1276,8 @@ public class TimelinePanel extends JPanel {
             currentY += th;
         }
 
-        // Clips - Synchronized copy to prevent flickering/ConcurrentModificationException
+        // Clips - Synchronized copy to prevent
+        // flickering/ConcurrentModificationException
         java.util.List<TimelineClip> snapshot;
         synchronized (clips) {
             snapshot = new java.util.ArrayList<>(clips);
@@ -1484,7 +1503,8 @@ public class TimelinePanel extends JPanel {
         fillPoly.addPoint(x + w, bodyTopY);
 
         // Fill the area ABOVE the curve with stipple pattern
-        if (stipplePaint == null) initStipplePattern();
+        if (stipplePaint == null)
+            initStipplePattern();
         g2d.setPaint(stipplePaint);
         g2d.fillPolygon(fillPoly);
 
@@ -1524,15 +1544,17 @@ public class TimelinePanel extends JPanel {
     private void zoomIn(double anchorTime, double factor) {
         double oldPPS = pixelsPerSecond;
         pixelsPerSecond *= factor;
-        if (pixelsPerSecond > MAX_ZOOM) pixelsPerSecond = MAX_ZOOM;
-        
+        if (pixelsPerSecond > MAX_ZOOM)
+            pixelsPerSecond = MAX_ZOOM;
+
         applyZoomCentering(anchorTime, oldPPS);
     }
 
     private void zoomOut(double anchorTime, double factor) {
         double oldPPS = pixelsPerSecond;
         pixelsPerSecond /= factor;
-        if (pixelsPerSecond < MIN_ZOOM) pixelsPerSecond = MIN_ZOOM;
+        if (pixelsPerSecond < MIN_ZOOM)
+            pixelsPerSecond = MIN_ZOOM;
 
         applyZoomCentering(anchorTime, oldPPS);
     }
@@ -1542,17 +1564,19 @@ public class TimelinePanel extends JPanel {
         // ScreenPos = (time - visibleStart) * oldPPS
         // ScreenPos = (time - newVisibleStart) * newPPS
         // newVisibleStart = time - (ScreenPos / newPPS)
-        
+
         int screenX = (mouseX >= 0) ? mouseX : getWidth() / 2;
         visibleStartTime = anchorTime - (screenX / pixelsPerSecond);
-        if (visibleStartTime < 0) visibleStartTime = 0;
-        
+        if (visibleStartTime < 0)
+            visibleStartTime = 0;
+
         fireTimelineUpdated();
     }
 
     public void fireTimelineUpdated() {
         for (TimelineListener listener : listeners) {
-            listener.onTimeUpdate(getPlayheadTime(), getPlayheadFrame(), blueline.formatTimecode(getPlayheadFrame()), true);
+            listener.onTimeUpdate(getPlayheadTime(), getPlayheadFrame(), blueline.formatTimecode(getPlayheadFrame()),
+                    true);
             listener.onTimelineUpdated();
         }
         repaint();

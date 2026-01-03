@@ -19,13 +19,13 @@ public class AudioServer {
     private SourceDataLine line;
     private final int SAMPLE_RATE = 48000;
     private final int FPS = 30;
-    
+
     private Thread audioThread;
     private boolean running = true;
     private long lastTimelineFrame = -1;
     private long samplesWrittenToLine = 0;
     private AudioClock audioClock;
-    
+
     // Persistent buffers to reduce GC pressure
     private float[] mixedBuffer;
     private byte[] byteBuffer;
@@ -45,12 +45,12 @@ public class AudioServer {
             AudioFormat format = new AudioFormat(SAMPLE_RATE, 16, 2, true, false);
             DataLine.Info info = new DataLine.Info(SourceDataLine.class, format);
             line = (SourceDataLine) AudioSystem.getLine(info);
-            
+
             // 1.0s buffer for maximum stability (Increased from 500ms)
             int bufferSize = (int) (SAMPLE_RATE * 1.0 * format.getFrameSize());
             line.open(format, bufferSize);
             line.start();
-            
+
             this.samplesPerFrame = (SAMPLE_RATE / FPS) * 2;
             this.mixedBuffer = new float[samplesPerFrame];
             this.byteBuffer = new byte[samplesPerFrame * 2];
@@ -67,18 +67,21 @@ public class AudioServer {
                 if (timeline != null && timeline.isPlaying()) {
                     double rate = timeline.getPlaybackRate();
                     long currentPlayhead = timeline.getPlayheadFrame();
-                    
+
                     // If we just started or user jumped (seek)
                     if (processedTimelineFrame == -1 || Math.abs(currentPlayhead - lastTimelineFrame) > 10) {
                         processedTimelineFrame = currentPlayhead;
                         line.flush();
                         audioClock.reset(processedTimelineFrame, line.getLongFramePosition());
                         audioClock.setPlaybackRate(rate, line.getLongFramePosition());
-                        
+
                         // Prime the buffer (Pre-read roughly 5 frames for lower latency)
                         for (int i = 0; i < 5; i++) {
                             processAudioChunk(processedTimelineFrame);
-                            if (rate >= 0) processedTimelineFrame++; else processedTimelineFrame--;
+                            if (rate >= 0)
+                                processedTimelineFrame++;
+                            else
+                                processedTimelineFrame--;
                         }
                     } else if (Math.abs(audioClock.getPlaybackRate() - rate) > 0.01) {
                         // Rate changed but no jump: Just update the clock checkpoint
@@ -88,22 +91,40 @@ public class AudioServer {
                     // Keep the buffer full (Vegas logic: Read Ahead)
                     long deviceFramePos = line.getLongFramePosition();
                     long currentClockFrame = audioClock.getCurrentTimelineFrame(deviceFramePos);
-                    
+
+                    // --- STABILITY FIX: Enforce Monotonicity ---
+                    // Prevents "micro-rollbacks" caused by audio driver jitter
+                    if (lastTimelineFrame != -1) {
+                        if (rate > 0 && currentClockFrame < lastTimelineFrame) {
+                            currentClockFrame = lastTimelineFrame;
+                        } else if (rate < 0 && currentClockFrame > lastTimelineFrame) {
+                            currentClockFrame = lastTimelineFrame;
+                        }
+                    }
+
                     // Send clock update to UI
                     if (currentClockFrame != lastTimelineFrame) {
                         lastTimelineFrame = currentClockFrame;
+                        final long finalFrame = currentClockFrame; // Local final copy for lambda
                         javax.swing.SwingUtilities.invokeLater(() -> {
-                            timeline.updatePlayheadFromFrame(currentClockFrame);
+                            timeline.updatePlayheadFromFrame(finalFrame);
                         });
                     }
 
                     // Fill ahead: up to 10 frames (responsive read ahead)
-                    boolean needsMore = (rate >= 0) ? (processedTimelineFrame < currentClockFrame + 10) : (processedTimelineFrame > currentClockFrame - 10);
+                    boolean needsMore = (rate >= 0) ? (processedTimelineFrame < currentClockFrame + 10)
+                            : (processedTimelineFrame > currentClockFrame - 10);
                     if (needsMore) {
                         processAudioChunk(processedTimelineFrame);
-                        if (rate >= 0) processedTimelineFrame++; else processedTimelineFrame--;
+                        if (rate >= 0)
+                            processedTimelineFrame++;
+                        else
+                            processedTimelineFrame--;
                     } else {
-                        try { Thread.sleep(2); } catch (Exception e) {}
+                        try {
+                            Thread.sleep(2);
+                        } catch (Exception e) {
+                        }
                     }
                 } else {
                     processedTimelineFrame = -1;
@@ -112,7 +133,10 @@ public class AudioServer {
                     if (line != null && line.isActive()) {
                         line.flush();
                     }
-                    try { Thread.sleep(10); } catch (Exception e) {}
+                    try {
+                        Thread.sleep(10);
+                    } catch (Exception e) {
+                    }
                 }
             }
         }, "AudioEngine-Thread");
@@ -135,25 +159,26 @@ public class AudioServer {
 
         for (TimelineClip clip : allClips) {
             if (frameIndex >= clip.getStartFrame() && frameIndex < (clip.getStartFrame() + clip.getDurationFrames())) {
-                if (timeline.getTrackType(clip.getTrackIndex()) != rocky.ui.timeline.TrackControlPanel.TrackType.AUDIO) {
+                if (timeline
+                        .getTrackType(clip.getTrackIndex()) != rocky.ui.timeline.TrackControlPanel.TrackType.AUDIO) {
                     continue;
                 }
-                
+
                 try {
                     MediaSource source = pool.getSource(clip.getMediaSourceId());
                     if (source != null && source.hasAudio()) {
                         anyAudio = true;
-                        
+
                         double trackVolume = 1.0;
                         long clipLocalFrame = frameIndex - clip.getStartFrame();
-                        
+
                         // Fade In/Out logic
                         if (clipLocalFrame < clip.getFadeInFrames()) {
-                            double t = (double)clipLocalFrame / clip.getFadeInFrames();
+                            double t = (double) clipLocalFrame / clip.getFadeInFrames();
                             trackVolume = TimelineClip.getOpacity(clip.getFadeInType(), t, true);
                         } else if (clipLocalFrame > clip.getDurationFrames() - clip.getFadeOutFrames()) {
                             long fadeOutStart = clip.getDurationFrames() - clip.getFadeOutFrames();
-                            double t = (double)(clipLocalFrame - fadeOutStart) / clip.getFadeOutFrames();
+                            double t = (double) (clipLocalFrame - fadeOutStart) / clip.getFadeOutFrames();
                             trackVolume = TimelineClip.getOpacity(clip.getFadeOutType(), t, false);
                         }
 
@@ -168,10 +193,11 @@ public class AudioServer {
                             }
                         } else {
                             // VARIABLE SPEED/REVERSE: Use resampling
-                            long startSample = (long)((clip.getSourceOffsetFrames() + clipLocalFrame) * (SAMPLE_RATE / (double)FPS));
+                            long startSample = (long) ((clip.getSourceOffsetFrames() + clipLocalFrame)
+                                    * (SAMPLE_RATE / (double) FPS));
                             for (int i = 0; i < samplesPerFrame / 2; i++) {
                                 double offset = i * rate;
-                                long targetSample = startSample + (long)offset;
+                                long targetSample = startSample + (long) offset;
                                 short[] s = source.getAudioSampleAt(targetSample);
                                 if (s != null) {
                                     mixedBuffer[i * 2] += (s[0] / 32768f) * trackVolume;
@@ -196,21 +222,28 @@ public class AudioServer {
     private void playAndMeter(float[] mixedSamples) {
         float masterGain = masterSound.getVolume();
         float maxL = 0, maxR = 0;
-        
+
         for (int i = 0; i < mixedSamples.length; i++) {
             float val = mixedSamples[i] * masterGain;
             float absVal = Math.abs(val);
-            if (i % 2 == 0) { if (absVal > maxL) maxL = absVal; }
-            else { if (absVal > maxR) maxR = absVal; }
+            if (i % 2 == 0) {
+                if (absVal > maxL)
+                    maxL = absVal;
+            } else {
+                if (absVal > maxR)
+                    maxR = absVal;
+            }
 
-            if (val > 1.0f) val = 1.0f;
-            else if (val < -1.0f) val = -1.0f;
-            
+            if (val > 1.0f)
+                val = 1.0f;
+            else if (val < -1.0f)
+                val = -1.0f;
+
             short s = (short) (val * 32767);
             byteBuffer[i * 2] = (byte) (s & 0xFF);
             byteBuffer[i * 2 + 1] = (byte) (s >> 8);
         }
-        
+
         if (line != null) {
             try {
                 int written = line.write(byteBuffer, 0, byteBuffer.length);

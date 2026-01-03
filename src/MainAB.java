@@ -138,7 +138,7 @@ public class MainAB {
                     // Invalidate cache to prevent ghost images when clips are moved/deleted
                     frameServer.invalidateCache();
                     frameServer.processFrame(timeline.getPlayheadTime(), true);
-                    
+
                     ruler.repaint();
                     long visibleStart = (long) (timeline.getVisibleStartTime() * 1000);
                     long visibleDuration = (long) (timeline.getVisibleDuration() * 1000);
@@ -154,7 +154,9 @@ public class MainAB {
                 @Override
                 public boolean dispatchKeyEvent(KeyEvent e) {
                     if (e.getID() == KeyEvent.KEY_PRESSED) {
-                        boolean ctrl = (e.getModifiersEx() & (System.getProperty("os.name").contains("Mac") ? KeyEvent.META_DOWN_MASK : KeyEvent.CTRL_DOWN_MASK)) != 0;
+                        boolean ctrl = (e.getModifiersEx()
+                                & (System.getProperty("os.name").contains("Mac") ? KeyEvent.META_DOWN_MASK
+                                        : KeyEvent.CTRL_DOWN_MASK)) != 0;
                         if (ctrl) {
                             if (e.getKeyCode() == KeyEvent.VK_Z) {
                                 if (e.isShiftDown()) {
@@ -260,23 +262,21 @@ public class MainAB {
                 if (dialog.isApproved()) {
                     history.pushState(timeline, projectProps, mediaPool);
                     dialog.applyTo(projectProps);
-                    
+
                     // Force components to acknowledge new settings
                     visualizer.updateProperties(projectProps);
                     frameServer.setProperties(projectProps);
-                    
+
                     // Re-init decoders with new scaling (improves performance for 4K)
                     double scale = projectProps.getPreviewScale();
                     // VEGAS PROXY MODEL: Cap scale at 0.25 (1/4) if Proxy Mode is enabled
-                    if (projectProps.isProxyModeEnabled() && scale > 0.25) {
-                        scale = 0.25;
-                    }
-                    
+                    // Logic removed
+
                     for (rocky.core.media.MediaSource source : mediaPool.getAllSources().values()) {
                         source.reinitDecoder(scale);
                     }
                     frameServer.invalidateCache();
-                    
+
                     frameServer.processFrame(timeline.getPlayheadTime(), true);
                     timeline.repaint();
                 }

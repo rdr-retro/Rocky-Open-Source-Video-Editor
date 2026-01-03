@@ -19,16 +19,14 @@ public class FrameServer {
     private final java.util.concurrent.ThreadPoolExecutor executor;
     private final java.util.concurrent.ConcurrentHashMap<Long, BufferedImage> frameCache = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentLinkedQueue<BufferedImage> bufferPool = new java.util.concurrent.ConcurrentLinkedQueue<>();
-    private final java.util.concurrent.atomic.AtomicLong latestTargetFrame = new java.util.concurrent.atomic.AtomicLong(-1);
+    private final java.util.concurrent.atomic.AtomicLong latestTargetFrame = new java.util.concurrent.atomic.AtomicLong(
+            -1);
     private BufferedImage currentVisibleBuffer = null;
     private long lastRequestTime = 0;
     private double currentScrubbingVelocity = 0; // frames per ms
     private final int MAX_POOL_SIZE = 10;
-    private long lastSubmittedFrame = -1;
-    
+
     // Vegas Adaptive Quality
-    private double currentAdaptiveScale = 1.0;
-    private long lastFrameRenderTime = 0;
 
     public FrameServer(TimelinePanel timeline, MediaPool pool, rocky.ui.viewer.VisualizerPanel visualizer) {
         this.timeline = timeline;
@@ -37,21 +35,22 @@ public class FrameServer {
 
         int cores = Runtime.getRuntime().availableProcessors();
         this.executor = new java.util.concurrent.ThreadPoolExecutor(
-            cores, cores, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
-            new java.util.concurrent.PriorityBlockingQueue<Runnable>()
-        );
+                cores, cores, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+                new java.util.concurrent.PriorityBlockingQueue<Runnable>());
     }
 
     private int getRamCacheLimitFrames() {
-        if (properties == null) return 60;
-        int mbLimit = properties.getRamCacheLimitMB();
+        if (properties == null)
+            return 60;
+        int mbLimit = 512; // Fixed limit since slider is removed
         int width = properties.getPreviewWidth();
         int height = properties.getPreviewHeight();
         // Bytes per frame = width * height * 4 (RGBA)
-        long bytesPerFrame = (long)width * height * 4;
-        if (bytesPerFrame == 0) return 60;
-        
-        long totalBytes = (long)mbLimit * 1024 * 1024;
+        long bytesPerFrame = (long) width * height * 4;
+        if (bytesPerFrame == 0)
+            return 60;
+
+        long totalBytes = (long) mbLimit * 1024 * 1024;
         return (int) (totalBytes / bytesPerFrame);
     }
 
@@ -60,7 +59,8 @@ public class FrameServer {
         private final boolean isPrefetch;
         private final long requestOrder;
         private final long taskRevision;
-        private static final java.util.concurrent.atomic.AtomicLong orderSource = new java.util.concurrent.atomic.AtomicLong(0);
+        private static final java.util.concurrent.atomic.AtomicLong orderSource = new java.util.concurrent.atomic.AtomicLong(
+                0);
 
         public RenderTask(long frame, boolean isPrefetch, long taskRevision) {
             this.frame = frame;
@@ -71,17 +71,21 @@ public class FrameServer {
 
         @Override
         public void run() {
-            // 1. Revision Check: If timeline layout changed since this task was created, abort.
-            // This prevents "zombie" frames (deleted clips) from overwriting the correct new state.
+            // 1. Revision Check: If timeline layout changed since this task was created,
+            // abort.
+            // This prevents "zombie" frames (deleted clips) from overwriting the correct
+            // new state.
             if (timeline.getLayoutRevision() > taskRevision) {
                 return;
             }
 
             if (latestTargetFrame.get() != -1 && !isPrefetch) {
-                if (latestTargetFrame.get() != frame) return;
+                if (latestTargetFrame.get() != frame)
+                    return;
             }
-            
-            if (isPrefetch && Math.abs(latestTargetFrame.get() - frame) > 20) return;
+
+            if (isPrefetch && Math.abs(latestTargetFrame.get() - frame) > 20)
+                return;
 
             // 2. Double-check synchronization
             BufferedImage rendered;
@@ -91,16 +95,20 @@ public class FrameServer {
                 e.printStackTrace();
                 return;
             }
-            
-            if (rendered == null) return;
-            
+
+            if (rendered == null)
+                return;
+
             // 3. Final Revision Check before UI Update
             if (timeline.getLayoutRevision() > taskRevision) {
                 returnCanvasToPool(rendered);
                 return;
             }
 
-            if (!isPrefetch && latestTargetFrame.get() != frame) {
+            // Relaxed check: Allow 1 frame drift to prevent micro-stuttering
+            // If the UI is slightly ahead (e.g. 102 vs 101), showing 101 is better than
+            // showing nothing.
+            if (!isPrefetch && Math.abs(latestTargetFrame.get() - frame) > 1) {
                 returnCanvasToPool(rendered);
                 return;
             }
@@ -126,8 +134,10 @@ public class FrameServer {
             long distA = Math.abs(this.frame - target);
             long distB = Math.abs(other.frame - target);
 
-            if (distA != distB) return Long.compare(distA, distB);
-            if (this.isPrefetch != other.isPrefetch) return this.isPrefetch ? 1 : -1;
+            if (distA != distB)
+                return Long.compare(distA, distB);
+            if (this.isPrefetch != other.isPrefetch)
+                return this.isPrefetch ? 1 : -1;
             return Long.compare(other.requestOrder, this.requestOrder); // Newer first
         }
     }
@@ -157,7 +167,7 @@ public class FrameServer {
                 returnCanvasToPool(removed);
             }
         }
-        
+
         // Clear the entire cache for a clean slate
         for (BufferedImage img : frameCache.values()) {
             if (img != null && img != currentVisibleBuffer) {
@@ -165,8 +175,9 @@ public class FrameServer {
             }
         }
         frameCache.clear();
-        
-        // Force the current visible buffer to be black/empty to avoid showing stale content
+
+        // Force the current visible buffer to be black/empty to avoid showing stale
+        // content
         if (currentVisibleBuffer != null) {
             java.awt.Graphics2D g = currentVisibleBuffer.createGraphics();
             g.setColor(java.awt.Color.BLACK);
@@ -185,7 +196,8 @@ public class FrameServer {
 
         if (force) {
             BufferedImage removed = frameCache.remove(targetFrame);
-            if (removed != null) returnCanvasToPool(removed);
+            if (removed != null)
+                returnCanvasToPool(removed);
         } else if (frameCache.containsKey(targetFrame)) {
             visualizer.updateFrame(frameCache.get(targetFrame));
             prefetchNextFrames(targetFrame, 15);
@@ -248,7 +260,6 @@ public class FrameServer {
         }
     }
 
-
     public BufferedImage getFrameAt(long targetFrame, boolean forceFullRes) {
         if (properties == null)
             return null;
@@ -263,27 +274,29 @@ public class FrameServer {
 
         BufferedImage canvas = getCanvasFromPool(canvasW, canvasH);
         java.awt.Graphics2D g2 = canvas.createGraphics();
-        
+
         // Quality Presets
-        String quality = properties.getPreviewQuality(); // Draft, Preview, Good, Best
-        
-        long startTime = System.nanoTime();
+        String quality = properties.getPreviewQuality(); // Legacy field from object (defaults to Preview)
+        // Note: We use getPreviewScale() now to control resolution, which is driven by
+        // Visor settings.
+
+        // Use Visor Bitrate setting to control rendering quality/interpolation
+        String visorBitrate = properties.getVisorBitrate();
+        boolean highQuality = "Alta".equals(visorBitrate) || "Media".equals(visorBitrate);
 
         boolean isScrubbingFast = currentScrubbingVelocity > 0.5; // > 0.5 frames/ms is approx > 15 fps movement
         boolean adaptiveLowQuality = isScrubbingFast;
-        
-        // Dynamic Adaptive Quality (Auto-Draft)
-        if (properties.isAutoDraftQualityEnabled() && lastFrameRenderTime > 40_000_000) { // > 40ms per frame
-            adaptiveLowQuality = true;
-        }
 
-        if ((quality.equals("Best") || quality.equals("Good")) && !adaptiveLowQuality) {
+        if (highQuality && !adaptiveLowQuality) {
             g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
-            g2.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            g2.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+                    "Alta".equals(visorBitrate) ? java.awt.RenderingHints.VALUE_INTERPOLATION_BICUBIC
+                            : java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
             g2.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_QUALITY);
         } else {
             g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_OFF);
-            g2.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            g2.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+                    java.awt.RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
             g2.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_SPEED);
         }
 
@@ -298,7 +311,8 @@ public class FrameServer {
         for (TimelineClip clip : allClips) {
             if (targetFrame >= clip.getStartFrame()
                     && targetFrame < (clip.getStartFrame() + clip.getDurationFrames())) {
-                if (timeline.getTrackType(clip.getTrackIndex()) == rocky.ui.timeline.TrackControlPanel.TrackType.VIDEO) {
+                if (timeline
+                        .getTrackType(clip.getTrackIndex()) == rocky.ui.timeline.TrackControlPanel.TrackType.VIDEO) {
                     activeClips.add(clip);
                 }
             }
@@ -320,15 +334,12 @@ public class FrameServer {
         }
 
         g2.dispose();
-        
+
         // --- ACES COLOR MANAGEMENT ---
-        boolean highQuality = quality.equals("Best") || quality.equals("Good");
         if (properties.isAcesEnabled() && !isScrubbingFast && highQuality) {
             ColorManagement.applyAces(canvas);
         }
-        
-        lastFrameRenderTime = System.nanoTime() - startTime;
-        
+
         return canvas;
     }
 
@@ -345,9 +356,6 @@ public class FrameServer {
         double finalScaleX = fitScale * transform.getScaleX();
         double finalScaleY = fitScale * transform.getScaleY();
 
-        double renderW = assetW * finalScaleX;
-        double renderH = assetH * finalScaleY;
-
         // Centering by default + user offset
         // User x=0, y=0 means centered in project
         double centerX = (canvasW / 2.0) + transform.getX();
@@ -356,8 +364,8 @@ public class FrameServer {
         float opacity = (float) clip.getOpacityAt(frameInClip);
 
         // Identity Transform Optimization
-        if (transform.getRotation() == 0 && transform.getScaleX() == 1.0 && transform.getScaleY() == 1.0 && 
-            transform.getX() == 0 && transform.getY() == 0 && fitScale == 1.0 && opacity >= 1.0f) {
+        if (transform.getRotation() == 0 && transform.getScaleX() == 1.0 && transform.getScaleY() == 1.0 &&
+                transform.getX() == 0 && transform.getY() == 0 && fitScale == 1.0 && opacity >= 1.0f) {
             g2.drawImage(asset, (canvasW - assetW) / 2, (canvasH - assetH) / 2, null);
             return;
         }
@@ -371,7 +379,8 @@ public class FrameServer {
 
         java.awt.Composite oldComp = g2.getComposite();
         if (opacity < 1.0f) {
-            g2.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, Math.max(0.0f, opacity)));
+            g2.setComposite(
+                    java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, Math.max(0.0f, opacity)));
         }
 
         g2.drawImage(asset, at, null);
