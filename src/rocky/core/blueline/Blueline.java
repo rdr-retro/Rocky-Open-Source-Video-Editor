@@ -74,11 +74,13 @@ public class Blueline {
         this.playbackStartFrame = getPlayheadFrame();
         this.lastUpdateNanos = System.nanoTime();
         this.isPlaying = true;
+        rocky.core.engine.PlaybackIsolation.getInstance().setPlaybackActive(true);
     }
 
     public void stopPlayback() {
         this.isPlaying = false;
         this.lastUpdateNanos = 0;
+        rocky.core.engine.PlaybackIsolation.getInstance().setPlaybackActive(false);
     }
 
     public long getPlayheadFrame() {

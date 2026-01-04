@@ -13,12 +13,15 @@ import rocky.core.logic.TemporalMath;
 import rocky.core.media.PeakManager;
 import rocky.core.media.MediaSource;
 import rocky.ui.properties.PropertiesWindow;
+import java.util.HashMap;
+import java.util.Map;
 
 public class TimelinePanel extends JPanel {
     private int mouseX = -1; // Hover cursor position
     private Timer repaintTimer;
     private static TimelineClip copiedClip = null;
     private rocky.core.model.TimelineModel model;
+    private final Map<TimelineClip, TimelineClipView> viewProxies = new HashMap<>();
 
 
     // View State
@@ -152,8 +155,13 @@ public class TimelinePanel extends JPanel {
 
     public void removeClip(TimelineClip clip) {
         model.removeClip(clip);
+        viewProxies.remove(clip);
         model.incrementLayoutRevision();
         fireTimelineUpdated();
+    }
+
+    public TimelineClipView getViewProxy(TimelineClip clip) {
+        return viewProxies.computeIfAbsent(clip, k -> new TimelineClipView(k));
     }
 
     public List<TimelineClip> getClipsAt(long frame) {
@@ -428,6 +436,17 @@ public class TimelinePanel extends JPanel {
                                         }
                                     }
                                     return;
+                                }
+
+                                // Selection Logic
+                                if (mouseX >= clipX && mouseX <= clipX + clipW) {
+                                    activeClip = clip;
+                                    TimelineClipView v = getViewProxy(clip);
+                                    if (!e.isShiftDown() && !v.isSelected()) {
+                                        for (TimelineClipView proxy : viewProxies.values()) proxy.setSelected(false);
+                                    }
+                                    v.setSelected(true);
+                                    repaint();
                                 }
 
                                 // Start/End Opacity Handles at TOP EDGE
@@ -1300,10 +1319,16 @@ public class TimelinePanel extends JPanel {
 
                 TrackControlPanel.TrackType ttype = (sidebar != null) ? sidebar.getTrackType(clip.getTrackIndex())
                         : null;
+                TimelineClipView view = getViewProxy(clip);
                 Color bodyCol = (ttype == TrackControlPanel.TrackType.AUDIO) ? TimelineClipView.AUDIO_BODY_COLOR
                         : TimelineClipView.BODY_COLOR;
                 Color headCol = (ttype == TrackControlPanel.TrackType.AUDIO) ? TimelineClipView.AUDIO_HEADER_COLOR
                         : TimelineClipView.HEADER_COLOR;
+
+                if (view.isSelected()) {
+                    g2d.setColor(Color.WHITE);
+                    g2d.fillRect(x - 2, trackY - 1, w + 4, trackH);
+                }
 
                 g2d.setColor(bodyCol);
                 g2d.fillRect(x, trackY + 1, w, trackH - 2);

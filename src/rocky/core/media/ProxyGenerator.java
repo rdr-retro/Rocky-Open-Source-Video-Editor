@@ -13,6 +13,11 @@ public class ProxyGenerator {
 
     public static void generateProxy(File source, int targetHeight, String bitrate, Consumer<String> onComplete) {
         executor.submit(() -> {
+            // PLAYBACK ISOLATION: Pause proxy generation while user is watching video
+            while (rocky.core.engine.PlaybackIsolation.getInstance().isPlaybackActive()) {
+                try { Thread.sleep(1000); } catch (InterruptedException e) { break; }
+            }
+
             try {
                 File proxyDir = new File(source.getParent(), ".proxies");
                 if (!proxyDir.exists())

@@ -80,6 +80,15 @@ public class PeakManager {
 
         // Linear read for efficiency
         for (int i = 0; i < totalFrames; i++) {
+            // PLAYBACK ISOLATION MODE: Suspend calculation if user hits "Play"
+            while (rocky.core.engine.PlaybackIsolation.getInstance().isPlaybackActive()) {
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+
             short[] samples = analysisDecoder.getAudioSamples(i, 1);
             if (samples != null) {
                 float max = 0;

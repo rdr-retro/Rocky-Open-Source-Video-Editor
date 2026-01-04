@@ -16,7 +16,7 @@ import java.util.*;
 public class ProjectManager {
 
     public static void saveProject(TimelinePanel panel, ProjectProperties props, MediaPool pool, File file) {
-        String state = serializeProject(panel, props, pool);
+        String state = serializeProject(panel.getClips(), props, pool, panel.getTrackHeights(), panel.getTrackTypes());
         try (PrintWriter writer = new PrintWriter(new FileWriter(file))) {
             writer.print(state);
             System.out.println("Project saved to: " + file.getAbsolutePath());
@@ -36,7 +36,7 @@ public class ProjectManager {
         }
     }
 
-    public static String serializeProject(TimelinePanel panel, ProjectProperties props, MediaPool pool) {
+    public static String serializeProject(List<TimelineClip> clips, ProjectProperties props, MediaPool pool, List<Integer> trackHeights, List<rocky.ui.timeline.TrackControlPanel.TrackType> trackTypes) {
         StringWriter sw = new StringWriter();
         try (PrintWriter writer = new PrintWriter(sw)) {
             writer.println("ROCKY_V6");
@@ -49,12 +49,10 @@ public class ProjectManager {
 
             // Save Tracks (Types and Heights)
             StringBuilder tracksStr = new StringBuilder("TRACKS:");
-            List<Integer> heights = panel.getTrackHeights();
-            List<rocky.ui.timeline.TrackControlPanel.TrackType> types = panel.getTrackTypes();
-            for (int i = 0; i < heights.size(); i++) {
-                String type = (i < types.size() && types.get(i) != null) ? types.get(i).name() : "VIDEO";
-                tracksStr.append(type).append(":").append(heights.get(i));
-                if (i < heights.size() - 1)
+            for (int i = 0; i < trackHeights.size(); i++) {
+                String type = (i < trackTypes.size() && trackTypes.get(i) != null) ? trackTypes.get(i).name() : "VIDEO";
+                tracksStr.append(type).append(":").append(trackHeights.get(i));
+                if (i < trackHeights.size() - 1)
                     tracksStr.append(",");
             }
             writer.println(tracksStr.toString());
@@ -65,7 +63,7 @@ public class ProjectManager {
             }
 
             // Save Clips
-            for (TimelineClip clip : panel.getClips()) {
+            for (TimelineClip clip : clips) {
                 ClipTransform ct = clip.getTransform();
                 writer.println("CLIP:" +
                         clip.getName() + "|" +

@@ -27,11 +27,15 @@ public class VisualizerPanel extends JPanel {
     private JLabel frameDisplayLabel;
     
     // --- TRIPLE BUFFER / VOLATILE STATE ---
-    private volatile BufferedImage displayFrame; // Currently being painted
-    private volatile BufferedImage nextFrame;    // Ready for next repaint
-    private BufferedImage lastSafeFrame;         // Frame that was just replaced and is now safe to recycle
+    private volatile BufferedImage displayFrame; // Still used for metadata/labels
+    private volatile BufferedImage nextFrame;    
+    private BufferedImage lastSafeFrame;         
     
-    private VolatileImage backBuffer;            // Hardware-accelerated surface
+    // Asynchronous Texture Upload System (Ping-Pong)
+    private VolatileImage vramBufferA;
+    private VolatileImage vramBufferB;
+    private volatile VolatileImage frontBuffer; // The one ready to be drawn by EDT
+    
     private Consumer<BufferedImage> recycleCallback;
     
     private long bluelineFrame = 0;
@@ -50,7 +54,7 @@ public class VisualizerPanel extends JPanel {
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
                 
-                // 1. SWAP: Move next -> display
+                // 1. SWAP Heap References (for recycling logic)
                 if (nextFrame != null) {
                     if (lastSafeFrame != null && recycleCallback != null) {
                         recycleCallback.accept(lastSafeFrame);
@@ -60,13 +64,24 @@ public class VisualizerPanel extends JPanel {
                     nextFrame = null;
                 }
 
-                if (displayFrame != null) {
+                if (frontBuffer != null) {
                     Graphics2D g2d = (Graphics2D) g;
-                    renderToVolatile(g2d);
                     
-                    // Update display labels to show actual current state
-                    displayVal.setText(displayFrame.getWidth() + "x" + displayFrame.getHeight() + "x32");
-                    frameVal.setText(String.valueOf(bluelineFrame)); 
+                    // FAST GPU-TO-GPU BLIT
+                    // No more texture uploads here!
+                    do {
+                        int val = frontBuffer.validate(getGraphicsConfiguration());
+                        if (val == VolatileImage.IMAGE_INCOMPATIBLE) {
+                            // This shouldn't happen often if we prepare correctly on backend
+                            break; 
+                        }
+                        g2d.drawImage(frontBuffer, 0, 0, getWidth(), getHeight(), null);
+                    } while (frontBuffer.contentsLost());
+
+                    if (displayFrame != null) {
+                        displayVal.setText(displayFrame.getWidth() + "x" + displayFrame.getHeight() + "x32");
+                        frameVal.setText(String.valueOf(bluelineFrame)); 
+                    }
                 }
             }
         };
@@ -149,43 +164,40 @@ public class VisualizerPanel extends JPanel {
         add(southContainer, BorderLayout.SOUTH);
     }
 
-    public void updateFrame(BufferedImage img) {
-        if (this.nextFrame != null && this.nextFrame != img && recycleCallback != null) {
-            recycleCallback.accept(this.nextFrame);
-        }
-        this.nextFrame = img;
-        videoArea.repaint();
-    }
-
-    public void setRecycleCallback(Consumer<BufferedImage> callback) {
-        this.recycleCallback = callback;
-    }
-
-    private void renderToVolatile(Graphics2D g2) {
-        if (displayFrame == null) return;
+    /**
+     * Uploads a BufferedImage to one of the VRAM buffers.
+     * CALL THIS FROM THE RENDER THREAD (FrameServer), NOT THE EDT.
+     */
+    public void prepareVramFrame(BufferedImage img) {
+        if (img == null || videoArea == null) return;
 
         int w = videoArea.getWidth();
         int h = videoArea.getHeight();
         if (w <= 0 || h <= 0) return;
 
-        // Ensure VolatileImage exists and matches size
+        // Choose the back buffer (the one NOT currently being drawn)
+        VolatileImage backBuffer = (frontBuffer == vramBufferA) ? vramBufferB : vramBufferA;
+
+        // Ensure it exists and matches size
         if (backBuffer == null || backBuffer.getWidth() != w || backBuffer.getHeight() != h) {
             backBuffer = videoArea.createVolatileImage(w, h);
+            if (frontBuffer == vramBufferA) vramBufferB = backBuffer; else vramBufferA = backBuffer;
         }
 
-        // Loop until rendering is successful (handles case where VRAM is lost)
+        // ASYNC UPLOAD (CPU -> GPU)
         do {
             int val = backBuffer.validate(videoArea.getGraphicsConfiguration());
             if (val == VolatileImage.IMAGE_INCOMPATIBLE) {
                 backBuffer = videoArea.createVolatileImage(w, h);
+                if (frontBuffer == vramBufferA) vramBufferB = backBuffer; else vramBufferA = backBuffer;
             }
 
             Graphics2D bg = backBuffer.createGraphics();
             bg.setColor(Color.BLACK);
             bg.fillRect(0, 0, w, h);
 
-            int projectW = displayFrame.getWidth();
-            int projectH = displayFrame.getHeight();
+            int projectW = img.getWidth();
+            int projectH = img.getHeight();
             double scale = Math.min((double) w / projectW, (double) h / projectH);
             int drawW = (int) (projectW * scale);
             int drawH = (int) (projectH * scale);
@@ -193,12 +205,25 @@ public class VisualizerPanel extends JPanel {
             int y = (h - drawH) / 2;
 
             bg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            bg.drawImage(displayFrame, x, y, drawW, drawH, null);
+            bg.drawImage(img, x, y, drawW, drawH, null);
             bg.dispose();
 
-            g2.drawImage(backBuffer, 0, 0, null);
-
         } while (backBuffer.contentsLost());
+
+        // ATOMIC SWAP: The new frame is now ready for the EDT to draw instantly
+        this.frontBuffer = backBuffer;
+    }
+
+    public void setRecycleCallback(Consumer<BufferedImage> callback) {
+        this.recycleCallback = callback;
+    }
+
+    public void updateFrame(BufferedImage img) {
+        if (this.nextFrame != null && this.nextFrame != img && recycleCallback != null) {
+            recycleCallback.accept(this.nextFrame);
+        }
+        this.nextFrame = img;
+        videoArea.repaint();
     }
 
     public void setFrameNumber(long frame) {

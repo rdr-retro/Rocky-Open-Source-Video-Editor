@@ -75,6 +75,11 @@ public class ThumbnailCache {
         // 3. Schedule Load/Generate
         pendingRequests.put(key, true);
         generatorExecutor.submit(() -> {
+            // PLAYBACK ISOLATION: Defer if user is watching the video
+            while (rocky.core.engine.PlaybackIsolation.getInstance().isPlaybackActive()) {
+                try { Thread.sleep(500); } catch (InterruptedException e) { break; }
+            }
+
             try {
                 BufferedImage thumb = loadFromDisk(key);
                 

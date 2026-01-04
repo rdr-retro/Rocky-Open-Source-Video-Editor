@@ -49,13 +49,8 @@ public class VideoDecoder {
             boolean isGIF = lowerName.endsWith(".gif");
             boolean isMOV = lowerName.endsWith(".mov");
 
-            // .mov files often work better with specific settings
-            if (isMOV) {
-                System.out.println("[VideoDecoder] MOV file detected - ENFORCING SAFE MODE (Software decoding + BGR24)");
-                grabber.setPixelFormat(avutil.AV_PIX_FMT_BGR24);
-                // Disable hardware acceleration for .mov to avoid glitches with complex codecs
-                // We don't set any hwaccel option here to let it default to software
-            } else if (!isWebP && !isGIF) {
+            // Hardware Acceleration Detection
+            if (!isWebP && !isGIF) {
                 if (os.contains("mac")) {
                     grabber.setVideoOption("hwaccel", "videotoolbox");
                 } else if (os.contains("win")) {
@@ -63,6 +58,10 @@ public class VideoDecoder {
                 } else if (os.contains("nix") || os.contains("nux")) {
                     grabber.setVideoOption("hwaccel", "vaapi");
                 }
+            } else if (isMOV) {
+                // For non-mac platforms, MOV might still need software mode for safety
+                // but on Mac we prioritize VideoToolbox.
+                grabber.setPixelFormat(avutil.AV_PIX_FMT_BGR24);
             }
             
             try {

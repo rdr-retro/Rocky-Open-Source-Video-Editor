@@ -111,6 +111,9 @@ public class FrameServer {
             manageCacheSize(frame);
 
             if (!isPrefetch) {
+                // ASYNC TEXTURE UPLOAD: Move BufferedImage -> VRAM copy off the EDT
+                visualizer.prepareVramFrame(rendered);
+
                 monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_START);
                 javax.swing.SwingUtilities.invokeLater(() -> {
                     currentVisibleBuffer = rendered;
@@ -196,7 +199,9 @@ public class FrameServer {
             if (removed != null)
                 returnCanvasToPool(removed);
         } else if (frameCache.containsKey(targetFrame)) {
-            visualizer.updateFrame(frameCache.get(targetFrame));
+            BufferedImage cached = frameCache.get(targetFrame);
+            visualizer.prepareVramFrame(cached);
+            visualizer.updateFrame(cached);
             prefetchFrames(targetFrame);
             return;
         }
