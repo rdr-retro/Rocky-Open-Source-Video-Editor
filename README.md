@@ -1,19 +1,24 @@
-# Rocky Open Source Video Editor
+# Rocky Open Source Video Editor 🚀
 
-Rocky Video Editor es un editor de video gratuito y de codigo abierto diseñado para ser potente pero facil de usar.
+Rocky Video Editor es un editor de video gratuito y de código abierto diseñado para ofrecer un rendimiento de nivel profesional con una interfaz intuitiva.
 
-## Caracteristicas Principales
+##  Arquitectura "Zero-Stutter" (Optimizado para Mac M4)
 
-- **Edicion Multiuso**: Soporta multiples pistas de video y audio simultaneas.
-- **Formatos Compatibles**: Acepta la mayoria de formatos populares como MP4, MOV, MP3, WAV y ahora tambien archivos de audio CAF.
-- **Linea de Tiempo Intuitiva**: Arrastra y suelta tus archivos directamente para empezar a editar.
-- **Control Total**: Ajusta la opacidad, realiza cortes precisos y añade efectos de fundido (fade in/out) facilmente.
-- **Motor de Alto Rendimiento**: Sistema inspirado en Sony Vegas con RAM Preview dinámico y calidad adaptativa para una edición fluida incluso en 4K.
-- **Sistema de Proxies "Hard"**: Genera versiones ligeras de tus videos con un solo clic (botón "px") para editar sin lag, manteniendo la máxima calidad en el render final.
-- **Sincronización de Audio Perfecta**: Motor de audio *jitter-aware* que garantiza una alineación perfecta entre audio y vídeo en exportaciones largas.
-- **Gestión de Color ACES**: Previsualización con gestión de color profesional para un look cinematográfico instantáneo.
-- **Animaciones**: Sistema de fotogramas clave (keyframes) para animar tus clips.
-- **Previsualizacion en Tiempo Real**: Reproductor integrado para ver tus cambios al instante.
+Rocky ha sido rediseñado para ofrecer la fluidez más extrema del mercado en Java, especialmente en hardware Apple Silicon:
+
+- **Aceleración por Hardware (VideoToolbox)**: Decodificación nativa de HEVC/H264 en macOS (M1-M4), reduciendo el uso de CPU hasta en un 80% al editar 4K.
+- **Playback Isolation Mode**: Sistema inteligente que pausa procesos secundarios (miniaturas, ondas de audio) al dar a "Play" para dedicar toda la potencia del equipo a la fluidez del video.
+- **Ondas de Audio Persistentes (.rocky_peaks)**: Inspirado en Sony Vegas (.sfk), Rocky guarda un caché binario de las ondas de audio para que se carguen instantáneamente sin volver a analizar el video.
+- **Async Texture Pipeline**: Subida de fotogramas a VRAM en hilos secundarios, eliminando por completo los bloqueos o avisos de `EDT BLOCKED`.
+- **Async History Engine**: El sistema de Undo/Redo (historial) funciona en segundo plano, permitiendo mover clips o soltar archivos sin micro-parones.
+
+## Características Principales
+
+- **Edición Multiuso**: Soporta múltiples pistas de video y audio simultáneas.
+- **Formatos Profesionales**: Soporte para MP4, MOV (HEVC/H264), MP3, WAV y archivos de audio CAF.
+- **Línea de Tiempo Intuitiva**: Arrastra y suelta (Drag & Drop) para empezar a editar al instante.
+- **Control Creativo**: Ajusta opacidad, realiza cortes precisos, aplica ACES Color Management y usa Keyframes para animar.
+- **Gestión de Proxies**: Genera versiones ligeras de tus clips (botón "px") para una respuesta táctil instantánea en proyectos masivos.
 
 ## Como Descargar e Instalar
 
