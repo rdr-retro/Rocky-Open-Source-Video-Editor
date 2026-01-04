@@ -22,6 +22,8 @@ import java.io.File;
  * RUN: ./run.sh
  */
 public class MainAB {
+    private static File currentProjectFile = null;
+
     private static void updatePlaybackRate(double rate, rocky.ui.timeline.TimelinePanel timeline,
             rocky.ui.timeline.BottomBarPanel bottomBar) {
         timeline.setPlaybackRate(rate);
@@ -233,6 +235,14 @@ public class MainAB {
             TopToolbar toolbar = new TopToolbar();
             toolbar.setOnSave(() -> {
                 System.out.println("MainAB: onSave triggered");
+                if (currentProjectFile != null) {
+                    System.out.println("MainAB: Saving to existing file: " + currentProjectFile.getAbsolutePath());
+                    ProjectManager.saveProject(timeline, projectProps, mediaPool, currentProjectFile);
+                    JOptionPane.showMessageDialog(frame, "Project saved: " + currentProjectFile.getName());
+                    return;
+                }
+                
+                // Fallback to Save As behavior if no file is set
                 JFileChooser chooser = new JFileChooser();
                 chooser.setFileFilter(new FileNameExtensionFilter("Rocky Project (.rocky)", "rocky"));
                 if (chooser.showSaveDialog(frame) == JFileChooser.APPROVE_OPTION) {
@@ -241,19 +251,24 @@ public class MainAB {
                     if (!f.getName().endsWith(".rocky")) {
                         f = new File(f.getAbsolutePath() + ".rocky");
                     }
+                    currentProjectFile = f;
                     ProjectManager.saveProject(timeline, projectProps, mediaPool, f);
                     JOptionPane.showMessageDialog(frame, "Project saved successfully!");
                 }
             });
+
             toolbar.setOnOpen(() -> {
                 System.out.println("MainAB: onOpen triggered");
                 JFileChooser chooser = new JFileChooser();
                 chooser.setFileFilter(new FileNameExtensionFilter("Rocky Project (.rocky)", "rocky"));
                 if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
                     System.out.println("MainAB: File selected for load");
-                    ProjectManager.loadProject(timeline, projectProps, mediaPool, sidebar, chooser.getSelectedFile());
+                    File f = chooser.getSelectedFile();
+                    currentProjectFile = f;
+                    ProjectManager.loadProject(timeline, projectProps, mediaPool, sidebar, f);
                     visualizer.updateProperties(projectProps);
                     history.pushState(timeline, projectProps, mediaPool);
+                    frame.setTitle("Rocky Open Source Video Editor - " + f.getName());
                 }
             });
             toolbar.setOnSettings(() -> {
