@@ -35,15 +35,29 @@ done
 # 3. Compilation
 echo "Compilando código fuente..."
 find src -name "*.java" > sources.txt
-javac -encoding UTF-8 -d bin -cp "lib/*:src" @sources.txt
+# Use bin_temp to avoid permission issues found previously
+mkdir -p bin_temp
+javac -encoding UTF-8 -d bin_temp -cp "lib/*:src" @sources.txt
 
 if [ $? -eq 0 ]; then
+    # 4. Plugin Packaging
+    echo "Compilando y empaquetando plugins..."
+    mkdir -p bin_plugins
+    find plugins_src -name "*.java" > plugins_sources.txt
+    javac -encoding UTF-8 -d bin_plugins -cp "lib/*:bin_temp" @plugins_sources.txt
+    cp -r plugins_src/META-INF bin_plugins/
+    mkdir -p plugins
+    jar cf plugins/samples.jar -C bin_plugins .
+    rm plugins_sources.txt
+    rm -rf bin_plugins
+
     echo "==============================="
     echo "¡Compilación exitosa!"
+    echo "Plugins empaquetados en plugins/samples.jar"
     echo "Usa ./run.sh para iniciar."
     echo "==============================="
 else
-    echo "Error en la compilación."
+    echo "Error en la compilación del núcleo."
     exit 1
 fi
 rm sources.txt

@@ -6,4 +6,4 @@ else
   SEP=":"
 fi
 
-java -cp "lib/*${SEP}bin" MainAB
+java -cp "lib/*${SEP}bin_temp" MainAB
