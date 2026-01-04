@@ -3,8 +3,8 @@ package rocky.ui.properties;
 import javax.swing.*;
 import javax.swing.tree.*;
 import java.awt.*;
-import rocky.ui.timeline.TimelineClip;
-import rocky.ui.timeline.ClipTransform;
+import rocky.core.model.TimelineClip;
+import rocky.core.model.ClipTransform;
 
 /**
  * A tree-based properties editor matching the Sony Vegas style.

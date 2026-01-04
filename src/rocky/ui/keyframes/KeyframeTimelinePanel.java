@@ -1,6 +1,7 @@
 package rocky.ui.keyframes;
 
-import rocky.ui.timeline.TimelineClip;
+import rocky.core.model.TimelineClip;
+import rocky.core.model.TimelineKeyframe;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;

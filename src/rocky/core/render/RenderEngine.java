@@ -1,5 +1,7 @@
 package rocky.core.render;
 
+import rocky.core.model.TimelineClip;
+import rocky.core.logic.TemporalMath;
 import rocky.ui.timeline.TimelinePanel;
 import rocky.core.engine.FrameServer;
 import java.awt.image.BufferedImage;
@@ -222,13 +224,13 @@ public class RenderEngine {
 
     private float[] mixFrameAudio(long frameIndex, int samplesNeeded, rocky.ui.timeline.ProjectProperties props) {
         rocky.core.model.TimelineModel model = frameServer.getModel();
-        java.util.List<rocky.ui.timeline.TimelineClip> allClips = model.getClips();
+        java.util.List<TimelineClip> allClips = model.getClips();
         int sampleRate = props.getAudioSampleRate();
         int channels = props.getAudioChannels();
         int samplesToGenerate = samplesNeeded * channels;
         float[] mixedBuffer = new float[samplesToGenerate];
 
-        for (rocky.ui.timeline.TimelineClip clip : allClips) {
+        for (TimelineClip clip : allClips) {
             if (frameIndex >= clip.getStartFrame() && frameIndex < (clip.getStartFrame() + clip.getDurationFrames())) {
                 boolean isAudio = false;
                 if (model.getTrackTypes().size() > clip.getTrackIndex()) {
@@ -251,11 +253,11 @@ public class RenderEngine {
                         // Fades
                         if (clipLocalFrame < clip.getFadeInFrames()) {
                             double t = (double) clipLocalFrame / clip.getFadeInFrames();
-                            trackVolume = rocky.ui.timeline.TimelineClip.getOpacity(clip.getFadeInType(), t, true);
+                            trackVolume = TemporalMath.getFadeValue(clip.getFadeInType(), t, true);
                         } else if (clipLocalFrame > clip.getDurationFrames() - clip.getFadeOutFrames()) {
                             long fadeOutStart = clip.getDurationFrames() - clip.getFadeOutFrames();
                             double t = (double) (clipLocalFrame - fadeOutStart) / clip.getFadeOutFrames();
-                            trackVolume = rocky.ui.timeline.TimelineClip.getOpacity(clip.getFadeOutType(), t, false);
+                            trackVolume = TemporalMath.getFadeValue(clip.getFadeOutType(), t, false);
                         }
 
                         for (int i = 0; i < samples.length && i < mixedBuffer.length; i++) {

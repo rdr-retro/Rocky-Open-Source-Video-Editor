@@ -1,6 +1,8 @@
 package rocky.core.engine;
 
-import rocky.ui.timeline.TimelineClip;
+import rocky.core.model.TimelineClip;
+import rocky.core.model.ClipTransform;
+import rocky.core.logic.TemporalMath;
 import rocky.ui.timeline.TimelinePanel;
 import rocky.core.media.MediaPool;
 import rocky.core.media.MediaSource;
@@ -39,6 +41,9 @@ public class FrameServer {
         this.executor = new java.util.concurrent.ThreadPoolExecutor(
                 cores, cores, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
                 new java.util.concurrent.PriorityBlockingQueue<Runnable>());
+        
+        // --- SAFE RECYCLE INTEGRATION ---
+        this.visualizer.setRecycleCallback(img -> returnCanvasToPool(img));
     }
 
     private int getRamCacheLimitFrames() {
@@ -102,51 +107,16 @@ public class FrameServer {
 
             // ... checks ...
 
-            if (!isPrefetch) {
-                 monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_START); // Only UI update remains
-                javax.swing.SwingUtilities.invokeLater(() -> {
-                    // Recycle the OLD visible buffer now that it's being replaced
-                    if (currentVisibleBuffer != null && currentVisibleBuffer != rendered) {
-                        returnCanvasToPool(currentVisibleBuffer);
-                    }
-                    currentVisibleBuffer = rendered;
-                    visualizer.updateFrame(rendered);
-                    monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_END);
-                    monitor.endFrame();
-                });
-            }
-
-            if (isPrefetch && Math.abs(latestTargetFrame.get() - frame) > 20)
-                return;
-
-            if (rendered == null)
-                return;
-
-            // 3. Final Revision Check before UI Update
-            if (model.getLayoutRevision() > taskRevision) {
-                returnCanvasToPool(rendered);
-                return;
-            }
-
-            // Relaxed check: Allow 1 frame drift to prevent micro-stuttering
-            // If the UI is slightly ahead (e.g. 102 vs 101), showing 101 is better than
-            // showing nothing.
-            if (!isPrefetch && Math.abs(latestTargetFrame.get() - frame) > 1) {
-                returnCanvasToPool(rendered);
-                return;
-            }
-
             frameCache.put(frame, rendered);
             manageCacheSize(frame);
 
             if (!isPrefetch) {
+                monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_START);
                 javax.swing.SwingUtilities.invokeLater(() -> {
-                    // Recycle the OLD visible buffer now that it's being replaced
-                    if (currentVisibleBuffer != null && currentVisibleBuffer != rendered) {
-                        returnCanvasToPool(currentVisibleBuffer);
-                    }
                     currentVisibleBuffer = rendered;
                     visualizer.updateFrame(rendered);
+                    monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_END);
+                    monitor.endFrame();
                 });
             }
         }
@@ -385,7 +355,7 @@ public class FrameServer {
             rocky.core.media.DecoderPool.touch(source.getFilePath());
 
             long frameInClip = targetFrame - clip.getStartFrame();
-            long sourceFrame = clip.getSourceFrameAt(frameInClip);
+            long sourceFrame = TemporalMath.getSourceFrameAt(clip, frameInClip);
             monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DECODE_START);
             BufferedImage asset = source.getFrame(sourceFrame, forceFullRes);
             monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.CONVERT_START);
@@ -415,7 +385,7 @@ public class FrameServer {
         double fitScale = Math.min((double) canvasW / assetW, (double) canvasH / assetH);
 
         // 2. Apply Custom Transform (Interpolated if keyframes exist)
-        rocky.ui.timeline.ClipTransform transform = clip.getInterpolatedTransform(frameInClip);
+        ClipTransform transform = TemporalMath.getInterpolatedTransform(clip, frameInClip);
         double finalScaleX = fitScale * transform.getScaleX();
         double finalScaleY = fitScale * transform.getScaleY();
 
@@ -424,7 +394,7 @@ public class FrameServer {
         double centerX = (canvasW / 2.0) + transform.getX();
         double centerY = (canvasH / 2.0) + transform.getY();
 
-        float opacity = (float) clip.getOpacityAt(frameInClip);
+        float opacity = (float) TemporalMath.getOpacityAt(clip, frameInClip);
 
         // Identity Transform Optimization
         if (transform.getRotation() == 0 && transform.getScaleX() == 1.0 && transform.getScaleY() == 1.0 &&

@@ -1,6 +1,7 @@
 package rocky.core.engine;
 
-import rocky.ui.timeline.TimelineClip;
+import rocky.core.model.TimelineClip;
+import rocky.core.logic.TemporalMath;
 import rocky.ui.timeline.TimelinePanel;
 import rocky.core.media.MediaPool;
 import rocky.core.media.MediaSource;
@@ -187,11 +188,11 @@ public class AudioServer {
                         // Fade In/Out logic
                         if (clipLocalFrame < clip.getFadeInFrames()) {
                             double t = (double) clipLocalFrame / clip.getFadeInFrames();
-                            trackVolume = TimelineClip.getOpacity(clip.getFadeInType(), t, true);
+                            trackVolume = TemporalMath.getFadeValue(clip.getFadeInType(), t, true);
                         } else if (clipLocalFrame > clip.getDurationFrames() - clip.getFadeOutFrames()) {
                             long fadeOutStart = clip.getDurationFrames() - clip.getFadeOutFrames();
                             double t = (double) (clipLocalFrame - fadeOutStart) / clip.getFadeOutFrames();
-                            trackVolume = TimelineClip.getOpacity(clip.getFadeOutType(), t, false);
+                            trackVolume = TemporalMath.getFadeValue(clip.getFadeOutType(), t, false);
                         }
 
                         if (Math.abs(rate - 1.0) < 0.01) {

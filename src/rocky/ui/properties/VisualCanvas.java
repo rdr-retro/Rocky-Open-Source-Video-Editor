@@ -8,10 +8,11 @@ import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 import java.util.List;
-import rocky.ui.timeline.TimelineClip;
-import rocky.ui.timeline.ClipTransform;
+import rocky.core.model.TimelineClip;
+import rocky.core.model.TimelineKeyframe;
+import rocky.core.model.ClipTransform;
+import rocky.core.logic.TemporalMath;
 import rocky.core.media.MediaPool;
-import rocky.ui.keyframes.TimelineKeyframe;
 
 /**
  * A canvas to visualize and manipulate the clip's transform.
@@ -170,11 +171,11 @@ public class VisualCanvas extends JPanel {
         }
 
         if (existing != null) {
-            existing.setTransform(new rocky.ui.timeline.ClipTransform(clip.getTransform()));
+            existing.setTransform(new ClipTransform(clip.getTransform()));
         } else {
             // Performance: Use addKeyframe to ensure sorting is only done once
             clip.addKeyframe(new TimelineKeyframe(
-                    localPlayheadFrame, localPlayheadFrame, new rocky.ui.timeline.ClipTransform(clip.getTransform())));
+                    localPlayheadFrame, localPlayheadFrame, new ClipTransform(clip.getTransform())));
         }
 
         firePropertyChange("transform", null, clip.getTransform());
@@ -349,7 +350,7 @@ public class VisualCanvas extends JPanel {
             rocky.core.media.MediaSource source = pool.getSource(clip.getMediaSourceId());
             if (source != null) {
                 // For preview, use the actual source frame at current playhead
-                long sourceFrame = clip.getSourceFrameAt(localPlayheadFrame);
+                long sourceFrame = TemporalMath.getSourceFrameAt(clip, localPlayheadFrame);
                 BufferedImage img = source.getFrame(sourceFrame);
                 if (img != null) {
                     g2.drawImage(img, (int) (-w / 2), (int) (-h / 2), (int) w, (int) h, null);

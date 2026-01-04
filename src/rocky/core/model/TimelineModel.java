@@ -1,6 +1,5 @@
 package rocky.core.model;
 
-import rocky.ui.timeline.TimelineClip;
 import rocky.core.structure.IntervalTree;
 import rocky.core.blueline.Blueline;
 import rocky.ui.timeline.TrackControlPanel;

@@ -3,7 +3,9 @@ package rocky.ui.viewer;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.awt.image.VolatileImage;
 import java.awt.event.MouseEvent;
+import java.util.function.Consumer;
 
 /**
  * A panel that acts as a video visualizer (Part A Right).
@@ -23,7 +25,15 @@ public class VisualizerPanel extends JPanel {
 
     private JPanel videoArea;
     private JLabel frameDisplayLabel;
-    private BufferedImage currentFrame;
+    
+    // --- TRIPLE BUFFER / VOLATILE STATE ---
+    private volatile BufferedImage displayFrame; // Currently being painted
+    private volatile BufferedImage nextFrame;    // Ready for next repaint
+    private BufferedImage lastSafeFrame;         // Frame that was just replaced and is now safe to recycle
+    
+    private VolatileImage backBuffer;            // Hardware-accelerated surface
+    private Consumer<BufferedImage> recycleCallback;
+    
     private long bluelineFrame = 0;
     private Runnable onPlay;
     private Runnable onPause;
@@ -39,27 +49,23 @@ public class VisualizerPanel extends JPanel {
             @Override
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
-                if (currentFrame != null) {
+                
+                // 1. SWAP: Move next -> display
+                if (nextFrame != null) {
+                    if (lastSafeFrame != null && recycleCallback != null) {
+                        recycleCallback.accept(lastSafeFrame);
+                    }
+                    lastSafeFrame = displayFrame;
+                    displayFrame = nextFrame;
+                    nextFrame = null;
+                }
+
+                if (displayFrame != null) {
                     Graphics2D g2d = (Graphics2D) g;
-                    g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                    
-                    int panelW = getWidth();
-                    int panelH = getHeight();
-                    int projectW = currentFrame.getWidth();
-                    int projectH = currentFrame.getHeight();
-                    
-                    // Viewport Scale (Project -> Screen)
-                    double scale = Math.min((double)panelW / projectW, (double)panelH / projectH);
-                    int drawW = (int)(projectW * scale);
-                    int drawH = (int)(projectH * scale);
-                    int x = (panelW - drawW) / 2;
-                    int y = (panelH - drawH) / 2;
-                    
-                    g2d.drawImage(currentFrame, x, y, drawW, drawH, null);
+                    renderToVolatile(g2d);
                     
                     // Update display labels to show actual current state
-                    displayVal.setText(drawW + "x" + drawH + "x32");
+                    displayVal.setText(displayFrame.getWidth() + "x" + displayFrame.getHeight() + "x32");
                     frameVal.setText(String.valueOf(bluelineFrame)); 
                 }
             }
@@ -144,8 +150,55 @@ public class VisualizerPanel extends JPanel {
     }
 
     public void updateFrame(BufferedImage img) {
-        this.currentFrame = img;
+        if (this.nextFrame != null && this.nextFrame != img && recycleCallback != null) {
+            recycleCallback.accept(this.nextFrame);
+        }
+        this.nextFrame = img;
         videoArea.repaint();
+    }
+
+    public void setRecycleCallback(Consumer<BufferedImage> callback) {
+        this.recycleCallback = callback;
+    }
+
+    private void renderToVolatile(Graphics2D g2) {
+        if (displayFrame == null) return;
+
+        int w = videoArea.getWidth();
+        int h = videoArea.getHeight();
+        if (w <= 0 || h <= 0) return;
+
+        // Ensure VolatileImage exists and matches size
+        if (backBuffer == null || backBuffer.getWidth() != w || backBuffer.getHeight() != h) {
+            backBuffer = videoArea.createVolatileImage(w, h);
+        }
+
+        // Loop until rendering is successful (handles case where VRAM is lost)
+        do {
+            int val = backBuffer.validate(videoArea.getGraphicsConfiguration());
+            if (val == VolatileImage.IMAGE_INCOMPATIBLE) {
+                backBuffer = videoArea.createVolatileImage(w, h);
+            }
+
+            Graphics2D bg = backBuffer.createGraphics();
+            bg.setColor(Color.BLACK);
+            bg.fillRect(0, 0, w, h);
+
+            int projectW = displayFrame.getWidth();
+            int projectH = displayFrame.getHeight();
+            double scale = Math.min((double) w / projectW, (double) h / projectH);
+            int drawW = (int) (projectW * scale);
+            int drawH = (int) (projectH * scale);
+            int x = (w - drawW) / 2;
+            int y = (h - drawH) / 2;
+
+            bg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            bg.drawImage(displayFrame, x, y, drawW, drawH, null);
+            bg.dispose();
+
+            g2.drawImage(backBuffer, 0, 0, null);
+
+        } while (backBuffer.contentsLost());
     }
 
     public void setFrameNumber(long frame) {

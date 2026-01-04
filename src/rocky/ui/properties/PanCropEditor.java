@@ -2,7 +2,8 @@ package rocky.ui.properties;
 
 import javax.swing.*;
 import java.awt.*;
-import rocky.ui.timeline.TimelineClip;
+import rocky.core.model.TimelineClip;
+import rocky.core.logic.TemporalMath;
 import rocky.core.media.MediaPool;
 import rocky.ui.keyframes.KeyframeTimelinePanel;
 
@@ -65,7 +66,7 @@ public class PanCropEditor extends JPanel {
                 
                 canvas.setPlayheadFrame(globalFrame);
                 // Update clip's working transform to the interpolated one for preview
-                clip.setTransform(clip.getInterpolatedTransform(clipLocalFrame));
+                clip.setTransform(TemporalMath.getInterpolatedTransform(clip, clipLocalFrame));
                 if (onUpdate != null)
                     onUpdate.run();
             }

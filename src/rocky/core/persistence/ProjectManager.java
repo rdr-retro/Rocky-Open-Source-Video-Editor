@@ -1,9 +1,10 @@
 package rocky.core.persistence;
 
-import rocky.ui.timeline.TimelineClip;
+import rocky.core.model.TimelineClip;
+import rocky.core.model.ClipTransform;
+import rocky.core.model.TimelineKeyframe;
 import rocky.ui.timeline.TimelinePanel;
 import rocky.ui.timeline.ProjectProperties;
-import rocky.ui.keyframes.TimelineKeyframe;
 import rocky.core.media.MediaPool;
 import rocky.core.media.MediaSource;
 import java.io.*;
@@ -65,7 +66,7 @@ public class ProjectManager {
 
             // Save Clips
             for (TimelineClip clip : panel.getClips()) {
-                rocky.ui.timeline.ClipTransform ct = clip.getTransform();
+                ClipTransform ct = clip.getTransform();
                 writer.println("CLIP:" +
                         clip.getName() + "|" +
                         clip.getStartFrame() + "|" +
@@ -104,7 +105,7 @@ public class ProjectManager {
                 // Save Keyframes
                 synchronized (clip.getTimeKeyframes()) {
                     for (TimelineKeyframe k : clip.getTimeKeyframes()) {
-                        rocky.ui.timeline.ClipTransform kt = k.getTransform();
+                        ClipTransform kt = k.getTransform();
                         writer.println("KEYFRAME:" +
                                 k.getClipFrame() + "|" +
                                 k.getSourceFrame() + "|" +
@@ -204,7 +205,7 @@ public class ProjectManager {
                         clip.setSourceOffsetFrames(Long.parseLong(data[9]));
                     }
                     if (data.length >= 17) {
-                        rocky.ui.timeline.ClipTransform ct = clip.getTransform();
+                        ClipTransform ct = clip.getTransform();
                         ct.setX(Double.parseDouble(data[10]));
                         ct.setY(Double.parseDouble(data[11]));
                         ct.setScaleX(Double.parseDouble(data[12]));
@@ -231,7 +232,7 @@ public class ProjectManager {
                     long cf = Long.parseLong(data[0]);
                     long sf = Long.parseLong(data[1]);
                     TimelineKeyframe k = new TimelineKeyframe(cf, sf);
-                    rocky.ui.timeline.ClipTransform kt = k.getTransform();
+                    ClipTransform kt = k.getTransform();
                     kt.setX(Double.parseDouble(data[2]));
                     kt.setY(Double.parseDouble(data[3]));
                     kt.setScaleX(Double.parseDouble(data[4]));

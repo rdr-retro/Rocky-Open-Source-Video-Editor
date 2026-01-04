@@ -6,6 +6,10 @@ import java.awt.event.*;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
+import rocky.core.model.TimelineClip;
+import rocky.core.model.TimelineKeyframe;
+import rocky.core.model.ClipTransform;
+import rocky.core.logic.TemporalMath;
 import rocky.core.media.PeakManager;
 import rocky.core.media.MediaSource;
 import rocky.ui.properties.PropertiesWindow;
@@ -750,10 +754,10 @@ public class TimelinePanel extends JPanel {
 
                 // Adjust keyframes for right part
                 synchronized (rightPart.getTimeKeyframes()) {
-                    java.util.Iterator<rocky.ui.keyframes.TimelineKeyframe> it = rightPart.getTimeKeyframes()
+                    java.util.Iterator<TimelineKeyframe> it = rightPart.getTimeKeyframes()
                             .iterator();
                     while (it.hasNext()) {
-                        rocky.ui.keyframes.TimelineKeyframe k = it.next();
+                        TimelineKeyframe k = it.next();
                         if (k.getClipFrame() < splitOffset) {
                             it.remove();
                         } else {
@@ -765,9 +769,9 @@ public class TimelinePanel extends JPanel {
                 // 2. Adjust left part (original clip)
                 clip.setDurationFrames(splitOffset);
                 synchronized (clip.getTimeKeyframes()) {
-                    java.util.Iterator<rocky.ui.keyframes.TimelineKeyframe> it = clip.getTimeKeyframes().iterator();
+                    java.util.Iterator<TimelineKeyframe> it = clip.getTimeKeyframes().iterator();
                     while (it.hasNext()) {
-                        rocky.ui.keyframes.TimelineKeyframe k = it.next();
+                        TimelineKeyframe k = it.next();
                         if (k.getClipFrame() > splitOffset) {
                             it.remove();
                         }
@@ -1296,10 +1300,10 @@ public class TimelinePanel extends JPanel {
 
                 TrackControlPanel.TrackType ttype = (sidebar != null) ? sidebar.getTrackType(clip.getTrackIndex())
                         : null;
-                Color bodyCol = (ttype == TrackControlPanel.TrackType.AUDIO) ? TimelineClip.AUDIO_BODY_COLOR
-                        : TimelineClip.BODY_COLOR;
-                Color headCol = (ttype == TrackControlPanel.TrackType.AUDIO) ? TimelineClip.AUDIO_HEADER_COLOR
-                        : TimelineClip.HEADER_COLOR;
+                Color bodyCol = (ttype == TrackControlPanel.TrackType.AUDIO) ? TimelineClipView.AUDIO_BODY_COLOR
+                        : TimelineClipView.BODY_COLOR;
+                Color headCol = (ttype == TrackControlPanel.TrackType.AUDIO) ? TimelineClipView.AUDIO_HEADER_COLOR
+                        : TimelineClipView.HEADER_COLOR;
 
                 g2d.setColor(bodyCol);
                 g2d.fillRect(x, trackY + 1, w, trackH - 2);
@@ -1529,7 +1533,7 @@ public class TimelinePanel extends JPanel {
             double progress = (double) i / res;
             int dx = (int) (progress * w);
             long clipFrame = (long) (progress * clip.getDurationFrames());
-            double opacity = clip.getOpacityAt(clipFrame);
+            double opacity = TemporalMath.getOpacityAt(clip, clipFrame);
 
             int px = x + dx;
             int py = bodyTopY + (int) ((1.0 - opacity) * bodyH);
@@ -1563,9 +1567,10 @@ public class TimelinePanel extends JPanel {
             if (screenX < 0 || screenX > getWidth())
                 continue;
 
-            // Map pixel to source frame
+            // Map pixel to source frame (using TemporalMath for time-warping support if any)
             double progress = (double) dx / w;
-            long sourceFrame = startFrame + (long) (progress * duration);
+            long clipFrame = Math.round(progress * duration);
+            long sourceFrame = TemporalMath.getSourceFrameAt(clip, clipFrame);
 
             if (sourceFrame >= 0 && sourceFrame < peaks.length) {
                 float peak = peaks[(int) sourceFrame];
@@ -1578,7 +1583,7 @@ public class TimelinePanel extends JPanel {
     }
 
     private double getOpacity(TimelineClip.FadeType type, double t, boolean isFadeIn) {
-        return TimelineClip.getOpacity(type, t, isFadeIn);
+        return TemporalMath.getFadeValue(type, t, isFadeIn);
     }
 
     private void zoomIn(double anchorTime, double factor) {
