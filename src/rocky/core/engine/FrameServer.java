@@ -380,6 +380,10 @@ public class FrameServer {
             if (source == null)
                 continue;
 
+            // PRE-TOUCH: Inform the pool that this media is about to be used
+            // This prevents the LRU policy from evicting a decoder that is visible.
+            rocky.core.media.DecoderPool.touch(source.getFilePath());
+
             long frameInClip = targetFrame - clip.getStartFrame();
             long sourceFrame = clip.getSourceFrameAt(frameInClip);
             monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DECODE_START);

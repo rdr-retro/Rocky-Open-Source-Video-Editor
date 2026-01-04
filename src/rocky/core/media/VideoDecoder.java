@@ -206,6 +206,9 @@ public class VideoDecoder {
         try {
             if (grabber == null) return null;
             
+            // Refresh LRU status in the pool so we are not evicted during long playback
+            DecoderPool.touch(videoFile.getAbsolutePath());
+            
             // Fuzzy Sequential Logic
             // If we are close enough (e.g. within 5 frames forward), just read through
             // This avoids flushing the decoder pipeline which happens on seek/timestamp change

@@ -2,70 +2,94 @@ package rocky.core.media;
 
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import java.io.File;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Manages a pool of FFmpegFrameGrabbers to avoid the overhead of 
  * creating/starting/stopping native grabbers frequently.
+ * 
+ * ENHANCED: Implements an LRU eviction policy to prevent VRAM fragmentation 
+ * and native memory leaks in large projects.
  */
 public class DecoderPool {
     
+    // Limits the total number of OPEN native decoders across all media sources
+    private static final int MAX_OPEN_DECODERS = 10;
+    
     // Key: File absolute path
-    // Value: Queue of Available (Stopped or Started) Grabbers
-    // We pool them by File because a Grabber is bound to a file.
-    private static final ConcurrentHashMap<String, ConcurrentLinkedQueue<FFmpegFrameGrabber>> pool = new ConcurrentHashMap<>();
+    // Value: Queue of Available Grabbers for that file
+    private static final Map<String, ConcurrentLinkedQueue<FFmpegFrameGrabber>> pool = new LinkedHashMap<>(MAX_OPEN_DECODERS, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, ConcurrentLinkedQueue<FFmpegFrameGrabber>> eldest) {
+            if (size() > MAX_OPEN_DECODERS) {
+                evict(eldest.getKey(), eldest.getValue());
+                return true;
+            }
+            return false;
+        }
+    };
 
     /**
      * Acquires a grabber for the given file.
-     * If one exists in the pool, it is returned. 
-     * If not, a new one is created (but NOT started).
+     * If one exists in the pool, it is returned and marked as "Recently Used".
      */
-    public static FFmpegFrameGrabber acquire(File file) {
+    public static synchronized FFmpegFrameGrabber acquire(File file) {
         String key = file.getAbsolutePath();
-        ConcurrentLinkedQueue<FFmpegFrameGrabber> queue = pool.get(key);
+        ConcurrentLinkedQueue<FFmpegFrameGrabber> queue = pool.get(key); // LinkedHashMap.get() updates LRU order
         
         if (queue != null) {
             FFmpegFrameGrabber grabber = queue.poll();
             if (grabber != null) {
-                // System.out.println("[DecoderPool] Reusing grabber for: " + file.getName());
                 return grabber;
             }
         }
         
-        // System.out.println("[DecoderPool] Creating NEW grabber for: " + file.getName());
+        // If we reach here, we need a new grabber. 
+        // We ensure the entry exists in the map so size() and LRU work.
+        pool.computeIfAbsent(key, k -> new ConcurrentLinkedQueue<>());
         return new FFmpegFrameGrabber(file);
     }
 
     /**
      * Releases a grabber back to the pool.
-     * The caller should ensure the grabber is in a reusable state (valid).
-     * We do NOT stop it here, allowing the next user to potentially reuse it hot.
-     * However, VideoDecoder often restarts, so this is just saving the object/native allocation.
      */
-    public static void release(File file, FFmpegFrameGrabber grabber) {
+    public static synchronized void release(File file, FFmpegFrameGrabber grabber) {
         if (grabber == null || file == null) return;
         
         String key = file.getAbsolutePath();
         pool.computeIfAbsent(key, k -> new ConcurrentLinkedQueue<>()).offer(grabber);
-        // System.out.println("[DecoderPool] Returned grabber to pool: " + file.getName());
+    }
+
+    /**
+     * Refreshes the "Recently Used" status of a file without acquiring a grabber.
+     * Useful for pre-caching visible clips.
+     */
+    public static synchronized void touch(String filePath) {
+        pool.get(filePath); // Simply accessing it updates LRU if accessOrder=true
+    }
+
+    private static void evict(String key, ConcurrentLinkedQueue<FFmpegFrameGrabber> queue) {
+        System.out.println("[DecoderPool] EVICTING oldest decoders for: " + key);
+        FFmpegFrameGrabber g;
+        while ((g = queue.poll()) != null) {
+            try {
+                g.stop();
+                g.release();
+            } catch (Exception e) {
+                System.err.println("[DecoderPool] Error during eviction of " + key + ": " + e.getMessage());
+            }
+        }
     }
 
     /**
      * Completely shuts down the pool and releases all native resources.
      */
-    public static void shutdown() {
+    public static synchronized void shutdown() {
         System.out.println("[DecoderPool] Shutting down pool...");
-        for (ConcurrentLinkedQueue<FFmpegFrameGrabber> queue : pool.values()) {
-            FFmpegFrameGrabber g;
-            while ((g = queue.poll()) != null) {
-                try {
-                    g.stop();
-                    g.release();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
+        for (Map.Entry<String, ConcurrentLinkedQueue<FFmpegFrameGrabber>> entry : pool.entrySet()) {
+            evict(entry.getKey(), entry.getValue());
         }
         pool.clear();
     }
