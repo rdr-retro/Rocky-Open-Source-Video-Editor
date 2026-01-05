@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class PluginManager {
     private static final PluginManager INSTANCE = new PluginManager();
-    
+
     private final Map<String, RockyEffect> effects = new ConcurrentHashMap<>();
     private final Map<String, RockyTransition> transitions = new ConcurrentHashMap<>();
     private final Map<String, RockyMediaGenerator> generators = new ConcurrentHashMap<>();
@@ -23,7 +23,7 @@ public class PluginManager {
         if (!pluginsDir.exists()) {
             pluginsDir.mkdirs();
         }
-        // FIXED: Scan the user's plugin directory
+        // Scan the user's plugin directory
         System.out.println("[PluginManager] Scanning user plugins: " + pluginsDir.getAbsolutePath());
         scanFolder(pluginsDir);
 
@@ -40,7 +40,8 @@ public class PluginManager {
 
     public void scanFolder(File folder) {
         File[] jars = folder.listFiles((dir, name) -> name.endsWith(".jar"));
-        if (jars == null) return;
+        if (jars == null)
+            return;
 
         for (File jar : jars) {
             loadPluginsFromJar(jar);
@@ -50,8 +51,8 @@ public class PluginManager {
     private void loadPluginsFromJar(File jar) {
         try {
             URL url = jar.toURI().toURL();
-            URLClassLoader loader = new URLClassLoader(new URL[]{url}, getClass().getClassLoader());
-            
+            URLClassLoader loader = new URLClassLoader(new URL[] { url }, getClass().getClassLoader());
+
             // Using ServiceLoader for clean discovery
             ServiceLoader<RockyEffect> effectLoader = ServiceLoader.load(RockyEffect.class, loader);
             for (RockyEffect effect : effectLoader) {

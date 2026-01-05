@@ -27,7 +27,6 @@ public class TimelinePanel extends JPanel {
     private rocky.core.model.TimelineModel model;
     private final Map<TimelineClip, TimelineClipView> viewProxies = new HashMap<>();
 
-
     // View State
     private double pixelsPerSecond = 100.0; // Dynamic Zoom Scale
     private double visibleStartTime = 0.0; // Time at X=0 (in seconds)
@@ -273,7 +272,7 @@ public class TimelinePanel extends JPanel {
     public TimelinePanel(rocky.core.model.TimelineModel model) {
         this.model = model;
         model.addListener(this::onModelUpdated);
-        
+
         setBackground(BG_COLOR);
         setFocusable(true);
 
@@ -447,7 +446,8 @@ public class TimelinePanel extends JPanel {
                                     activeClip = clip;
                                     TimelineClipView v = getViewProxy(clip);
                                     if (!e.isShiftDown() && !v.isSelected()) {
-                                        for (TimelineClipView proxy : viewProxies.values()) proxy.setSelected(false);
+                                        for (TimelineClipView proxy : viewProxies.values())
+                                            proxy.setSelected(false);
                                     }
                                     v.setSelected(true);
                                     repaint();
@@ -654,7 +654,8 @@ public class TimelinePanel extends JPanel {
                 } else {
                     if (activeClip != null) {
                         // Re-insert into tree after modification
-                        model.getClipTree().add(activeClip.getStartFrame(), activeClip.getStartFrame() + activeClip.getDurationFrames(), activeClip);
+                        model.getClipTree().add(activeClip.getStartFrame(),
+                                activeClip.getStartFrame() + activeClip.getDurationFrames(), activeClip);
                     }
 
                     if (activeClip != null && interactionMode != 0) {
@@ -740,30 +741,30 @@ public class TimelinePanel extends JPanel {
                 JMenuItem fxItem = new JMenuItem("Efectos de vídeo...");
                 fxItem.addActionListener(ev -> {
                     Window parent = SwingUtilities.getWindowAncestor(TimelinePanel.this);
-                    FXChainWindow fxWin = new FXChainWindow(parent instanceof Frame ? (Frame)parent : null, 
-                        "Efectos de evento de vídeo", clip.getAppliedEffects(), () -> {
-                            fireTimelineUpdated();
-                        });
+                    FXChainWindow fxWin = new FXChainWindow(parent instanceof Frame ? (Frame) parent : null,
+                            "Efectos de evento de vídeo", clip.getAppliedEffects(), () -> {
+                                fireTimelineUpdated();
+                            });
                     fxWin.setVisible(true);
                 });
                 menu.add(fxItem);
 
                 menu.add(fxItem);
-                
+
                 // FIXED: Location moved to showClipMenu
                 // Edit Text Option for TextGenerator
                 if (clip.getMediaGenerator() != null && clip.getMediaGenerator().getPluginName().contains("Texto")) {
-                     JMenuItem textItem = new JMenuItem("Editar texto...");
-                     textItem.addActionListener(ev -> {
-                         Window parent = SwingUtilities.getWindowAncestor(TimelinePanel.this);
-                         new TextEditorDialog(parent, clip.getMediaGenerator(), () -> {
-                             fireTimelineUpdated();
-                             if (historyManager != null) {
-                                 historyManager.pushState(TimelinePanel.this, projectProps, mediaPool);
-                             }
-                         }).setVisible(true);
-                     });
-                     menu.add(textItem);
+                    JMenuItem textItem = new JMenuItem("Editar texto...");
+                    textItem.addActionListener(ev -> {
+                        Window parent = SwingUtilities.getWindowAncestor(TimelinePanel.this);
+                        new TextEditorDialog(parent, clip.getMediaGenerator(), () -> {
+                            fireTimelineUpdated();
+                            if (historyManager != null) {
+                                historyManager.pushState(TimelinePanel.this, projectProps, mediaPool);
+                            }
+                        }).setVisible(true);
+                    });
+                    menu.add(textItem);
                 }
 
                 menu.addSeparator();
@@ -904,7 +905,7 @@ public class TimelinePanel extends JPanel {
                     group.add(item);
                     menu.add(item);
                 }
-                
+
                 menu.addSeparator();
                 menu.show(e.getComponent(), e.getX(), e.getY());
             }
@@ -991,8 +992,8 @@ public class TimelinePanel extends JPanel {
 
                         // If dropping a Generator in empty space, create a new track
                         if (targetTrackIdx == -1 && plugin instanceof RockyMediaGenerator && sidebar != null) {
-                             sidebar.addTrack(TrackControlPanel.TrackType.VIDEO);
-                             targetTrackIdx = sidebar.getTrackCount() - 1;
+                            sidebar.addTrack(TrackControlPanel.TrackType.VIDEO);
+                            targetTrackIdx = sidebar.getTrackCount() - 1;
                         }
 
                         if (targetTrackIdx != -1) {
@@ -1005,10 +1006,12 @@ public class TimelinePanel extends JPanel {
                                     AppliedPlugin applied = new AppliedPlugin(plugin.getName());
                                     if (frame < mid) {
                                         clip.setFadeInTransition(applied);
-                                        if (clip.getFadeInFrames() == 0) clip.setFadeInFrames(Math.min(30, clip.getDurationFrames() / 8));
+                                        if (clip.getFadeInFrames() == 0)
+                                            clip.setFadeInFrames(Math.min(30, clip.getDurationFrames() / 8));
                                     } else {
                                         clip.setFadeOutTransition(applied);
-                                        if (clip.getFadeOutFrames() == 0) clip.setFadeOutFrames(Math.min(30, clip.getDurationFrames() / 8));
+                                        if (clip.getFadeOutFrames() == 0)
+                                            clip.setFadeOutFrames(Math.min(30, clip.getDurationFrames() / 8));
                                     }
                                 }
                             } else if (plugin instanceof RockyMediaGenerator) {
@@ -1111,7 +1114,8 @@ public class TimelinePanel extends JPanel {
 
                                     // Rule 3: MP4/Video with audio -> Auto create audio track below
                                     boolean hasAudio = source.hasAudio();
-                                    if (source.isVideo() && hasAudio && trackType == TrackControlPanel.TrackType.VIDEO) {
+                                    if (source.isVideo() && hasAudio
+                                            && trackType == TrackControlPanel.TrackType.VIDEO) {
                                         if (sidebar != null) {
                                             int audioTrackIdx = targetTrackIndex + 1;
                                             onTrackInserted(audioTrackIdx);
@@ -1236,18 +1240,18 @@ public class TimelinePanel extends JPanel {
      * Removes clips and shifts them up when a track is deleted.
      */
     public void removeTrackData(int index) {
-            java.util.List<TimelineClip> toRemove = new java.util.ArrayList<>();
-            for (TimelineClip clip : model.getClips()) {
-                if (clip.getTrackIndex() == index) {
-                    toRemove.add(clip);
-                } else if (clip.getTrackIndex() > index) {
-                    clip.setTrackIndex(clip.getTrackIndex() - 1);
-                }
+        java.util.List<TimelineClip> toRemove = new java.util.ArrayList<>();
+        for (TimelineClip clip : model.getClips()) {
+            if (clip.getTrackIndex() == index) {
+                toRemove.add(clip);
+            } else if (clip.getTrackIndex() > index) {
+                clip.setTrackIndex(clip.getTrackIndex() - 1);
             }
-            for (TimelineClip c : toRemove) {
-                model.removeClip(c);
-            }
-            fireTimelineUpdated();
+        }
+        for (TimelineClip c : toRemove) {
+            model.removeClip(c);
+        }
+        fireTimelineUpdated();
     }
 
     private long findSnapFrame(long targetFrame, TimelineClip excludeClip) {
@@ -1419,49 +1423,75 @@ public class TimelinePanel extends JPanel {
                     rocky.core.media.MediaSource source = mediaPool.getSource(clip.getMediaSourceId());
                     if (source != null) {
                         int thumbH = trackH - 22;
-                        // Calculate ideal thumbnail width based on aspect ratio (assuming 16:9 approx if unknown, 
+                        // Calculate ideal thumbnail width based on aspect ratio (assuming 16:9 approx
+                        // if unknown,
                         // but better to use source ratio if available)
-                        double aspectRatio = (double)source.getWidth() / Math.max(1, source.getHeight());
-                        if (aspectRatio <= 0) aspectRatio = 1.777;
-                        
+                        double aspectRatio = (double) source.getWidth() / Math.max(1, source.getHeight());
+                        if (aspectRatio <= 0)
+                            aspectRatio = 1.777;
+
                         int thumbW = (int) (thumbH * aspectRatio);
-                        if (thumbW < 1) thumbW = 50;
+                        if (thumbW < 1)
+                            thumbW = 50;
 
                         // Filmstrip Loop
                         // We draw as many thumbnails as fit in the visible clip area
                         // To optimize, we only draw fully or partially visible thumbnails
-                        
-                        // Clip Screen Rect
-                        int clipScreenX = x;
-                        int clipScreenW = w;
-                        
-                        // Intersection with Viewport (Optimization: Don't draw thumbs off screen)
-                        // Simple check: iterate from 0 to w with step thumbW
-                        
+
+                        // --- THUMBNAIL RENDERING (3-Point: Start, Middle, End) ---
                         Shape oldClipRect = g2d.getClip();
                         g2d.setClip(new Rectangle(Math.max(0, x), trackY + 21, w, thumbH));
-                        
-                        for (int tx = 0; tx < w; tx += thumbW) {
-                            // Calculate which frame this thumbnail represents
-                            // tx is offset in pixels from clip start
-                            // time offset = tx / pixelsPerSecond
-                            // frame offset = time * fps
-                            double offsetTime = tx / pixelsPerSecond;
-                            long offsetFrames = Math.round(offsetTime * getFPS());
-                            
+
+                        // Define positions for 3 thumbnails
+                        // 1. Start (Left)
+                        // 2. Middle (Center)
+                        // 3. End (Right)
+
+                        // Helper structure for the 3 frames
+                        // [Position X relative to clip, Frame Offset]
+                        long durationFrames = clip.getDurationFrames();
+                        long[][] thumbConfig = {
+                                { 0, 0 }, // Start
+                                { (w - thumbW) / 2, durationFrames / 2 }, // Middle
+                                { w - thumbW, durationFrames - 1 } // End
+                        };
+
+                        // Which thumbnails to draw based on available width
+                        boolean drawStart = true;
+                        boolean drawEnd = w > thumbW;
+                        boolean drawMiddle = w > thumbW * 2.5; // Only if space allows separation
+
+                        // Draw Loop
+                        for (int i = 0; i < 3; i++) {
+                            if (i == 1 && !drawMiddle)
+                                continue;
+                            if (i == 2 && !drawEnd)
+                                continue;
+
+                            int tx = (int) thumbConfig[i][0];
+                            long offsetFrames = thumbConfig[i][1];
+
+                            // Prevent overlap for Middle if it's too close (redundant but safe)
+                            if (i == 1) {
+                                if (tx < thumbW || tx > w - thumbW * 2)
+                                    continue;
+                            }
+
+                            // Bounds check
+                            if (tx < 0)
+                                tx = 0;
+
                             // Ask Cache
-                            // Callback: repaint() if loaded async
                             BufferedImage thumb = rocky.core.cache.ThumbnailCache.getInstance().getThumbnail(
-                                source.getFilePath(), 
-                                clip.getSourceOffsetFrames() + offsetFrames, 
-                                getFPS(),
-                                () -> repaint()
-                            );
-                            
+                                    source.getFilePath(),
+                                    clip.getSourceOffsetFrames() + offsetFrames,
+                                    getFPS(),
+                                    () -> repaint());
+
                             if (thumb != null) {
                                 g2d.drawImage(thumb, x + tx, trackY + 21, thumbW, thumbH, null);
                             } else {
-                                // Draw placeholder (optional, or just empty)
+                                // Draw placeholder
                                 g2d.setColor(Color.decode("#1a0b2e"));
                                 g2d.fillRect(x + tx, trackY + 21, thumbW, thumbH);
                             }
@@ -1674,7 +1704,8 @@ public class TimelinePanel extends JPanel {
             if (screenX < 0 || screenX > getWidth())
                 continue;
 
-            // Map pixel to source frame (using TemporalMath for time-warping support if any)
+            // Map pixel to source frame (using TemporalMath for time-warping support if
+            // any)
             double progress = (double) dx / w;
             long clipFrame = Math.round(progress * duration);
             long sourceFrame = TemporalMath.getSourceFrameAt(clip, clipFrame);
@@ -1727,7 +1758,8 @@ public class TimelinePanel extends JPanel {
 
     public void fireTimelineUpdated() {
         for (TimelineListener listener : listeners) {
-            listener.onTimeUpdate(getPlayheadTime(), getPlayheadFrame(), model.getBlueline().formatTimecode(getPlayheadFrame()),
+            listener.onTimeUpdate(getPlayheadTime(), getPlayheadFrame(),
+                    model.getBlueline().formatTimecode(getPlayheadFrame()),
                     true);
             listener.onTimelineUpdated();
         }
@@ -1739,14 +1771,14 @@ public class TimelinePanel extends JPanel {
         long currentFrame = model.getBlueline().getPlayheadFrame();
         double time = currentFrame / (double) getFPS(); // approximation, accurate enough for UI
         String timecode = model.getBlueline().formatTimecode(currentFrame);
-        
+
         // Auto-scroll logic (moved from updatePlayheadFromFrame)
         // If playing, we might need to scroll
         if (model.getBlueline().isPlaying()) {
-             double newScroll = model.getBlueline().calculateAutoScroll(visibleStartTime, getVisibleDuration());
-             if (newScroll >= 0) {
-                 visibleStartTime = newScroll;
-             }
+            double newScroll = model.getBlueline().calculateAutoScroll(visibleStartTime, getVisibleDuration());
+            if (newScroll >= 0) {
+                visibleStartTime = newScroll;
+            }
         }
 
         for (TimelineListener listener : listeners) {

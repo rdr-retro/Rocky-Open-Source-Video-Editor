@@ -39,9 +39,10 @@ public class PanCropEditor extends JPanel {
 
         this.treePanel = new PropertiesTreePanel(clip);
         treePanel.setOnParameterChanged(() -> {
-            if (onUpdate != null) onUpdate.run();
+            if (onUpdate != null)
+                onUpdate.run();
         });
-        
+
         VisualCanvas canvas = new VisualCanvas(clip, pool, historyManager);
         canvas.setContext(mainTimeline, projectProps);
 
@@ -67,12 +68,12 @@ public class PanCropEditor extends JPanel {
             public void onPlayheadChanged(long clipLocalFrame) {
                 // Convert clip-local frame to global timeline frame
                 long globalFrame = clip.getStartFrame() + clipLocalFrame;
-                
+
                 // Update main timeline playhead
                 if (mainTimeline != null) {
                     mainTimeline.updatePlayheadFromFrame(globalFrame, true);
                 }
-                
+
                 canvas.setPlayheadFrame(globalFrame);
                 // Update clip's working transform to the interpolated one for preview
                 clip.setTransform(TemporalMath.getInterpolatedTransform(clip, clipLocalFrame));
@@ -88,18 +89,21 @@ public class PanCropEditor extends JPanel {
                 public void onTimeUpdate(double time, long frame, String timecode, boolean force) {
                     // Convert global timeline frame to clip-local frame
                     long clipLocalFrame = frame - clip.getStartFrame();
-                    
+
                     // Clamp to clip boundaries
-                    if (clipLocalFrame < 0) clipLocalFrame = 0;
-                    if (clipLocalFrame > clip.getDurationFrames()) clipLocalFrame = clip.getDurationFrames();
-                    
+                    if (clipLocalFrame < 0)
+                        clipLocalFrame = 0;
+                    if (clipLocalFrame > clip.getDurationFrames())
+                        clipLocalFrame = clip.getDurationFrames();
+
                     canvas.setPlayheadFrame(frame);
                     timeline.setPlayheadFrame(clipLocalFrame);
                     repaint();
                 }
 
                 @Override
-                public void onTimelineUpdated() {}
+                public void onTimelineUpdated() {
+                }
             });
         }
 
@@ -109,6 +113,12 @@ public class PanCropEditor extends JPanel {
         verticalSplit.setBorder(null);
 
         add(verticalSplit, BorderLayout.CENTER);
+
+        // Force editor to open at START of clip (Frame 0)
+        SwingUtilities.invokeLater(() -> {
+            timeline.setPlayheadFrame(0);
+            canvas.setPlayheadFrame(0);
+        });
     }
 
     private JPanel createTopToolbar() {
@@ -137,7 +147,8 @@ public class PanCropEditor extends JPanel {
                     }
                     clip.addEffect(applied);
                     treePanel.refresh();
-                    if (onUpdate != null) onUpdate.run();
+                    if (onUpdate != null)
+                        onUpdate.run();
                 });
                 menu.add(item);
             }

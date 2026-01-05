@@ -22,6 +22,9 @@ public class VisualCanvas extends JPanel {
     private final MediaPool pool;
     private double zoom = 1.0;
     private Point lastMousePos;
+    private Point2D initialMouseWorldPos;
+    private double initialScaleX;
+    private double initialScaleY;
     private ToolsSidebar.Tool currentTool = ToolsSidebar.Tool.SELECT;
     private rocky.core.media.MaskAnchor hoveredAnchor = null;
     private rocky.core.media.MaskAnchor selectedAnchor = null;
@@ -33,9 +36,9 @@ public class VisualCanvas extends JPanel {
 
     private Action currentAction = Action.NONE;
     private int resizeHandle = -1; // 0-7
-    private double initialRotation;
-    private double initialMouseAngle;
+    private double lastRotationAngle;
     private long localPlayheadFrame = 0;
+    private ClipTransform initialTransformSnapshot;
     private final rocky.core.persistence.HistoryManager historyManager;
     private rocky.ui.timeline.TimelinePanel mainTimeline;
     private rocky.ui.timeline.ProjectProperties projectProps;
@@ -60,6 +63,12 @@ public class VisualCanvas extends JPanel {
                 lastMousePos = e.getPoint();
                 Point2D p = inverseTransform(e.getPoint());
 
+                // Initialize state for accurate dragging
+                initialMouseWorldPos = p;
+                initialTransformSnapshot = new ClipTransform(clip.getTransform());
+                initialScaleX = clip.getTransform().getScaleX();
+                initialScaleY = clip.getTransform().getScaleY();
+
                 if (currentTool == ToolsSidebar.Tool.EDIT) { // Pen tool / Masking
                     if (hoveredAnchor != null && clip.getMask().getAnchors().indexOf(hoveredAnchor) == 0
                             && clip.getMask().getAnchors().size() > 2) {
@@ -76,9 +85,8 @@ public class VisualCanvas extends JPanel {
                         currentAction = Action.MOVING;
                     } else if (isRotationArea(e.getPoint())) {
                         currentAction = Action.ROTATING;
-                        initialRotation = clip.getTransform().getRotation();
-                        initialMouseAngle = Math.atan2(p.getY() - clip.getTransform().getY(),
-                                p.getX() - clip.getTransform().getX());
+                        lastRotationAngle = Math.toDegrees(Math.atan2(p.getY() - clip.getTransform().getY(),
+                                p.getX() - clip.getTransform().getX()));
                     } else {
                         selectedAnchor = findAnchorAt(e.getPoint());
                         if (selectedAnchor == null)
@@ -109,11 +117,23 @@ public class VisualCanvas extends JPanel {
                     clip.getTransform().setX(clip.getTransform().getX() + dx);
                     clip.getTransform().setY(clip.getTransform().getY() + dy);
                 } else if (currentAction == Action.ROTATING) {
-                    double currentAngle = Math.atan2(p.getY() - clip.getTransform().getY(),
-                            p.getX() - clip.getTransform().getX());
-                    clip.getTransform().setRotation(initialRotation + Math.toDegrees(currentAngle - initialMouseAngle));
+                    double currentAngle = Math.toDegrees(Math.atan2(p.getY() - clip.getTransform().getY(),
+                            p.getX() - clip.getTransform().getX()));
+
+                    double delta = currentAngle - lastRotationAngle;
+
+                    // Normalize delta to handle wrap-around (-180 to 180 boundary)
+                    if (delta < -180)
+                        delta += 360;
+                    if (delta > 180)
+                        delta -= 360;
+
+                    clip.getTransform().setRotation(clip.getTransform().getRotation() + delta);
+                    lastRotationAngle = currentAngle;
                 } else if (currentAction == Action.RESIZING) {
-                    handleResizing(p, dx, dy);
+                    double totalDx = p.getX() - initialMouseWorldPos.getX();
+                    double totalDy = p.getY() - initialMouseWorldPos.getY();
+                    handleResizing(totalDx, totalDy, e.isShiftDown());
                 } else if (selectedAnchor != null) {
                     selectedAnchor.setX(p.getX());
                     selectedAnchor.setY(p.getY());
@@ -152,16 +172,33 @@ public class VisualCanvas extends JPanel {
     }
 
     private void updateTransform() {
-        // If there are NO keyframes yet, we update the BASE transform
+        // AUTO-KEYFRAME LOGIC
+        // If there are NO keyframes yet:
         if (clip.getTimeKeyframes().isEmpty()) {
-            firePropertyChange("transform", null, clip.getTransform());
-            repaint();
-            return;
+            // Case A: We are at Start (Frame 0) -> Apply GLOBAL change (no keyframes needed
+            // yet)
+            if (localPlayheadFrame == 0) {
+                firePropertyChange("transform", null, clip.getTransform());
+                repaint();
+                return;
+            }
+            // Case B: We are NOT at Start -> User wants to animate FROM start TO here
+            else {
+                // 1. Create Keyframe at 0 with the INITIAL state (before this drag)
+                // This preserves the static look up until this point.
+                ClipTransform startT = (initialTransformSnapshot != null) ? initialTransformSnapshot
+                        : new ClipTransform();
+                clip.addKeyframe(new TimelineKeyframe(0, 0, new ClipTransform(startT)));
+
+                // 2. Create Keyframe at current frame with NEW state will be handled by
+                // "existing" logic below
+                // (We just added one, so the check below will pass)
+            }
         }
 
-        // Auto-Keying Logic: If there is at least ONE keyframe, we continue auto-keying
+        // Auto-Keying Logic: Update existing or create new at current frame
         TimelineKeyframe existing = null;
-        synchronized(clip.getTimeKeyframes()) {
+        synchronized (clip.getTimeKeyframes()) {
             for (TimelineKeyframe k : clip.getTimeKeyframes()) {
                 if (k.getClipFrame() == localPlayheadFrame) {
                     existing = k;
@@ -173,7 +210,7 @@ public class VisualCanvas extends JPanel {
         if (existing != null) {
             existing.setTransform(new ClipTransform(clip.getTransform()));
         } else {
-            // Performance: Use addKeyframe to ensure sorting is only done once
+            // New keyframe at this position
             clip.addKeyframe(new TimelineKeyframe(
                     localPlayheadFrame, localPlayheadFrame, new ClipTransform(clip.getTransform())));
         }
@@ -259,42 +296,88 @@ public class VisualCanvas extends JPanel {
         return pts;
     }
 
-    private void handleResizing(Point2D p, double dx, double dy) {
-        ClipTransform ct = clip.getTransform();
-        double factorX = dx / 150.0;
-        double factorY = dy / 100.0;
+    private void handleResizing(double totalDx, double totalDy, boolean isShift) {
+        // Base dimensions for scale 1.0 (used in findResizeHandleAt)
+        double baseHalfW = 150.0;
+        double baseHalfH = 100.0;
 
-        // Handle logic based on index (0=TL, 1=TC, 2=TR, 3=RC, 4=BR, 5=BC, 6=BL, 7=LC)
+        // Calculate raw scale change factors based on mouse movement
+        double factorX = totalDx / baseHalfW;
+        double factorY = totalDy / baseHalfH;
+
+        // We will calculate target scales relative to the INITIAL state
+        double targetScaleX = initialScaleX;
+        double targetScaleY = initialScaleY;
+
+        // Apply directionality based on handle
+        // 0=TL, 1=TC, 2=TR, 3=RC, 4=BR, 5=BC, 6=BL, 7=LC
         switch (resizeHandle) {
-            case 0:
-                ct.setScaleX(ct.getScaleX() - factorX);
-                ct.setScaleY(ct.getScaleY() - factorY);
+            case 0: // Top-Left
+                targetScaleX -= factorX;
+                targetScaleY -= factorY;
                 break;
-            case 1:
-                ct.setScaleY(ct.getScaleY() - factorY);
+            case 1: // Top
+                targetScaleY -= factorY;
                 break;
-            case 2:
-                ct.setScaleX(ct.getScaleX() + factorX);
-                ct.setScaleY(ct.getScaleY() - factorY);
+            case 2: // Top-Right
+                targetScaleX += factorX;
+                targetScaleY -= factorY;
                 break;
-            case 3:
-                ct.setScaleX(ct.getScaleX() + factorX);
+            case 3: // Right
+                targetScaleX += factorX;
                 break;
-            case 4:
-                ct.setScaleX(ct.getScaleX() + factorX);
-                ct.setScaleY(ct.getScaleY() + factorY);
+            case 4: // Bottom-Right
+                targetScaleX += factorX;
+                targetScaleY += factorY;
                 break;
-            case 5:
-                ct.setScaleY(ct.getScaleY() + factorY);
+            case 5: // Bottom
+                targetScaleY += factorY;
                 break;
-            case 6:
-                ct.setScaleX(ct.getScaleX() - factorX);
-                ct.setScaleY(ct.getScaleY() + factorY);
+            case 6: // Bottom-Left
+                targetScaleX -= factorX;
+                targetScaleY += factorY;
                 break;
-            case 7:
-                ct.setScaleX(ct.getScaleX() - factorX);
+            case 7: // Left
+                targetScaleX -= factorX;
                 break;
         }
+
+        // Apply Proportional Logic if it's a CORNER handle and SHIFT is NOT held
+        boolean isCorner = (resizeHandle == 0 || resizeHandle == 2 || resizeHandle == 4 || resizeHandle == 6);
+        if (isCorner && !isShift) {
+            double initialRatio = initialScaleX / initialScaleY;
+
+            // Determine dominant change to drive aspect ratio
+            // We use the magnitude of change relative to the initial size to decide
+            // "intent"
+            double deltaX = Math.abs(targetScaleX - initialScaleX);
+            double deltaY = Math.abs(targetScaleY - initialScaleY);
+
+            // Normalizing delta by aspect ratio to compare "visual" distance
+            // If aspect is 2:1 (X=2, Y=1), a change of 0.2 in X is "less" impactful than
+            // 0.2 in Y?
+            // Simple approach: Use the larger relative change
+            // Or simpler: Use the MAX scale factor to drive the other
+
+            if (deltaX > deltaY * initialRatio) {
+                // X is dominant
+                targetScaleY = targetScaleX / initialRatio;
+            } else {
+                // Y is dominant
+                targetScaleX = targetScaleY * initialRatio;
+            }
+        }
+
+        // Safety clamps (prevent flipping/zero for now if desired, though standard
+        // tools often allow flipping)
+        // Let's keep a tiny minimum to avoid errors
+        if (Math.abs(targetScaleX) < 0.01)
+            targetScaleX = 0.01 * Math.signum(targetScaleX);
+        if (Math.abs(targetScaleY) < 0.01)
+            targetScaleY = 0.01 * Math.signum(targetScaleY);
+
+        clip.getTransform().setScaleX(targetScaleX);
+        clip.getTransform().setScaleY(targetScaleY);
     }
 
     @Override

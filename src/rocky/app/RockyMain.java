@@ -63,6 +63,7 @@ public class RockyMain {
             JFrame frame = new JFrame("Rocky Open Source Video Editor (.rocky Projects)");
             frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             frame.setExtendedState(JFrame.MAXIMIZED_BOTH); // Maximize window
+            frame.setMinimumSize(new Dimension(1024, 768));
             frame.setBackground(Color.decode("#0f051d"));
             frame.setLayout(new BorderLayout());
 
@@ -138,10 +139,12 @@ public class RockyMain {
             });
             centerContainer.add(scrollbarPanel, BorderLayout.SOUTH);
 
-            timeline.setTimelineListener(new MainTimelineListener(sidebar, visualizer, frameServer, audioServer, timeline, ruler, hScroll));
+            timeline.setTimelineListener(
+                    new MainTimelineListener(sidebar, visualizer, frameServer, audioServer, timeline, ruler, hScroll));
 
             // --- UNDO / REDO KEYBOARD SHORTCUTS ---
-            KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(new MainUndoRedoDispatcher(history, timeline, projectProps, mediaPool, sidebar));
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(
+                    new MainUndoRedoDispatcher(history, timeline, projectProps, mediaPool, sidebar));
 
             timeline.addComponentListener(new TimelineResizeListener(timeline, hScroll));
 
@@ -199,7 +202,7 @@ public class RockyMain {
                     JOptionPane.showMessageDialog(frame, "Project saved: " + currentProjectFile.getName());
                     return;
                 }
-                
+
                 // Fallback to Save As behavior if no file is set
                 JFileChooser chooser = new JFileChooser();
                 chooser.setFileFilter(new FileNameExtensionFilter("Rocky Project (.rocky)", "rocky"));
@@ -275,7 +278,8 @@ public class RockyMain {
 
                     RenderEngine engine = new RenderEngine(frameServer);
                     final File finalFile = outputFile;
-                    engine.render(outputFile, new MainRenderProgressListener(progressBar, progressDialog, finalFile, frame));
+                    engine.render(outputFile,
+                            new MainRenderProgressListener(progressBar, progressDialog, finalFile, frame));
                     progressDialog.setVisible(true);
                 }
             });
