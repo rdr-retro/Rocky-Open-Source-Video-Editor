@@ -15,7 +15,7 @@ import java.util.Map;
  */
 public class BlackAndWhiteEffect implements RockyEffect {
     @Override
-    public String getName() { return "Blanco y Negro Pro"; }
+    public String getName() { return "Monocromo"; }
     @Override
     public String getDescription() { return "Convierte el clip a escala de grises."; }
     @Override

@@ -1,58 +1,157 @@
 # Rocky Open Source Video Editor
 
-Rocky Video Editor es un editor de video gratuito y de código abierto diseñado para ofrecer un rendimiento de nivel profesional con una interfaz intuitiva.
+Rocky Video Editor is a high-performance, open-source video editing application built in Java. It is designed to provide professional-grade features with a focus on extreme performance and fluidity ("Zero-Stutter"), utilizing hardware acceleration and advanced architectural patterns.
 
-##  Arquitectura "Zero-Stutter" (Multi-Plataforma)
+## 1. Introduction and Philosophy
 
-Rocky ha sido rediseñado para ofrecer la fluidez más extrema del mercado en Java, detectando automáticamente tu sistema operativo y hardware para optimizar el rendimiento:
+The core philosophy of Rocky is to provide a seamless editing experience. Traditional Java applications are often criticized for performance issues, especially in media processing. Rocky overcomes this by leveraging native hardware acceleration (VideoToolbox on macOS, NVENC/AMF/QSV on Windows) and a custom-built asynchronous pipeline.
 
-### Aceleración por Hardware Automática
-Rocky detecta tu tarjeta gráfica y utiliza el codificador nativo más rápido disponible:
-- **macOS (Apple Silicon/Intel)**: Usa **VideoToolbox** (nativo de Apple) para una renderización ultra-rápida y eficiente.
-- **Windows (NVIDIA)**: Detecta tarjetas GeForce/Quadro y activa **NVENC**.
-- **Windows (AMD)**: Detecta tarjetas Radeon y activa **AMF**.
-- **Windows (Intel)**: Detecta gráficos integrados (UHD/Iris) y activa **QuickSync (QSV)**.
+The editor supports non-linear video editing (NLE), allowing users to arrange video, audio, and image clips on multiple tracks, apply effects, transitions, and export the final result in high-quality formats.
 
-### Optimizaciones del Motor
-- **Playback Isolation Mode**: Sistema inteligente que pausa procesos secundarios (miniaturas, ondas de audio) al dar a "Play" para dedicar toda la potencia del equipo a la fluidez del video.
-- **Ondas de Audio Persistentes (.rocky_peaks)**: Inspirado en Sony Vegas (.sfk), Rocky guarda un caché binario de las ondas de audio para que se carguen instantáneamente sin volver a analizar el video.
-- **Async Texture Pipeline**: Subida de fotogramas a VRAM en hilos secundarios, eliminando por completo los bloqueos o avisos de `EDT BLOCKED`.
-- **Async History Engine**: El sistema de Undo/Redo (historial) funciona en segundo plano, permitiendo mover clips o soltar archivos sin micro-parones.
+## 2. Key Features
 
-## Características Principales
+### 2.1 Zero-Stutter Technology
+Rocky implements a sophisticated "Zero-Stutter" architecture that ensures smooth playback even with 4K footage.
+- **Playback Isolation**: When the user hits play, non-essential background tasks (like waveform generation or thumbnail caching) are paused to dedicate all system resources to video decoding and rendering.
+- **Asynchronous Texture Upload**: Frame data is uploaded to the GPU in a separate thread, preventing the Event Dispatch Thread (EDT) from blocking. This keeps the UI responsive at all times.
 
-- **Edición Multiuso**: Soporta múltiples pistas de video y audio simultáneas.
-- **Formatos Profesionales**: Soporte para MP4, MOV (HEVC/H264), MP3, WAV y archivos de audio CAF.
-- **Línea de Tiempo Intuitiva**: Arrastra y suelta (Drag & Drop) para empezar a editar al instante.
-- **Control Creativo**: Ajusta opacidad, realiza cortes precisos, aplica ACES Color Management y usa Keyframes para animar.
-- **Gestión de Proxies**: Genera versiones ligeras de tus clips (botón "px") para una respuesta táctil instantánea en proyectos masivos.
+### 2.2 Hardware Acceleration
+The application automatically detects the underlying hardware and selects the best available decoder and encoder.
+- **macOS**: Utilizes Apple's VideoToolbox framework for hardware-accelerated H.264 and HEVC decoding/encoding. Optimized for both Intel and Apple Silicon (M1/M2/M3) chips.
+- **Windows**:
+    - **NVIDIA**: Detects GeForce/Quadro cards and enables NVENC/NVDEC.
+    - **AMD**: Detects Radeon cards and enables AMF.
+    - **Intel**: Detects Integrated Graphics (UHD/Iris) and enables QuickSync Video (QSV).
 
-## Como Descargar e Instalar
+### 2.3 Professional Color Management
+Rocky integrates ACES (Academy Color Encoding System) specifically via an efficient approximation (Narkowicz ACES) suitable for real-time rendering. This provides a filmic look with proper highlight roll-off and contrast handling, superior to standard sRGB rendering.
 
-Sigue estos pasos sencillos para empezar a usar Rocky Video Editor en tu ordenador:
+### 2.4 Smart Caching
+- **Audio Peaks (.rocky_peaks)**: Similar to industry-standard software, Rocky generates and caches audio waveform data in binary files. This allows instant waveform loading on subsequent project opens, bypassing the need to re-analyze audio files.
+- **Proxy System**: Users can toggle "Proxy Mode" to generate lower-resolution, lightweight copies of media files for editing, which are instantly swapped for the originals during the final render.
 
-### Requisitos Previos
-Necesitas tener **Java** instalado en tu ordenador. Es probable que ya lo tengas, pero si no, puedes descargarlo gratis desde la pagina oficial de Java u OpenJDK.
+## 3. Technical Architecture
 
-### Paso 1: Descargar
-1. Ve al boton verde que dice "Code" en la parte superior de esta pagina.
-2. Selecciona la opcion "Download ZIP".
-3. Guarda el archivo en tu escritorio o carpeta de descargas.
+The project is structured around a Model-View-Controller (MVC) pattern, but heavily optimized for real-time media.
 
-### Paso 2: Preparar
-1. Busca el archivo ZIP que acabas de descargar.
-2. Haz clic derecho sobre el y selecciona "Extraer aqui" o "Descomprimir".
-3. Entra en la carpeta que se ha creado.
+### 3.1 Core Components
+- **TimelineModel**: The central data structure representing the project state. It manages a list of `TimelineClip` objects, arranged in tracks. It uses an `IntervalTree` for efficient spatial queries (finding which clips are under the playhead or mouse).
+- **FrameServer**: The engine responsible for fetching and composing video frames. It handles the "Render Graph", pulling frames from `VideoDecoder` instances, applying effects chain, rendering transitions, and compositing layers.
+- **VideoDecoder**: A wrapper around JavaCV/FFmpeg. It manages the native FFmpeg process, handles seeking, and frame grabbing. It implements a ring buffer to pre-fetch frames and smooth out playback.
+- **RenderEngine**: Sharing logic with FrameServer, this component is dedicated to the export process, writing the composed frames to a video file using the selected hardware encoder.
 
-### Paso 3: Abrir el Programa
+### 3.2 Plugin System
+Rocky features a robust plugin architecture based on Java's `ServiceLoader`.
+- **Location**: Plugins are loaded from the local `plugins` folder and the user's home directory (`~/.rocky_plugins`).
+- **Discovery**: The `PluginManager` scans the classpath and external JARs for implementations of the logical interfaces.
+- **Types**:
+    - **RockyMediaGenerator**: Creates content (e.g., Solid Color, Text, Checkerboard).
+    - **RockyEffect**: Modifies existing frames (e.g., Blur, Sepia, Black & White).
+    - **RockyTransition**: Blends two overlapping clips (e.g., CrossFade, Dissolve).
 
-**En Windows:**
-1. Dentro de la carpeta, busca un archivo llamado `run.bat` (o simplemente `run`).
-2. Haz doble clic sobre el para iniciar el editor.
+### 3.3 User Interface (UI)
+The UI is built with Java Swing but customized heavily.
+- **TimelinePanel**: A custom-painted component that renders the multi-track timeline, clips, waveforms, and playhead. It handles complex mouse interactions for trimming, moving, and selecting clips.
+- **PropertiesWindow**: A dynamic panel that inspects the currently selected clip. It uses reflection or a property model to expose editable fields (Position, Opacity, Plugin Parameters).
+- **TextEditorDialog**: A specialized dialog for the Text Generator plugin, offering controls for Font, Size, Color, and Text content with a modern dark theme.
 
-**En Mac o Linux:**
-1. Abre la carpeta del programa.
-2. Haz doble clic en el archivo `run.sh` (o `run`).
-3. Nota: Si no se abre al hacer doble clic, es posible que necesites abrir la "Terminal", arrastrar el archivo `run.sh` dentro y pulsar Enter.
+## 4. Project Structure
 
-¡Y listo! El editor deberia abrirse y estar listo para usarse.
+- **src/**: Contains the main application source code.
+    - `rocky.app`: Entry point (`RockyMain.java`).
+    - `rocky.core`: Core logic, data models, and media processing.
+        - `model`: `TimelineClip`, `TimelineModel`, `ProjectProperties`.
+        - `media`: `VideoDecoder`, `AudioDecoder`, `FrameServer`.
+        - `plugins`: Plugin interfaces and `PluginManager`.
+    - `rocky.ui`: UI components.
+        - `timeline`: `TimelinePanel`, `TimelineRuler`.
+        - `viewer`: `ViewerPanel`, `GLCanvas` integration.
+- **plugins_src/**: Source code for built-in plugins (Standard Library).
+    - `rocky.core.plugins.samples`: Implementations like `TextGenerator`, `SolidColorGenerator`.
+    - `META-INF/services`: Configuration files for `ServiceLoader`.
+- **lib/**: External dependencies (JARs). Populated automatically by the build script.
+- **bin_user/**: Output directory for compiled main application classes.
+- **bin_plugins/**: Temporary output directory for compiling plugins.
+- **plugins/**: Final destination for packaged plugin JARs (`samples.jar`).
+
+## 5. Development Guide
+
+### 5.1 Dependencies
+The project relies on **JavaCV** (Java Wrapper for OpenCV and FFmpeg) handling all low-level media operations.
+- `ffmpeg.jar`: The core media library.
+- `javacv.jar`: The Java bridge.
+- `javacpp.jar`: Native memory management.
+The build scripts automatically download the correct versions of these libraries from Maven Central into the `lib/` folder.
+
+### 5.2 Compiling the Project
+We provide custom build scripts that handle dependency downloading, compilation, and plugin packaging.
+
+#### Windows
+1.  Navigate to the project root directory.
+2.  Run `compile.bat`.
+    - This script checks for `lib/` dependencies and downloads them if missing.
+    - It compiles `src/` into `bin_user/`.
+    - It compiles `plugins_src/` into `plugins/samples.jar`.
+    - It configures a portable FFmpeg if necessary.
+
+#### macOS and Linux
+1.  Open a terminal in the project root.
+2.  Make the script executable: `chmod +x compile.sh`.
+3.  Run `./compile.sh`.
+    - Similar to the Windows script, it handles dependencies, main compilation, and plugin packaging.
+
+### 5.3 Running the Application
+
+#### Windows
+Run `run.bat`.
+- This sets up the classpath including `lib/*`, `bin_user`, and `plugins/samples.jar`.
+- It launches `rocky.app.RockyMain`.
+
+#### macOS and Linux
+Run `./run.sh`.
+- Ensure it is executable (`chmod +x run.sh`).
+- Checks OS type to set the correct classpath separator (`:` vs `;`).
+- Launches the application.
+
+## 6. Creating Creating Custom Plugins
+
+To create a new plugin for Rocky:
+
+1.  **Create a Class**: Create a new Java class in `plugins_src` (or your own project) that implements one of the interfaces:
+    - `rocky.core.plugins.RockyEffect`
+    - `rocky.core.plugins.RockyTransition`
+    - `rocky.core.plugins.RockyMediaGenerator`
+
+2.  **Implement Methods**:
+    - `getName()`, `getDescription()`, `getCategory()`: Metadata.
+    - `getParameters()`: Return a list of `PluginParameter` objects (Sliders, Colors, Text, Dropdowns).
+    - `render()` / `generate()`: The core logic. You receive a `BufferedImage` or `Graphics2D` context to draw your effect.
+
+3.  **Register the Service**:
+    - Create a file in `META-INF/services/` named exactly after the interface (e.g., `rocky.core.plugins.RockyEffect`).
+    - Add the fully qualified name of your class (e.g., `com.myuser.MyCoolEffect`) on a new line.
+
+4.  **Compile**: Re-run the compilation script to package your new plugin into the JAR.
+
+## 7. Troubleshooting
+
+### 7.1 "Command not found" on macOS/Linux
+Ensure the scripts have execution permissions:
+`chmod +x compile.sh run.sh`
+
+### 7.2 Missing Dependencies / Download Errors
+If the download fails, check your internet connection. You can manually place the required JARs (JavaCV, FFmpeg 6.0 components) in the `lib/` folder. The script skips download if files exist.
+
+### 7.3 Performance Issues
+- Ensure you are running on the High Performance power plan/profile.
+- Rocky tries to use GPU decoding. Check console logs for "VideoToolbox" (Mac) or "NVENC" (Windows) to verify hardware acceleration is active.
+- For extremely large files (8K), consider using the Proxy workflow.
+
+### 7.4 Plugins Not Showing
+- Verify `plugins/samples.jar` exists.
+- Check the `META-INF/services` files for typos.
+- Ensure the build script output says "Compilando y empaquetando plugins...".
+
+## 8. License
+
+Rocky Video Editor is open source software. Feel free to modify, fork, and contribute back to the project.

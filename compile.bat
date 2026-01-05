@@ -99,9 +99,25 @@ for %%u in (%LIBS%) do (
 echo.
 echo === Compilando codigo fuente... ===
 dir /s /b src\*.java > sources.txt
-javac -encoding UTF-8 -d bin -cp "lib/*;src" @sources.txt
+if not exist "bin_user" mkdir "bin_user"
+javac -encoding UTF-8 -d bin_user -cp "lib/*;src" @sources.txt
 
 if %errorlevel% equ 0 (
+    echo.
+    echo === Compilando y empaquetando plugins... ===
+    dir /s /b plugins_src\*.java > plugins_sources.txt
+    if not exist "bin_plugins" mkdir "bin_plugins"
+    javac -encoding UTF-8 -d bin_plugins -cp "lib/*;bin_user" @plugins_sources.txt
+    
+    if not exist "bin_plugins\META-INF" mkdir "bin_plugins\META-INF"
+    xcopy "plugins_src\META-INF" "bin_plugins\META-INF" /E /I /Y
+    
+    if not exist "plugins" mkdir "plugins"
+    jar cf plugins/samples.jar -C bin_plugins .
+    
+    del plugins_sources.txt
+    rd /s /q bin_plugins
+
     echo.
     echo ===============================
     echo ¡Compilacion exitosa!
@@ -111,7 +127,7 @@ if %errorlevel% equ 0 (
 ) else (
     echo.
     echo ===============================
-    echo ERROR en la compilacion.
+    echo ERROR en la compilacion del núcleo.
     echo ===============================
     del sources.txt
     pause

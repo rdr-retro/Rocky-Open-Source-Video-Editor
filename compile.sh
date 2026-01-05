@@ -54,6 +54,7 @@ if [ $? -eq 0 ]; then
     echo "==============================="
     echo "¡Compilación exitosa!"
     echo "Plugins empaquetados en plugins/samples.jar"
+    chmod +x run.sh
     echo "Usa ./run.sh para iniciar."
     echo "==============================="
 else

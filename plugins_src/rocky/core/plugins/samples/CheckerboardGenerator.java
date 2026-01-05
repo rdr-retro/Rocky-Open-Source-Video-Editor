@@ -13,7 +13,7 @@ import java.util.Map;
  */
 public class CheckerboardGenerator implements RockyMediaGenerator {
     @Override
-    public String getName() { return "Patrón de Tablero"; }
+    public String getName() { return "Ajedrez"; }
     @Override
     public String getDescription() { return "Genera un patrón de tablero de ajedrez."; }
     @Override

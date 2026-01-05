@@ -14,7 +14,7 @@ import java.util.Map;
  */
 public class CrossFadeTransition implements RockyTransition {
     @Override
-    public String getName() { return "Fundido Encadenado"; }
+    public String getName() { return "Disolver"; }
     @Override
     public String getDescription() { return "Transición suave entre dos clips."; }
     @Override

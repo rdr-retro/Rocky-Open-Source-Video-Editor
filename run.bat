@@ -15,7 +15,7 @@ if %errorlevel% neq 0 (
 )
 
 echo Iniciando Rocky Video Editor...
-java -cp "lib/*;bin" MainAB
+java -cp "lib/*;bin_user;plugins/samples.jar" rocky.app.RockyMain
 pause
 
 

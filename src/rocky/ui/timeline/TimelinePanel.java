@@ -748,6 +748,24 @@ public class TimelinePanel extends JPanel {
                 });
                 menu.add(fxItem);
 
+                menu.add(fxItem);
+                
+                // FIXED: Location moved to showClipMenu
+                // Edit Text Option for TextGenerator
+                if (clip.getMediaGenerator() != null && clip.getMediaGenerator().getPluginName().contains("Texto")) {
+                     JMenuItem textItem = new JMenuItem("Editar texto...");
+                     textItem.addActionListener(ev -> {
+                         Window parent = SwingUtilities.getWindowAncestor(TimelinePanel.this);
+                         new TextEditorDialog(parent, clip.getMediaGenerator(), () -> {
+                             fireTimelineUpdated();
+                             if (historyManager != null) {
+                                 historyManager.pushState(TimelinePanel.this, projectProps, mediaPool);
+                             }
+                         }).setVisible(true);
+                     });
+                     menu.add(textItem);
+                }
+
                 menu.addSeparator();
 
                 long phFrame = model.getBlueline().getPlayheadFrame();
@@ -886,6 +904,8 @@ public class TimelinePanel extends JPanel {
                     group.add(item);
                     menu.add(item);
                 }
+                
+                menu.addSeparator();
                 menu.show(e.getComponent(), e.getX(), e.getY());
             }
 

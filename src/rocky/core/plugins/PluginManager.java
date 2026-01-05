@@ -23,6 +23,10 @@ public class PluginManager {
         if (!pluginsDir.exists()) {
             pluginsDir.mkdirs();
         }
+        // FIXED: Scan the user's plugin directory
+        System.out.println("[PluginManager] Scanning user plugins: " + pluginsDir.getAbsolutePath());
+        scanFolder(pluginsDir);
+
         // Also check local plugins folder
         File localPlugins = new File("plugins");
         if (localPlugins.exists()) {
