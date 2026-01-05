@@ -6,4 +6,4 @@ else
   SEP=":"
 fi
 
-java -cp "lib/*${SEP}bin_temp" MainAB
+java -cp "lib/*${SEP}bin_v5" RockyMain
