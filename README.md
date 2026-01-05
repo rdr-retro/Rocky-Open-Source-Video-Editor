@@ -1,12 +1,19 @@
-# Rocky Open Source Video Editor 🚀
+# Rocky Open Source Video Editor
 
 Rocky Video Editor es un editor de video gratuito y de código abierto diseñado para ofrecer un rendimiento de nivel profesional con una interfaz intuitiva.
 
-##  Arquitectura "Zero-Stutter" (Optimizado para Mac M4)
+##  Arquitectura "Zero-Stutter" (Multi-Plataforma)
 
-Rocky ha sido rediseñado para ofrecer la fluidez más extrema del mercado en Java, especialmente en hardware Apple Silicon:
+Rocky ha sido rediseñado para ofrecer la fluidez más extrema del mercado en Java, detectando automáticamente tu sistema operativo y hardware para optimizar el rendimiento:
 
-- **Aceleración por Hardware (VideoToolbox)**: Decodificación nativa de HEVC/H264 en macOS (M1-M4), reduciendo el uso de CPU hasta en un 80% al editar 4K.
+### Aceleración por Hardware Automática
+Rocky detecta tu tarjeta gráfica y utiliza el codificador nativo más rápido disponible:
+- **macOS (Apple Silicon/Intel)**: Usa **VideoToolbox** (nativo de Apple) para una renderización ultra-rápida y eficiente.
+- **Windows (NVIDIA)**: Detecta tarjetas GeForce/Quadro y activa **NVENC**.
+- **Windows (AMD)**: Detecta tarjetas Radeon y activa **AMF**.
+- **Windows (Intel)**: Detecta gráficos integrados (UHD/Iris) y activa **QuickSync (QSV)**.
+
+### Optimizaciones del Motor
 - **Playback Isolation Mode**: Sistema inteligente que pausa procesos secundarios (miniaturas, ondas de audio) al dar a "Play" para dedicar toda la potencia del equipo a la fluidez del video.
 - **Ondas de Audio Persistentes (.rocky_peaks)**: Inspirado en Sony Vegas (.sfk), Rocky guarda un caché binario de las ondas de audio para que se carguen instantáneamente sin volver a analizar el video.
 - **Async Texture Pipeline**: Subida de fotogramas a VRAM en hilos secundarios, eliminando por completo los bloqueos o avisos de `EDT BLOCKED`.
