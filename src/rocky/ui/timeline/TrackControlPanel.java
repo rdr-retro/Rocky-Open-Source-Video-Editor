@@ -54,9 +54,9 @@ public class TrackControlPanel extends JPanel {
         this.type = type;
         setLayout(null); 
         setBackground(type == TrackType.VIDEO ? BG_COLOR_VIDEO : BG_COLOR_AUDIO);
-        setPreferredSize(new Dimension(250, height));
-        setMinimumSize(new Dimension(250, 40)); 
-        setMaximumSize(new Dimension(2500, 500)); 
+        setPreferredSize(new Dimension(350, height));
+        setMinimumSize(new Dimension(350, 40)); 
+        setMaximumSize(new Dimension(3500, 500)); 
         
         Color stripColor = (type == TrackType.VIDEO) ? STRIP_COLOR_VIDEO : STRIP_COLOR_AUDIO;
         
@@ -186,7 +186,7 @@ public class TrackControlPanel extends JPanel {
                     int newHeight = Math.max(40, startHeight + delta);
                     if (newHeight != height) {
                         height = newHeight;
-                        setPreferredSize(new Dimension(250, height));
+                        setPreferredSize(new Dimension(350, height));
                         revalidate();
                         if (resizeListener != null) resizeListener.onHeightChanged(); 
                     }
@@ -220,7 +220,9 @@ public class TrackControlPanel extends JPanel {
         // Slider
         JSlider slider = new JSlider(0, 100, 100);
         slider.setOpaque(false);
-        slider.setBounds(130, 20, 100, 20);
+        // Extend slider to fill space (starts at 130, container width ~350)
+        // Previous width 110. New width 200.
+        slider.setBounds(130, 20, 200, 20);
         add(slider);
     }
     
@@ -240,7 +242,7 @@ public class TrackControlPanel extends JPanel {
         
         JSlider slider = new JSlider(0, 100, 80);
         slider.setOpaque(false);
-        slider.setBounds(110, 20, 80, 20);
+        slider.setBounds(110, 20, 220, 20);
         add(slider);
         
         // Pan

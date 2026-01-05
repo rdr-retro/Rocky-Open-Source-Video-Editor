@@ -26,8 +26,8 @@ public class RockyTopToolbar extends JPanel {
 
     public RockyTopToolbar() {
         setBackground(BG_COLOR);
-        setLayout(new FlowLayout(FlowLayout.LEFT, 12, 6));
-        setPreferredSize(new Dimension(0, 38));
+        setLayout(new FlowLayout(FlowLayout.LEFT, 12, 4));
+        setPreferredSize(new Dimension(0, 30));
         setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_COLOR));
 
         // Group 1: File Operations
@@ -66,7 +66,7 @@ public class RockyTopToolbar extends JPanel {
         p.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         p.setToolTipText(tooltip);
         
-        VectorToolbarIcon icon = new VectorToolbarIcon(type, 18, tint);
+        VectorToolbarIcon icon = new VectorToolbarIcon(type, 14, tint);
         p.add(icon, BorderLayout.CENTER);
         
         if (onClick != null) {
@@ -90,7 +90,7 @@ public class RockyTopToolbar extends JPanel {
 
     private JComponent createVerticalSeparator() {
         JSeparator s = new JSeparator(JSeparator.VERTICAL);
-        s.setPreferredSize(new Dimension(2, 20));
+        s.setPreferredSize(new Dimension(2, 16));
         s.setForeground(Color.decode("#0f051d"));
         s.setBackground(Color.decode("#dcd0ff"));
         return s;

@@ -62,7 +62,7 @@ public class RockyMain {
 
             JFrame frame = new JFrame("Rocky Open Source Video Editor (.rocky Projects)");
             frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-            frame.setSize(1200, 800);
+            frame.setExtendedState(JFrame.MAXIMIZED_BOTH); // Maximize window
             frame.setBackground(Color.decode("#0f051d"));
             frame.setLayout(new BorderLayout());
 
@@ -122,7 +122,7 @@ public class RockyMain {
             scrollbarPanel.setBackground(Color.decode("#0f051d"));
 
             JPanel sidebarSpacer = new JPanel();
-            sidebarSpacer.setPreferredSize(new Dimension(250, 0));
+            sidebarSpacer.setPreferredSize(new Dimension(350, 0));
             sidebarSpacer.setBackground(Color.decode("#0f051d"));
             scrollbarPanel.add(sidebarSpacer, BorderLayout.WEST);
 
@@ -180,7 +180,7 @@ public class RockyMain {
 
             // Create a split pane for NavPanel and Visualizer
             JSplitPane topSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, navPanel, visualizer);
-            topSplit.setDividerLocation(350);
+            topSplit.setDividerLocation(450);
             topSplit.setDividerSize(5);
             topSplit.setBorder(null);
             topSplit.setOpaque(false);
@@ -283,7 +283,7 @@ public class RockyMain {
 
             // --- MAIN CONTENT (A + B) ---
             JSplitPane mainSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, topPanel, centerContainer);
-            mainSplit.setDividerLocation(400);
+            mainSplit.setDividerLocation(500);
             mainSplit.setDividerSize(5);
             mainSplit.setBorder(null);
 

@@ -34,12 +34,12 @@ public class SidebarPanel extends JPanel {
         setBackground(BG_COLOR);
 
         // Initial size, but JSplitPane will control it
-        setPreferredSize(new Dimension(250, 0));
+        setPreferredSize(new Dimension(350, 0));
         setMinimumSize(new Dimension(100, 0)); // Allow shrinking
 
         // Top Header Area (Timecode)
         headerPanel = new JPanel(new BorderLayout());
-        headerPanel.setPreferredSize(new Dimension(250, 30)); // Match ruler height (30px)
+        headerPanel.setPreferredSize(new Dimension(350, 30)); // Match ruler height (30px)
         headerPanel.setBackground(TIMECODE_BG);
         headerPanel.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 1, Color.BLACK)); // Bottom and Right border
 
@@ -66,7 +66,7 @@ public class SidebarPanel extends JPanel {
                 if (getParent() instanceof JViewport) {
                     minHeight = Math.max(minHeight, getParent().getHeight());
                 }
-                return new Dimension(250, Math.max(minHeight, d.height));
+                return new Dimension(350, Math.max(minHeight, d.height));
             }
         };
         bodyPanel.setBackground(BG_COLOR);
@@ -280,7 +280,7 @@ public class SidebarPanel extends JPanel {
 
     public void setTrackHeights(java.util.List<Integer> heights) {
         for (int i = 0; i < Math.min(heights.size(), tracks.size()); i++) {
-            tracks.get(i).setPreferredSize(new Dimension(250, heights.get(i)));
+            tracks.get(i).setPreferredSize(new Dimension(350, heights.get(i)));
         }
         tracksContainer.revalidate();
         tracksContainer.repaint();
@@ -323,7 +323,7 @@ public class SidebarPanel extends JPanel {
 
             int num = i + 1;
             TrackControlPanel track = new TrackControlPanel(type, num);
-            track.setPreferredSize(new Dimension(250, h));
+            track.setPreferredSize(new Dimension(350, h));
 
             // Wire listeners (Copied from addTrack for consistency)
             track.setResizeListener(() -> {

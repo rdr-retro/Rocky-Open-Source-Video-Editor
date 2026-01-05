@@ -969,6 +969,12 @@ public class TimelinePanel extends JPanel {
                         long frame = Math.round(screenToTime(loc.x) * getFPS());
                         int targetTrackIdx = findTrackAt(loc.y);
 
+                        // If dropping a Generator in empty space, create a new track
+                        if (targetTrackIdx == -1 && plugin instanceof RockyMediaGenerator && sidebar != null) {
+                             sidebar.addTrack(TrackControlPanel.TrackType.VIDEO);
+                             targetTrackIdx = sidebar.getTrackCount() - 1;
+                        }
+
                         if (targetTrackIdx != -1) {
                             TimelineClip clip = findClipAt(targetTrackIdx, frame);
                             if (clip != null) {

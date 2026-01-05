@@ -21,21 +21,25 @@ import javax.swing.tree.TreeSelectionModel;
 import javax.swing.tree.DefaultTreeCellRenderer;
 import javax.swing.JTree;
 import java.util.HashMap;
+import java.util.Collections;
 
 /**
- * A professional split-pane explorer for plugins (Sony Vegas Style).
- * Left: Plugin List
- * Right: Visual Presets Grid
+ * PluginExplorerPanel - Sony Vegas Pro Style (FINAL PERFECTO)
+ * Effects: Imagen original → Hover: Efecto animado + barra
+ * Transitions: Mitad/mitad → Hover: Transición animada + barra  
+ * Generators: PREVIEW REAL → Hover: SOLO borde (sin animación)
  */
 public class PluginExplorerPanel extends JPanel {
     
-    // --- PURPLE PRO THEME ---
-    private final Color BG_DARK = new Color(15, 5, 29);       // #0f051d
-    private final Color BG_PANEL = new Color(26, 11, 46);     // #1a0b2e
-    private final Color GRID_BG = new Color(35, 15, 60);      // Lighter purple for grid background
-    private final Color TEXT_PRIMARY = new Color(220, 220, 255);
-    private final Color LIST_SELECTION = new Color(88, 55, 138); // Header/Selection purple
-    private final Color BORDER_COLOR = new Color(60, 40, 90);
+    // === VEGAS PRO STYLE COLORS ===
+    private final Color BG_DARK = new Color(20, 20, 25);
+    private final Color BG_PANEL = new Color(35, 35, 42);
+    private final Color GRID_BG = new Color(42, 42, 48);
+    private final Color TEXT_PRIMARY = new Color(230, 230, 235);
+    private final Color LIST_SELECTION = new Color(65, 65, 85);
+    private final Color BORDER_COLOR = new Color(70, 70, 85);
+    private final Color TILE_BORDER = new Color(80, 80, 95);
+    private final Color HOVER_BORDER = new Color(120, 140, 255);
 
     private static BufferedImage flowerBase;
     static {
@@ -53,13 +57,30 @@ public class PluginExplorerPanel extends JPanel {
     
     public PluginExplorerPanel(List<? extends RockyPlugin> plugins) {
         this.plugins = plugins;
+        Collections.sort((List<RockyPlugin>) plugins, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+        
         setLayout(new BorderLayout());
         setBackground(BG_DARK);
 
-        // 1. LEFT SIDE: Plugin List
-        // 1. LEFT SIDE: Plugin Tree
+        setupLeftPanel();
+        JPanel rightPanel = setupRightPanel();
+
+        JScrollPane leftScroll = createLeftScroll();
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftScroll, rightPanel);
+        splitPane.setDividerLocation(220);
+        splitPane.setDividerSize(3);
+        splitPane.setBorder(null);
+        splitPane.setBackground(BG_DARK);
+        
+        add(splitPane, BorderLayout.CENTER);
+
+        pluginTree.expandRow(0);
+        updatePresets(null);
+    }
+
+    private void setupLeftPanel() {
         DefaultMutableTreeNode root = new DefaultMutableTreeNode("Root");
-        DefaultMutableTreeNode pluginsFolder = new DefaultMutableTreeNode("Plugins"); // Folder requested by user
+        DefaultMutableTreeNode pluginsFolder = new DefaultMutableTreeNode("Plugins");
         root.add(pluginsFolder);
 
         for (RockyPlugin p : plugins) {
@@ -67,110 +88,82 @@ public class PluginExplorerPanel extends JPanel {
         }
 
         pluginTree = new JTree(root);
-        pluginTree.setRootVisible(false); // Hide "Root", show "Plugins" as top-level folder
+        pluginTree.setRootVisible(false);
         pluginTree.setShowsRootHandles(true);
         pluginTree.setBackground(BG_PANEL);
         pluginTree.setForeground(TEXT_PRIMARY);
+        pluginTree.setRowHeight(20);
+        pluginTree.putClientProperty("JTree.lineStyle", "None");
         
-        // Custom Tree Renderer
-        pluginTree.setCellRenderer(new PluginTreeCellRenderer());
-
+        pluginTree.setCellRenderer(new VegasTreeCellRenderer());
         pluginTree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
-        // Expand "Plugins" folder
-        pluginTree.expandRow(0);
-
-        JScrollPane listScroll = new JScrollPane(pluginTree);
-        listScroll.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, BORDER_COLOR));
-        listScroll.getVerticalScrollBar().setUI(new PurpleScrollBarUI());
-        listScroll.setBackground(BG_PANEL);
-        listScroll.getViewport().setBackground(BG_PANEL);
-
-        // 2. RIGHT SIDE: Presets Grid
-        JPanel rightPanel = new JPanel(new BorderLayout());
-        rightPanel.setBackground(GRID_BG);
-
-        // Header "Preset:"
-        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 5));
-        header.setBackground(GRID_BG);
-        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_COLOR));
-        JLabel lbl = new JLabel("Preset:");
-        lbl.setFont(new Font("SansSerif", Font.BOLD, 12));
-        lbl.setForeground(TEXT_PRIMARY);
-        header.add(lbl);
         
-        presetHeaderLabel = new JLabel("");
-        presetHeaderLabel.setFont(new Font("SansSerif", Font.ITALIC, 12));
-        presetHeaderLabel.setForeground(new Color(180, 180, 220));
-        header.add(presetHeaderLabel);
-        
-        rightPanel.add(header, BorderLayout.NORTH);
-
-        // Grid (Using FlowLayout to prevent stretching single items)
-        presetsGrid = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 15));
-        presetsGrid.setBackground(GRID_BG);
-        presetsGrid.setBorder(new EmptyBorder(15, 15, 15, 15));
-        
-        // Wrap grid in a panel that aligns it to top-left to avoid centering if desired, 
-        // though FlowLayout.LEFT handles x-axis. FlowLayout usually wraps.
-        // To force it to stretch ONLY width but keep height flexible:
-        
-        // However, standard FlowLayout might not wrap correctly in a ScrollPane 
-        // without a custom layout or resize listener. 
-        // A better approach for "Grid that packs" is WrapLayout or modified GridBag.
-        // BUT for now, since we want 3 columns (Vegas style), let's stick to simple Flow 
-        // and fixed size tiles.
-        
-        // Actually, let's use a wrapper to ensure it starts at top
-        JPanel flowWrapper = new JPanel(new BorderLayout());
-        flowWrapper.setBackground(GRID_BG);
-        flowWrapper.add(presetsGrid, BorderLayout.NORTH); // Pins content to top
-
-        JScrollPane gridScroll = new JScrollPane(flowWrapper);
-        gridScroll.setBorder(null);
-        gridScroll.getVerticalScrollBar().setUI(new PurpleScrollBarUI());
-        gridScroll.setBackground(GRID_BG);
-        gridScroll.getViewport().setBackground(GRID_BG);
-        
-        rightPanel.add(gridScroll, BorderLayout.CENTER);
-
-        // 3. SPLIT PANE
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, listScroll, rightPanel);
-        splitPane.setDividerLocation(200);
-        splitPane.setDividerSize(4);
-        splitPane.setBorder(null);
-        splitPane.setBackground(BG_DARK);
-        
-        // Customizing Divider (optional, but standard look is okay for now)
-        
-        add(splitPane, BorderLayout.CENTER);
-
-        // Events
-        // Events
         pluginTree.addTreeSelectionListener(e -> {
             DefaultMutableTreeNode node = (DefaultMutableTreeNode) pluginTree.getLastSelectedPathComponent();
             if (node == null) return;
-            
             if (node.isLeaf() && node.getUserObject() instanceof RockyPlugin) {
                 updatePresets((RockyPlugin) node.getUserObject());
             } else {
                 updatePresets(null);
             }
         });
+    }
 
-        // Show all plugins initially
-        updatePresets(null);
+    private JScrollPane createLeftScroll() {
+        JScrollPane scroll = new JScrollPane(pluginTree);
+        scroll.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, BORDER_COLOR));
+        scroll.getVerticalScrollBar().setUI(new VegasScrollBarUI());
+        scroll.setBackground(BG_PANEL);
+        scroll.getViewport().setBackground(BG_PANEL);
+        return scroll;
+    }
+
+    private JPanel setupRightPanel() {
+        JPanel rightPanel = new JPanel(new BorderLayout());
+        rightPanel.setBackground(GRID_BG);
+
+        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 8));
+        header.setBackground(GRID_BG);
+        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_COLOR));
+        
+        JLabel lbl = new JLabel("Presets:");
+        lbl.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        lbl.setForeground(TEXT_PRIMARY);
+        header.add(lbl);
+        
+        presetHeaderLabel = new JLabel("Todos");
+        presetHeaderLabel.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        presetHeaderLabel.setForeground(new Color(180, 190, 220));
+        header.add(presetHeaderLabel);
+        
+        rightPanel.add(header, BorderLayout.NORTH);
+
+        presetsGrid = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 8));
+        presetsGrid.setBackground(GRID_BG);
+        presetsGrid.setBorder(new EmptyBorder(12, 12, 12, 12));
+        
+        JPanel flowWrapper = new JPanel(new BorderLayout());
+        flowWrapper.setBackground(GRID_BG);
+        flowWrapper.add(presetsGrid, BorderLayout.NORTH);
+
+        JScrollPane gridScroll = new JScrollPane(flowWrapper);
+        gridScroll.setBorder(null);
+        gridScroll.getVerticalScrollBar().setUI(new VegasScrollBarUI());
+        gridScroll.setBackground(GRID_BG);
+        gridScroll.getViewport().setBackground(GRID_BG);
+        
+        rightPanel.add(gridScroll, BorderLayout.CENTER);
+        return rightPanel;
     }
 
     private void updatePresets(RockyPlugin plugin) {
         presetsGrid.removeAll();
         
         if (plugin != null) {
-            // Single plugin selected - show just that one
             presetHeaderLabel.setText(plugin.getName());
-            addPresetCell(plugin, "Predeterminado");
+            addPresetCell(plugin, "Default");
         } else {
-            // Folder selected or nothing - show ALL plugins as squares
-            presetHeaderLabel.setText("Plugins");
+            presetHeaderLabel.setText("Todos");
             for (RockyPlugin p : plugins) {
                 addPresetCell(p, p.getName());
             }
@@ -181,152 +174,242 @@ public class PluginExplorerPanel extends JPanel {
     }
 
     private void addPresetCell(RockyPlugin plugin, String variantName) {
-        presetsGrid.add(new PluginPresetCell(plugin, variantName));
+        presetsGrid.add(new VegasPresetCell(plugin, variantName));
     }
 
-    // --- RENDERERS & COMPONENTS ---
-
-    private class PluginListRenderer extends DefaultListCellRenderer {
+    private class VegasTreeCellRenderer extends DefaultTreeCellRenderer {
         @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
-            JLabel lbl = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-            RockyPlugin p = (RockyPlugin) value;
-            lbl.setText(p.getName());
-            lbl.setBorder(new EmptyBorder(5, 8, 5, 8));
-            lbl.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        public Component getTreeCellRendererComponent(JTree tree, Object value, 
+            boolean sel, boolean expanded, boolean leaf, int row, boolean hasFocus) {
+            super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
             
-            if (isSelected) {
-                lbl.setBackground(LIST_SELECTION);
-                lbl.setForeground(Color.WHITE);
-            } else {
-                lbl.setBackground(BG_PANEL);
-                lbl.setForeground(new Color(180, 180, 200));
+            if (value instanceof DefaultMutableTreeNode) {
+                Object userObject = ((DefaultMutableTreeNode) value).getUserObject();
+                if (userObject instanceof RockyPlugin) {
+                    setText(((RockyPlugin) userObject).getName());
+                } else {
+                    setText(userObject.toString());
+                }
             }
-            return lbl;
+            
+            setFont(new Font("Segoe UI", Font.PLAIN, 11));
+            setBorder(new EmptyBorder(4, 10, 4, 10));
+            
+            if (sel) {
+                setBackground(LIST_SELECTION);
+                setForeground(Color.WHITE);
+            } else {
+                setBackground(BG_PANEL);
+                setForeground(new Color(190, 195, 205));
+            }
+            setOpaque(true);
+            return this;
         }
     }
 
-    /**
-     * Represents a single "Preset" visual tile (Thumbnail + Text Below)
-     */
-    private class PluginPresetCell extends JPanel implements PluginTransferHandler.PluginCell {
+    private class VegasPresetCell extends JPanel implements PluginTransferHandler.PluginCell {
         private final RockyPlugin plugin;
         private final String variant;
-        private final BufferedImage preview;
+        private final BufferedImage previewStatic;
+        private final BufferedImage originalImage;
         private boolean hovered = false;
+        private Timer animationTimer;
+        private float animationProgress = 0.0f;
+        private JPanel thumbPanel;
 
-        public PluginPresetCell(RockyPlugin plugin, String variant) {
+        public VegasPresetCell(RockyPlugin plugin, String variant) {
             this.plugin = plugin;
             this.variant = variant;
-            this.preview = generatePreview(plugin);
+            this.originalImage = flowerBase;
+            this.previewStatic = generatePreview(plugin);
 
             setLayout(new BorderLayout());
-            setBackground(new Color(255, 255, 255, 15)); // Glassy background
-            setBorder(BorderFactory.createLineBorder(new Color(100, 80, 140), 1));
-            setPreferredSize(new Dimension(140, 120)); // Vegas style 4:3 cards
+            setBackground(BG_PANEL);
+            setBorder(BorderFactory.createLineBorder(TILE_BORDER, 1));
+            setPreferredSize(new Dimension(120, 95));
+            setToolTipText(plugin.getName() + " - " + variant);
             
             setTransferHandler(new PluginTransferHandler());
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-            // Thumbnail Area
-            JPanel thumb = new JPanel() {
+            thumbPanel = new JPanel() {
                 @Override
                 protected void paintComponent(Graphics g) {
                     super.paintComponent(g);
-                    if (preview != null) {
-                        g.drawImage(preview, 0, 0, getWidth(), getHeight(), null);
+                    
+                    int thumbWidth = 118;
+                    int thumbHeight = 63;
+                    
+                    if (previewStatic != null) {
+                        // Generators SIN animación - solo hover border
+                        if (hovered && !(plugin instanceof RockyMediaGenerator)) {
+                            BufferedImage frame = generateAnimatedFrame(animationProgress);
+                            if (frame != null) {
+                                g.drawImage(frame, 0, 0, thumbWidth, thumbHeight, null);
+                            }
+                        } else {
+                            g.drawImage(previewStatic, 0, 0, thumbWidth, thumbHeight, null);
+                        }
                     }
-                    // Inner shadow for depth
-                    g.setColor(new Color(0,0,0,50));
-                    g.drawRect(0,0,getWidth()-1,getHeight()-1);
+                    
+                    Graphics2D g2d = (Graphics2D) g;
+                    g2d.setColor(new Color(0, 0, 0, 40));
+                    g2d.drawRect(1, 1, thumbWidth-1, thumbHeight-1);
+                    
+                    // Generators SIN barra de progreso
+                    if (hovered && !(plugin instanceof RockyMediaGenerator)) {
+                        int barHeight = 4;
+                        int barY = thumbHeight - barHeight - 2;
+                        int barWidth = thumbWidth - 4;
+                        int progressWidth = (int)(barWidth * animationProgress);
+                        
+                        g2d.setColor(new Color(50, 50, 60, 200));
+                        g2d.fillRoundRect(2, barY, barWidth, barHeight, 3, 3);
+                        
+                        if (progressWidth > 0) {
+                            GradientPaint gradient = new GradientPaint(
+                                2, barY, new Color(100, 120, 255, 220),
+                                2 + progressWidth, barY, new Color(150, 200, 255, 220)
+                            );
+                            g2d.setPaint(gradient);
+                            g2d.fillRoundRect(2, barY, progressWidth, barHeight, 3, 3);
+                            
+                            g2d.setColor(new Color(255, 255, 255, 80));
+                            g2d.fillRect(2, barY, progressWidth, 1);
+                        }
+                    }
                 }
             };
-            thumb.setPreferredSize(new Dimension(140, 90));
-            thumb.setOpaque(false);
-            
-            // Text Area
-            JLabel lbl = new JLabel("<html><center>" + variant + "</center></html>", SwingConstants.CENTER);
-            lbl.setFont(new Font("SansSerif", Font.PLAIN, 11));
-            lbl.setForeground(TEXT_PRIMARY);
-            lbl.setBorder(new EmptyBorder(5, 2, 5, 2));
+            thumbPanel.setPreferredSize(new Dimension(120, 65));
+            thumbPanel.setOpaque(false);
 
-            add(thumb, BorderLayout.CENTER);
+            JLabel lbl = new JLabel(variant, SwingConstants.CENTER);
+            lbl.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+            lbl.setForeground(TEXT_PRIMARY);
+            lbl.setBorder(new EmptyBorder(4, 2, 4, 2));
+
+            add(thumbPanel, BorderLayout.CENTER);
             add(lbl, BorderLayout.SOUTH);
+
+            animationTimer = new Timer(30, e -> {
+                animationProgress += 0.02f;
+                if (animationProgress >= 1.0f) animationProgress = 0.0f;
+                thumbPanel.repaint();
+            });
 
             addMouseListener(new MouseAdapter() {
                 public void mouseEntered(MouseEvent e) {
                     hovered = true;
-                    setBackground(new Color(100, 80, 160)); // Highlight
-                    setBorder(BorderFactory.createLineBorder(new Color(180, 160, 255), 2));
+                    setBorder(BorderFactory.createLineBorder(HOVER_BORDER, 2));
+                    // Generators SIN animación
+                    if (!(plugin instanceof RockyMediaGenerator) && 
+                        (plugin instanceof RockyEffect || plugin instanceof RockyTransition)) {
+                        animationProgress = 0.0f;
+                        animationTimer.start();
+                    }
+                    thumbPanel.repaint();
                 }
                 public void mouseExited(MouseEvent e) {
                     hovered = false;
-                    setBackground(new Color(255, 255, 255, 15));
-                    setBorder(BorderFactory.createLineBorder(new Color(100, 80, 140), 1));
+                    setBorder(BorderFactory.createLineBorder(TILE_BORDER, 1));
+                    animationTimer.stop();
+                    thumbPanel.repaint();
                 }
                 public void mousePressed(MouseEvent e) {
-                    JComponent c = (JComponent) e.getSource();
-                    TransferHandler handler = c.getTransferHandler();
-                    handler.exportAsDrag(c, e, TransferHandler.COPY);
+                    JComponent component = (JComponent) e.getSource();
+                    TransferHandler handler = component.getTransferHandler();
+                    handler.exportAsDrag(component, e, TransferHandler.COPY);
                 }
             });
         }
 
+        private BufferedImage generateAnimatedFrame(float progress) {
+            if (originalImage == null) return null;
+            
+            int w = originalImage.getWidth();
+            int h = originalImage.getHeight();
+            BufferedImage frame = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g2 = frame.createGraphics();
+            
+            if (plugin instanceof RockyMediaGenerator) {
+                ((RockyMediaGenerator) plugin).generate(g2, w, h, 0L, new HashMap<>());
+            } else {
+                g2.drawImage(originalImage, 0, 0, null);
+                int wipeX = (int)(w * progress);
+                g2.setClip(0, 0, wipeX, h);
+                
+                if (plugin instanceof RockyEffect) {
+                    ((RockyEffect) plugin).apply(originalImage, g2, new HashMap<>());
+                } else if (plugin instanceof RockyTransition) {
+                    BufferedImage b = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+                    Graphics2D gB = b.createGraphics();
+                    gB.setColor(Color.WHITE);
+                    gB.fillRect(0, 0, w, h);
+                    gB.dispose();
+                    g2.setClip(null);
+                    ((RockyTransition) plugin).render(g2, w, h, originalImage, b, progress, new HashMap<>());
+                }
+            }
+            
+            g2.dispose();
+            return frame;
+        }
+
         @Override
         public RockyPlugin getPlugin() {
-            return plugin; // In real app, we'd wrap plugin + variant into a configuration object
+            return plugin;
         }
     }
 
+    // ✅ FIXED: Generators muestran PREVIEW REAL del generador
     private BufferedImage generatePreview(RockyPlugin plugin) {
         if (flowerBase == null) return null;
-        BufferedImage result = new BufferedImage(flowerBase.getWidth(), flowerBase.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        BufferedImage result = new BufferedImage(flowerBase.getWidth(), 
+            flowerBase.getHeight(), BufferedImage.TYPE_INT_ARGB);
         Graphics2D g2 = result.createGraphics();
         
-        // Slightly darken bg for drama
-        g2.setColor(Color.BLACK);
-        g2.fillRect(0,0,result.getWidth(), result.getHeight());
-        
-        if (plugin instanceof RockyEffect) {
-            ((RockyEffect) plugin).apply(flowerBase, g2, new HashMap<>());
-        } else if (plugin instanceof RockyTransition) {
-             // Split view for transition preview (A | B)
-            int w = result.getWidth();
-            int h = result.getHeight();
-            
-            // Draw A (Original)
+        // ✅ GENERADORES: Muestran preview REAL del generador
+        if (plugin instanceof RockyMediaGenerator) {
+            g2.setColor(new Color(10, 10, 15));
+            g2.fillRect(0, 0, result.getWidth(), result.getHeight());
+            ((RockyMediaGenerator) plugin).generate(g2, result.getWidth(), result.getHeight(), 0L, new HashMap<>());
+        } 
+        // EFFECTS/TRANSITIONS: Imagen original
+        else {
+            g2.setColor(new Color(10, 10, 15));
+            g2.fillRect(0, 0, result.getWidth(), result.getHeight());
             g2.drawImage(flowerBase, 0, 0, null);
             
-            // Draw B component (White/Text)
-            BufferedImage b = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D gB = b.createGraphics();
-            gB.setColor(Color.WHITE);
-            gB.setFont(new Font("Arial", Font.BOLD, 64));
-            gB.drawString("B", w/2 - 20, h/2 + 20);
-            gB.dispose();
-            
-            ((RockyTransition) plugin).render(g2, w, h, flowerBase, b, 0.5f, new HashMap<>());
-        } else if (plugin instanceof RockyMediaGenerator) {
-            ((RockyMediaGenerator) plugin).generate(g2, result.getWidth(), result.getHeight(), 0, new HashMap<>());
-        } else {
-            g2.drawImage(flowerBase, 0, 0, null);
+            if (plugin instanceof RockyTransition) {
+                int w = result.getWidth(), h = result.getHeight();
+                BufferedImage b = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+                Graphics2D gB = b.createGraphics();
+                gB.setColor(Color.WHITE);
+                gB.setFont(new Font("Segoe UI", Font.BOLD, 48));
+                gB.drawString("B", w/2 - 20, h/2 + 15);
+                gB.dispose();
+                ((RockyTransition) plugin).render(g2, w, h, flowerBase, b, 0.5f, new HashMap<>());
+            }
         }
         
         g2.dispose();
         return result;
     }
 
-    // --- PURPLE SCROLLBAR ---
-    private class PurpleScrollBarUI extends javax.swing.plaf.basic.BasicScrollBarUI {
+    private class VegasScrollBarUI extends javax.swing.plaf.basic.BasicScrollBarUI {
         @Override protected void configureScrollBarColors() {
-            this.thumbColor = new Color(80, 60, 120);
-            this.trackColor = BG_PANEL;
+            this.thumbColor = new Color(90, 90, 110);
+            this.trackColor = new Color(42, 42, 48);
         }
-        @Override protected JButton createDecreaseButton(int orientation) { return createZeroButton(); }
-        @Override protected JButton createIncreaseButton(int orientation) { return createZeroButton(); }
+        @Override protected JButton createDecreaseButton(int orientation) { 
+            return createZeroButton(); 
+        }
+        @Override protected JButton createIncreaseButton(int orientation) { 
+            return createZeroButton(); 
+        }
         private JButton createZeroButton() {
             JButton b = new JButton();
-            b.setPreferredSize(new Dimension(0,0));
+            b.setPreferredSize(new Dimension(0, 0));
             return b;
         }
     }

@@ -104,10 +104,10 @@ public class VisualizerPanel extends JPanel {
         playBar.setBackground(CONTROL_BG);
         playBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
         
-        playBar.add(new VectorIcon("PLAY", 16, e -> { if(onPlay != null) onPlay.run(); })); 
-        playBar.add(new VectorIcon("PAUSE", 16, e -> { if(onPause != null) onPause.run(); })); 
-        playBar.add(new VectorIcon("STOP", 16, e -> { if(onStop != null) onStop.run(); })); 
-        playBar.add(new VectorIcon("MENU", 16, null)); 
+        playBar.add(new VectorIcon("PLAY", 12, e -> { if(onPlay != null) onPlay.run(); })); 
+        playBar.add(new VectorIcon("PAUSE", 12, e -> { if(onPause != null) onPause.run(); })); 
+        playBar.add(new VectorIcon("STOP", 12, e -> { if(onStop != null) onStop.run(); })); 
+        playBar.add(new VectorIcon("MENU", 12, null)); 
         
         southContainer.add(playBar);
 

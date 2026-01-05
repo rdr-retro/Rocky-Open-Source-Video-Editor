@@ -358,12 +358,16 @@ public class FrameServer {
 
         for (TimelineClip clip : videoClips) {
             MediaSource source = pool.getSource(clip.getMediaSourceId());
-            if (source == null)
+            
+            // If standard clip and no source, skip. But if it's a generator, we proceed.
+            if (source == null && clip.getMediaGenerator() == null)
                 continue;
 
             // PRE-TOUCH: Inform the pool that this media is about to be used
             // This prevents the LRU policy from evicting a decoder that is visible.
-            rocky.core.media.DecoderPool.touch(source.getFilePath());
+            if (source != null) {
+                rocky.core.media.DecoderPool.touch(source.getFilePath());
+            }
 
             long frameInClip = targetFrame - clip.getStartFrame();
             long sourceFrame = TemporalMath.getSourceFrameAt(clip, frameInClip);

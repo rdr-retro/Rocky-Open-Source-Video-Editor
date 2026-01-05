@@ -74,8 +74,8 @@ public class NavigationPanel extends JPanel {
     private JPanel createTemplatesPanel() {
         JPanel p = new JPanel();
         p.setOpaque(false);
-        // 2 columns, dynamic rows (2x2 grid basically)
-        p.setLayout(new GridLayout(0, 2, 15, 15)); 
+        // Use FlowLayout to prevent stretching
+        p.setLayout(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER, 15, 15)); 
         p.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
 
         p.add(createTemplateButton("<html><center>Estándar<br>4:3</center></html>", "1440x1080 (HD 4:3)", 1440, 1080));
@@ -106,9 +106,10 @@ public class NavigationPanel extends JPanel {
 
     private JButton createTemplateButton(String label, String resString, int w, int h) {
         JButton btn = new JButton(label);
-        // Square-ish aspect ratio desired? GridLayout will force them to fill cells.
-        // We'll give them a preferred size to hint squareness if space allows
-        btn.setPreferredSize(new Dimension(100, 100));
+        // Enforce square dimensions
+        btn.setPreferredSize(new Dimension(140, 140));
+        btn.setMinimumSize(new Dimension(140, 140));
+        btn.setMaximumSize(new Dimension(140, 140));
         
         btn.setBackground(new Color(40, 30, 60)); // Darker base
         btn.setForeground(new Color(220, 220, 255));
