@@ -33,7 +33,15 @@ public class FrameServer {
     private BufferedImage currentVisibleBuffer = null;
     private long lastRequestTime = 0;
     private double currentScrubbingVelocity = 0; // frames per ms
-    private final int MAX_POOL_SIZE = 10;
+    private final int MAX_POOL_SIZE = 100; // Increased for aggressive mode
+    
+    // REC-001: Adaptive Latency Feedback
+    private final java.util.concurrent.ConcurrentLinkedQueue<Long> recentDecodeTimes = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private volatile double averageDecodeMs = 150.0; // Initial estimate
+    
+    // Diagnostic Integration
+    private rocky.core.diagnostics.DiagnosticPanel diagnosticPanel;
+    private final rocky.core.diagnostics.FPSTracker fpsTracker = new rocky.core.diagnostics.FPSTracker();
 
     // Vegas Adaptive Quality
 
@@ -44,9 +52,38 @@ public class FrameServer {
         this.monitor = new rocky.core.diagnostics.PerformanceMonitor();
 
         int cores = Runtime.getRuntime().availableProcessors();
+        
+        // AGGRESSIVE MODE: Use all available RAM
+        // Queue: 2000 tasks for deep buffering with HEVC 4K @ 60fps
+        // Max memory: 2000 * 8MB (1080p) = 16GB - acceptable for modern Macs
+        java.util.concurrent.PriorityBlockingQueue<Runnable> boundedQueue = 
+            new java.util.concurrent.PriorityBlockingQueue<>(2000);
+        
         this.executor = new java.util.concurrent.ThreadPoolExecutor(
                 cores, cores, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
-                new java.util.concurrent.PriorityBlockingQueue<Runnable>());
+                boundedQueue,
+                new java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy() {
+                    @Override
+                    public void rejectedExecution(Runnable r, java.util.concurrent.ThreadPoolExecutor e) {
+                        // Intelligent Discard: Remove task farthest from current playhead
+                        if (r instanceof RenderTask) {
+                            RenderTask rejected = (RenderTask) r;
+                            System.err.println("[FrameServer] Queue Full - Dropping Frame: " + rejected.frame);
+                            if (diagnosticPanel != null) diagnosticPanel.incrementDroppedFrames();
+                            
+                            // AUTO-PROXY TRIGGER
+                            // If we are dropping frames, we should tell the ProxyManager
+                            java.util.List<rocky.core.model.TimelineClip> clips = model.getClipsAt(rejected.frame);
+                            for (rocky.core.model.TimelineClip clip : clips) {
+                                rocky.core.media.MediaSource src = pool.getSource(clip.getMediaSourceId());
+                                if (src != null && src.isVideo()) {
+                                    rocky.core.media.ProxyManager.getInstance().reportStress(src.getFilePath(), src);
+                                }
+                            }
+                        }
+                        super.rejectedExecution(r, e);
+                    }
+                });
         
         // --- SAFE RECYCLE INTEGRATION ---
         this.visualizer.setRecycleCallback(img -> returnCanvasToPool(img));
@@ -54,17 +91,39 @@ public class FrameServer {
 
     private int getRamCacheLimitFrames() {
         if (properties == null)
-            return 60;
-        int mbLimit = 512; // Fixed limit since slider is removed
+            return 200; // Increased default
+        
+        // AGGRESSIVE MODE: Fixed large cache, only reduce at critical threshold
+        Runtime runtime = Runtime.getRuntime();
+        long maxMemory = runtime.maxMemory();
+        long freeMemory = runtime.freeMemory();
+        long totalMemory = runtime.totalMemory();
+        long usedMemory = totalMemory - freeMemory;
+        
+        long actualFree = maxMemory - usedMemory;
+        double memoryPressure = 1.0 - ((double) actualFree / maxMemory);
+        
         int width = properties.getPreviewWidth();
         int height = properties.getPreviewHeight();
-        // Bytes per frame = width * height * 4 (RGBA)
         long bytesPerFrame = (long) width * height * 4;
         if (bytesPerFrame == 0)
-            return 60;
-
-        long totalBytes = (long) mbLimit * 1024 * 1024;
-        return (int) (totalBytes / bytesPerFrame);
+            return 200;
+        
+        // Aggressive: Use 4GB cache, only reduce at 95% pressure
+        int baseLimit = 4096; // 4GB for maximum smoothness
+        if (memoryPressure > 0.95) {
+            baseLimit = 1024; // Emergency: Still 1GB
+            System.err.println("[FrameServer] CRITICAL MEMORY: " + (int)(memoryPressure*100) + "% - Emergency cache");
+        }
+        
+        // Diagnostic: Report memory pressure
+        if (diagnosticPanel != null) diagnosticPanel.setMemoryPressure(memoryPressure);
+        
+        long totalBytes = (long) baseLimit * 1024 * 1024;
+        int frameLimit = (int) (totalBytes / bytesPerFrame);
+        
+        // Cap at reasonable maximum to prevent integer overflow
+        return Math.min(frameLimit, 2000);
     }
 
     private class RenderTask implements Runnable, Comparable<RenderTask> {
@@ -101,14 +160,36 @@ public class FrameServer {
 
             // ... checks ...
 
-            // 2. Double-check synchronization
+            // 2. Decode with timing for adaptive latency
             BufferedImage rendered;
+            long decodeStart = System.currentTimeMillis();
             try {
-                // Time handled inside getFrameAt via marks
                 rendered = getFrameAt(frame, false);
             } catch (Exception e) {
                 e.printStackTrace();
                 return;
+            }
+            long decodeEnd = System.currentTimeMillis();
+            long decodeDuration = decodeEnd - decodeStart;
+            
+            // REC-001: Track decode time for adaptive compensation
+            if (!isPrefetch && decodeDuration > 0) {
+                recentDecodeTimes.offer(decodeDuration);
+                // Keep only last 10 samples
+                while (recentDecodeTimes.size() > 10) {
+                    recentDecodeTimes.poll();
+                }
+                // Update rolling average
+                long sum = 0;
+                int count = 0;
+                for (Long time : recentDecodeTimes) {
+                    sum += time;
+                    count++;
+                }
+                if (count > 0) {
+                    averageDecodeMs = sum / (double) count;
+                    if (diagnosticPanel != null) diagnosticPanel.setAvgDecodeMs(averageDecodeMs);
+                }
             }
 
             // ... checks ...
@@ -117,13 +198,32 @@ public class FrameServer {
             manageCacheSize(frame);
 
             if (!isPrefetch) {
+                // --- SYNC-CATCH-UP: LATE FRAME REJECTION ---
+                // If decoding took too long and the playhead has moved on, DISCARD this frame.
+                // This prevents "Slow Motion" drift where we show 100ms old frames.
+                long currentTarget = latestTargetFrame.get();
+                long drift = Math.abs(currentTarget - frame);
+                
+                // Threshold: 2 frames (approx 33-66ms tolerance)
+                // If we are more than 2 frames behind, skip drawing to catch up.
+                if (drift > 2) {
+                     // Monitor: Mark as "Skipped for Sync"
+                     if (diagnosticPanel != null) diagnosticPanel.recordSyncSkip();
+                     return; // Skip update
+                }
+
                 // ASYNC TEXTURE UPLOAD: Move BufferedImage -> VRAM copy off the EDT
                 visualizer.prepareVramFrame(rendered);
 
                 monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_START);
                 javax.swing.SwingUtilities.invokeLater(() -> {
+                    // Double-Check inside EDT (just in case)
+                    if (Math.abs(latestTargetFrame.get() - frame) > 4) return;
+                    
                     currentVisibleBuffer = rendered;
                     visualizer.updateFrame(rendered);
+                    fpsTracker.recordFrame();
+                    if (diagnosticPanel != null) diagnosticPanel.setMeasuredFPS(fpsTracker.getMeasuredFPS());
                     monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_END);
                     monitor.endFrame();
                 });
@@ -158,6 +258,23 @@ public class FrameServer {
 
     public MediaPool getMediaPool() {
         return pool;
+    }
+    
+    /**
+     * REC-001: Exposes average decode time for adaptive latency compensation.
+     * AudioServer can query this to dynamically adjust its pre-roll.
+     * @return Average decode time in milliseconds (rolling window of last 10 frames)
+     */
+    public double getAverageDecodeMs() {
+        return averageDecodeMs;
+    }
+    
+    public void setDiagnosticPanel(rocky.core.diagnostics.DiagnosticPanel panel) {
+        this.diagnosticPanel = panel;
+    }
+    
+    public int getQueueSize() {
+        return executor.getQueue().size();
     }
 
     /**
@@ -199,16 +316,24 @@ public class FrameServer {
     public void processFrame(double timeInSeconds, boolean force) {
         double fps = (properties != null) ? properties.getFPS() : 30.0;
         long targetFrame = Math.round(timeInSeconds * fps);
+        
+        // Diagnostic: Report video timestamp
+        if (diagnosticPanel != null) {
+            diagnosticPanel.setVideoTimestamp(timeInSeconds);
+            diagnosticPanel.setQueueSize(getQueueSize());
+        }
 
         if (force) {
             BufferedImage removed = frameCache.remove(targetFrame);
             if (removed != null)
                 returnCanvasToPool(removed);
+            if (diagnosticPanel != null) diagnosticPanel.recordCacheMiss();
         } else if (frameCache.containsKey(targetFrame)) {
             BufferedImage cached = frameCache.get(targetFrame);
             visualizer.prepareVramFrame(cached);
             visualizer.updateFrame(cached);
             prefetchFrames(targetFrame);
+            if (diagnosticPanel != null) diagnosticPanel.recordCacheHit();
             return;
         }
 

@@ -43,23 +43,40 @@ public class TimelineModel {
 
     // --- Clip Management ---
 
+    private final java.util.concurrent.locks.ReentrantReadWriteLock treeLock = new java.util.concurrent.locks.ReentrantReadWriteLock();
+
     public void addClip(TimelineClip clip) {
         clips.add(clip);
-        clipTree.add(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
+        treeLock.writeLock().lock();
+        try {
+            clipTree.add(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
+        } finally {
+            treeLock.writeLock().unlock();
+        }
         incrementRevision();
         fireUpdate();
     }
 
     public void removeClip(TimelineClip clip) {
         clips.remove(clip);
-        clipTree.remove(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
+        treeLock.writeLock().lock();
+        try {
+            clipTree.remove(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
+        } finally {
+             treeLock.writeLock().unlock();
+        }
         incrementRevision();
         fireUpdate();
     }
 
     public void clearClips() {
         clips.clear();
-        clipTree.clear();
+        treeLock.writeLock().lock();
+        try {
+            clipTree.clear();
+        } finally {
+            treeLock.writeLock().unlock();
+        }
         incrementRevision();
         fireUpdate();
     }
@@ -69,14 +86,19 @@ public class TimelineModel {
      * Use this when moving/resizing clips to keep the tree consistent.
      */
     public void updateClipPosition(TimelineClip clip, Runnable modification) {
-        // Remove from tree with OLD coordinates
-        clipTree.remove(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
-        
-        // Execute the change properties
-        modification.run();
-        
-        // Re-insert with NEW coordinates
-        clipTree.add(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
+        treeLock.writeLock().lock();
+        try {
+            // Remove from tree with OLD coordinates
+            clipTree.remove(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
+            
+            // Execute the change properties
+            modification.run();
+            
+            // Re-insert with NEW coordinates
+            clipTree.add(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
+        } finally {
+            treeLock.writeLock().unlock();
+        }
         incrementRevision();
     }
 
@@ -98,7 +120,12 @@ public class TimelineModel {
     }
 
     public List<TimelineClip> getClipsAt(long frame) {
-        return clipTree.query(frame);
+        treeLock.readLock().lock();
+        try {
+            return clipTree.query(frame);
+        } finally {
+            treeLock.readLock().unlock();
+        }
     }
 
     public IntervalTree<TimelineClip> getClipTree() {

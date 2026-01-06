@@ -264,6 +264,41 @@ public class PropertiesTreePanel extends JPanel {
         }
     }
 
+    /**
+     * Updates the values in the tree from the current clip transform
+     * without rebuilding the entire structure (to preserve expansion state etc).
+     */
+    public void updateValues() {
+        DefaultMutableTreeNode root = (DefaultMutableTreeNode) model.getRoot();
+        
+        for (int i = 0; i < root.getChildCount(); i++) {
+            DefaultMutableTreeNode category = (DefaultMutableTreeNode) root.getChildAt(i);
+            String categoryName = category.getUserObject().toString();
+            
+            if (categoryName.equals("Posición")) {
+                for (int j = 0; j < category.getChildCount(); j++) {
+                    PropertyNode node = (PropertyNode) category.getChildAt(j);
+                    String name = node.getName();
+                    if (name.equals("Anchura")) node.setValue(clip.getTransform().getScaleX() * 1920);
+                    else if (name.equals("Altura")) node.setValue(clip.getTransform().getScaleY() * 1080);
+                    else if (name.equals("Centro X")) node.setValue(clip.getTransform().getX());
+                    else if (name.equals("Centro Y")) node.setValue(clip.getTransform().getY());
+                    model.nodeChanged(node);
+                }
+            }
+            else if (categoryName.equals("Rotación")) {
+                 for (int j = 0; j < category.getChildCount(); j++) {
+                    PropertyNode node = (PropertyNode) category.getChildAt(j);
+                    String name = node.getName();
+                    if (name.equals("Ángulo")) node.setValue(clip.getTransform().getRotation());
+                    else if (name.equals("Centro X")) node.setValue(clip.getTransform().getX());
+                    else if (name.equals("Centro Y")) node.setValue(clip.getTransform().getY());
+                    model.nodeChanged(node);
+                }
+            }
+        }
+    }
+
     private static class PropertyCellRenderer extends DefaultTreeCellRenderer {
         public PropertyCellRenderer() {
             setOpenIcon(null);

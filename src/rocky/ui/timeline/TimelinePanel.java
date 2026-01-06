@@ -269,12 +269,45 @@ public class TimelinePanel extends JPanel {
         model.getBlueline().setPlaybackRate(rate);
     }
 
+    // Playback Loop (60 FPS)
+    private Timer playbackTimer;
+
     public TimelinePanel(rocky.core.model.TimelineModel model) {
         this.model = model;
         model.addListener(this::onModelUpdated);
 
         setBackground(BG_COLOR);
         setFocusable(true);
+        
+        // Main Playback Loop (Video Engine Heartbeat)
+        // Runs at ~60 FPS to drive the Blueline clock and visualizer updates
+        playbackTimer = new Timer(16, e -> {
+            if (model.getBlueline().isPlaying()) {
+                model.getBlueline().update(); // Update clock (Audio or System)
+                
+                // --- FIX: Manually trigger UI update from Timer ---
+                // We cannot use updatePlayheadFromFrame() because it might reset the precise clock 
+                // and it calls 'onTimelineUpdated' which kills the cache.
+                // We only want 'onTimeUpdate'.
+                
+                long frame = model.getBlueline().getPlayheadFrame();
+                double time = frame / (double) getFPS(); 
+                
+                // Auto-scroll logic
+                double newScroll = model.getBlueline().calculateAutoScroll(visibleStartTime, getVisibleDuration());
+                if (newScroll >= 0) {
+                    visibleStartTime = newScroll;
+                }
+                
+                // Notify View (FrameServer, Visualizer, Ruler)
+                for (TimelineListener listener : listeners) {
+                    listener.onTimeUpdate(time, frame, model.getBlueline().formatTimecode(frame), false);
+                }
+                
+                repaint(); // Update Playhead Line on Timeline
+            }
+        });
+        playbackTimer.start(); // Always running, logic gated by isPlaying inside
 
         // Debounce PeakManager repaints (max 30 FPS for UI updates)
         repaintTimer = new Timer(33, e -> repaint());
