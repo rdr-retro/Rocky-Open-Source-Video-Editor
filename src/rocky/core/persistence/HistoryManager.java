@@ -33,6 +33,11 @@ public class HistoryManager {
         
         // 2. Offload serialization to background thread
         historyExecutor.submit(() -> {
+            // PLAYBACK ISOLATION: Defer state capture if playing
+            while (rocky.core.engine.PlaybackIsolation.getInstance().isPlaybackActive()) {
+                try { Thread.sleep(500); } catch (InterruptedException e) { break; }
+            }
+
             String state = ProjectManager.serializeProject(clipsSnapshot, props, pool, trackHeights, trackTypes);
             if (state.equals(currentState)) return;
             

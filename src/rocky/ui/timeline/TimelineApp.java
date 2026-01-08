@@ -99,15 +99,15 @@ public class TimelineApp {
                 @Override
                 public void onTimelineUpdated() {
                     ruler.repaint();
+                }
+
+                @Override
+                public void onTimelineStructureChanged() {
                     // FORCE RE-RENDER on state update (clip add/delete/split)
                     if (frameServer != null) {
+                        frameServer.invalidateCache();
                         frameServer.processFrame(timeline.getPlayheadTime(), true);
                     }
-                    
-                    long visibleStart = (long) (timeline.getVisibleStartTime() * 1000);
-                    long visibleDuration = (long) (timeline.getVisibleDuration() * 1000);
-                    long projectDuration = (long) (timeline.getProjectDuration() * 1000);
-                    // hScroll update logic...
                 }
             });
 
@@ -158,6 +158,10 @@ public class TimelineApp {
                     hScroll.setValues((int) visibleStart, (int) visibleDuration, 0, (int) projectDuration);
                     hScroll.setBlockIncrement((int) visibleDuration);
                     hScroll.setUnitIncrement((int) (visibleDuration / 10));
+                }
+
+                @Override
+                public void onTimelineStructureChanged() {
                 }
             });
 

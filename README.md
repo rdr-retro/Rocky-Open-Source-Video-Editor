@@ -9,8 +9,8 @@ Tras una profunda reestructuración del motor de renderizado, Rocky ahora ofrece
 
 Para conseguir esta estabilidad, se han implementado las siguientes mejoras estructurales:
 
-### 1. Eliminación del bucle de invalidación de caché
-Se ha implementado un sistema de revisión de diseño que solo permite invalidar la caché cuando hay un cambio real en la estructura del proyecto. Esto protege la persistencia de los datos precargados durante la reproducción, evitando lecturas de disco innecesarias.
+### 1. Separación de Eventos de UI y Estructura (Zero-Stutter Zoom)
+Se ha implementado una arquitectura de eventos dual. Las interacciones de la interfaz (Zoom con la rueda del ratón, desplazamientos horizontales y navegación) ahora son independientes de la validación del motor de video. Esto permite explorar la línea de tiempo con fluidez absoluta mientras el video se reproduce a 60 FPS, eliminando los micro-tirones que antes provocaba la invalidación constante de la caché.
 
 ### 2. Optimización multihilo para Apple Silicon M4
 El servidor de fotogramas utiliza 10 hilos de ejecución para aprovechar todos los núcleos del procesador. Se ha sustituido el procesamiento en paralelo de clips superpuestos por una ejecución secuencial optimizada para evitar la contención de recursos en las librerías nativas.
@@ -18,8 +18,8 @@ El servidor de fotogramas utiliza 10 hilos de ejecución para aprovechar todos l
 ### 3. Estabilización de la memoria de video (VRAM)
 Se ha corregido el error en el pipeline de renderizado de macOS mediante un intercambio atómico de imágenes en memoria RAM. Esto permite que el sistema operativo gestione la aceleración Metal de forma nativa y segura, eliminando fallos en el hilo de flasheo de Java2D.
 
-### 4. Gestión del hilo de interfaz (EDT)
-Se ha optimizado la carga de la interfaz de usuario suspendiendo el renderizado de miniaturas en el timeline durante la reproducción. Las etiquetas de información se actualizan de forma regulada (10Hz) para dedicar la máxima prioridad al flujo de video.
+### 4. Gestión del hilo de interfaz y Aislamiento Total
+Se ha optimizado la carga del Event Dispatch Thread (EDT) regulando la actualización de etiquetas a 10Hz. Además, Rocky implementa un aislamiento estricto de procesos en segundo plano: durante la reproducción, se suspenden automáticamente la generación de miniaturas, el cálculo de ondas de audio (`PeakManager`) y la serialización del historial (`HistoryManager`), garantizando que el bus de datos y el motor NVMe se dediquen al 100% al flujo de video.
 
 ### 5. Sincronización robusta del decodificador
 Los bloqueos de seguridad en la capa de medios aseguran que la decodificación y la clonación del buffer de imagen ocurran de forma atómica, eliminando parpadeos o corrupciones visuales en el motor de pre-renderizado.

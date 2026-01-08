@@ -39,10 +39,6 @@ public class MainTimelineListener implements TimelinePanel.TimelineListener {
 
     @Override
     public void onTimelineUpdated() {
-        // Invalidate cache to prevent ghost images when clips are moved/deleted
-        frameServer.invalidateCache();
-        frameServer.processFrame(timeline.getPlayheadTime(), true);
-
         ruler.repaint();
         long visibleStart = (long) (timeline.getVisibleStartTime() * 1000);
         long visibleDuration = (long) (timeline.getVisibleDuration() * 1000);
@@ -50,5 +46,12 @@ public class MainTimelineListener implements TimelinePanel.TimelineListener {
         hScroll.setValues((int) visibleStart, (int) visibleDuration, 0, (int) projectDuration);
         hScroll.setBlockIncrement((int) visibleDuration);
         hScroll.setUnitIncrement((int) (visibleDuration / 10));
+    }
+
+    @Override
+    public void onTimelineStructureChanged() {
+        // Invalidate cache only when clips are moved/deleted to prevent ghost images
+        frameServer.invalidateCache();
+        frameServer.processFrame(timeline.getPlayheadTime(), true);
     }
 }

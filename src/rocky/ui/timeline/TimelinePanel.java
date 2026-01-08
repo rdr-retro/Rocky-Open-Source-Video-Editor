@@ -970,7 +970,7 @@ public class TimelinePanel extends JPanel {
                 if (visibleStartTime < 0)
                     visibleStartTime = 0;
 
-                fireTimelineUpdated();
+                fireViewUpdated();
             }
         });
 
@@ -1316,7 +1316,9 @@ public class TimelinePanel extends JPanel {
     public interface TimelineListener {
         void onTimeUpdate(double timeInSeconds, long totalFrames, String timecode, boolean force);
 
-        void onTimelineUpdated(); // For syncing ruler/scrollbar
+        void onTimelineUpdated(); // For syncing ruler/scrollbar (UI only)
+
+        void onTimelineStructureChanged(); // For cache invalidation (Clips moved/deleted)
     }
 
     private final java.util.List<TimelineListener> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -1763,7 +1765,7 @@ public class TimelinePanel extends JPanel {
         if (visibleStartTime < 0)
             visibleStartTime = 0;
 
-        fireTimelineUpdated();
+        fireViewUpdated();
     }
 
     public void fireTimelineUpdated() {
@@ -1771,6 +1773,14 @@ public class TimelinePanel extends JPanel {
             listener.onTimeUpdate(getPlayheadTime(), getPlayheadFrame(),
                     model.getBlueline().formatTimecode(getPlayheadFrame()),
                     true);
+            listener.onTimelineStructureChanged();
+            listener.onTimelineUpdated();
+        }
+        repaint();
+    }
+
+    public void fireViewUpdated() {
+        for (TimelineListener listener : listeners) {
             listener.onTimelineUpdated();
         }
         repaint();
@@ -1798,6 +1808,7 @@ public class TimelinePanel extends JPanel {
         for (TimelineListener listener : listeners) {
             listener.onTimeUpdate(time, currentFrame, timecode, false);
             if (layoutChanged) {
+                listener.onTimelineStructureChanged();
                 listener.onTimelineUpdated();
             }
         }

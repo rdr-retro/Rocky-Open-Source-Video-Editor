@@ -104,6 +104,10 @@ public class PanCropEditor extends JPanel {
                 @Override
                 public void onTimelineUpdated() {
                 }
+
+                @Override
+                public void onTimelineStructureChanged() {
+                }
             });
         }
 
