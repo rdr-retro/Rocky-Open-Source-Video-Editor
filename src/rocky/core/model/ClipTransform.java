@@ -16,7 +16,7 @@ public class ClipTransform {
     public ClipTransform() {
     }
 
-    public ClipTransform(ClipTransform other) {
+    public void copyFrom(ClipTransform other) {
         if (other != null) {
             this.x = other.x;
             this.y = other.y;
@@ -26,6 +26,10 @@ public class ClipTransform {
             this.anchorX = other.anchorX;
             this.anchorY = other.anchorY;
         }
+    }
+
+    public ClipTransform(ClipTransform other) {
+        copyFrom(other);
     }
 
     public double getX() {

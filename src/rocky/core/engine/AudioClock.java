@@ -45,7 +45,7 @@ public class AudioClock {
     public long getCurrentTimelineFrame(long audioFramesPlayed) {
         long relativeFrames = audioFramesPlayed - baseDevicePos;
         double seconds = (double) relativeFrames / sampleRate;
-        return baseTimelineFrame + (long)(seconds * fps * playbackRate);
+        return baseTimelineFrame + Math.round(seconds * fps * playbackRate);
     }
 
     /**

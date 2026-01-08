@@ -14,6 +14,7 @@ public class ProjectProperties {
     private String displayRes = "1920x1080 (Full HD 1080p)";
     private boolean lowResPreview = true;
     private double fps = 30.0;
+    private double visorFPS = 60.0; // Visor/Preview fluidity setting
     private int audioSampleRate = 48000;
     private int audioChannels = 2;
 
@@ -212,6 +213,14 @@ public class ProjectProperties {
 
     public void setFPS(double fps) {
         this.fps = fps;
+    }
+
+    public double getVisorFPS() {
+        return visorFPS;
+    }
+
+    public void setVisorFPS(double visorFPS) {
+        this.visorFPS = visorFPS;
     }
 
     public int getAudioSampleRate() {

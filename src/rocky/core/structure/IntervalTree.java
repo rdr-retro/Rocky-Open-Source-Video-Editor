@@ -49,8 +49,12 @@ public class IntervalTree<T> {
      */
     public List<T> query(long point) {
         List<T> result = new ArrayList<>();
-        query(root, point, result);
+        query(point, result);
         return result;
+    }
+
+    public void query(long point, List<T> result) {
+        query(root, point, result);
     }
 
     private void query(Node node, long point, List<T> result) {

@@ -2,6 +2,8 @@ package rocky.core.media;
 
 import java.awt.image.BufferedImage;
 import java.awt.Graphics2D;
+import java.awt.AlphaComposite;
+import java.awt.Color;
 import java.io.File;
 import org.bytedeco.javacv.*;
 import org.bytedeco.ffmpeg.global.avutil;
@@ -19,7 +21,11 @@ public class VideoDecoder {
     private int height;
     private double scaleFactor = 1.0;
     private long lastFrameNumber = -2; 
-    private double videoFPS = 30.0;
+    private long lastNativeFrame = -2;
+    private BufferedImage lastImage = null;
+    private BufferedImage rotationBuffer = null;
+    private double videoFPS = 30.0; // Project FPS
+    private double sourceNativeFPS = 30.0;
 
     public VideoDecoder(File file, int width, int height) {
         this.videoFile = file;
@@ -189,6 +195,11 @@ public class VideoDecoder {
 
             System.out.println("[VideoDecoder] Final Logical Dimensions: " + width + "x" + height);
             
+            // --- DETECT NATIVE FPS ---
+            this.sourceNativeFPS = grabber.getVideoFrameRate();
+            if (this.sourceNativeFPS <= 0) this.sourceNativeFPS = 30.0;
+            System.out.println("[VideoDecoder] Source Native FPS: " + sourceNativeFPS);
+
             return true;
         } catch (Exception e) {
             System.err.println("[VideoDecoder] Failed to init: " + e.getMessage());
@@ -212,28 +223,35 @@ public class VideoDecoder {
             // Refresh LRU status in the pool so we are not evicted during long playback
             DecoderPool.touch(videoFile.getAbsolutePath());
             
+            // 1. Translate PROJECT FRAME to SOURCE NATIVE FRAME
+            long nativeFrame = Math.round(frameNumber * (sourceNativeFPS / videoFPS));
+
+            // 2. Performance: If the native frame hasn't changed (e.g. 60fps project, 30fps source), 
+            // return the cached last image to avoid redundant decoding and maintain correct duration.
+            if (nativeFrame == lastNativeFrame && lastImage != null) {
+                lastFrameNumber = frameNumber;
+                return lastImage;
+            }
+
             // Fuzzy Sequential Logic
-            // If we are close enough (e.g. within 5 frames forward), just read through
-            // This avoids flushing the decoder pipeline which happens on seek/timestamp change
-            boolean isSequential = (frameNumber == lastFrameNumber + 1);
-            boolean isCloseEnough = (frameNumber > lastFrameNumber && frameNumber <= lastFrameNumber + 5);
+            boolean isSequential = (nativeFrame == lastNativeFrame + 1);
+            boolean isCloseEnough = (nativeFrame > lastNativeFrame && nativeFrame <= lastNativeFrame + 3);
             
             if (!isSequential) {
                 if (isCloseEnough) {
                     // Consume intervening frames
-                    int framesToSkip = (int)(frameNumber - lastFrameNumber - 1);
+                    int framesToSkip = (int)(nativeFrame - lastNativeFrame - 1);
                     for (int i = 0; i < framesToSkip; i++) {
                         grabber.grabImage(); // Discard
                     }
                 } else {
                     // Long Seek
-                    // Optimize for MP4/MOV: setVideoFrameNumber is precise and often faster
                     String fmt = grabber.getFormat();
                     if (fmt != null && (fmt.contains("mp4") || fmt.contains("mov"))) {
-                        grabber.setVideoFrameNumber((int)frameNumber);
+                        grabber.setVideoFrameNumber((int)nativeFrame);
                     } else {
-                        // Fallback to timestamp for others
-                        long timestamp = Math.round((frameNumber / videoFPS) * 1000000);
+                        // Use timestamp-based seek for better accuracy across different FPS
+                        long timestamp = Math.round((nativeFrame / sourceNativeFPS) * 1000000);
                         grabber.setTimestamp(timestamp);
                     }
                 }
@@ -247,6 +265,7 @@ public class VideoDecoder {
             }
 
             lastFrameNumber = frameNumber;
+            lastNativeFrame = nativeFrame;
             
             if (frame != null && frame.image != null) {
                 BufferedImage raw = converter.getBufferedImage(frame);
@@ -256,17 +275,26 @@ public class VideoDecoder {
                 // dimensions, it means the decoder (Hardware Accel) already applied 
                 // the rotation for us.
                 if (raw.getWidth() == this.width && raw.getHeight() == this.height) {
+                    this.lastImage = raw;
                     return raw;
                 }
 
-                if (rotation == 0) return raw;
+                if (rotation == 0) {
+                    this.lastImage = raw;
+                    return raw;
+                }
 
-                // Handle Manual Rotation Logic
-                BufferedImage rotated = new BufferedImage(width, height, raw.getType());
-                Graphics2D g2 = rotated.createGraphics();
+                // Handle Manual Rotation Logic (Optimized: Zero Allocation)
+                if (rotationBuffer == null || rotationBuffer.getWidth() != width || rotationBuffer.getHeight() != height) {
+                    rotationBuffer = new BufferedImage(width, height, raw.getType());
+                }
+                Graphics2D g2 = rotationBuffer.createGraphics();
                 
-                // We need to handle the rotation based on what we calculated in init()
-                // but double check if we are already rotated (some grabbers do it, some don't)
+                // Clear background manually if reuse to avoid artifacts (though we draw over fully)
+                g2.setComposite(AlphaComposite.Src);
+                g2.setColor(new Color(0,0,0,0));
+                g2.fillRect(0,0, width, height);
+
                 if (rotation == 90 || rotation == -270) {
                     g2.translate(width, 0);
                     g2.rotate(Math.toRadians(90));
@@ -280,7 +308,11 @@ public class VideoDecoder {
                 
                 g2.drawImage(raw, 0, 0, null);
                 g2.dispose();
-                return rotated;
+                this.lastImage = rotationBuffer;
+                return rotationBuffer;
+            } else if (lastImage != null) {
+                // FALLBACK: If decoding fails, return last successful image to prevent black screen
+                return lastImage; 
             }
         } catch (Exception e) {
             System.err.println("[VideoDecoder] Error grabbing frame " + frameNumber + ": " + e.getMessage());

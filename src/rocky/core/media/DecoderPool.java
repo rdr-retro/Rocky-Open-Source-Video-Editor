@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public class DecoderPool {
     
     // Limits the total number of OPEN native decoders across all media sources
-    private static final int MAX_OPEN_DECODERS = 10;
+    private static final int MAX_OPEN_DECODERS = 32;
     
     // Key: File absolute path
     // Value: Queue of Available Grabbers for that file

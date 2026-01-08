@@ -21,10 +21,13 @@ public class MediaSource {
     private boolean isVideo;
     private boolean isAudio;
 
+    // --- OPTIMIZATION: Buffer Pooling for cloneToARGBPre ---
+    private final java.util.concurrent.ConcurrentLinkedQueue<BufferedImage> localBufferPool = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
     // Performance Optimization for GIFs and short animations
     private java.util.List<java.awt.image.BufferedImage> gifFrameCache;
     private long currentCacheBytes = 0;
-    private final long MAX_CACHE_BYTES = 200 * 1024 * 1024; // 200 MB limit per source
+    private final long MAX_CACHE_BYTES = 800 * 1024 * 1024; // 800 MB limit per source (Better for 60 FPS)
 
     // Proxy support (Dual-stream architecture)
     private String proxyFilePath;
@@ -40,6 +43,7 @@ public class MediaSource {
                 BufferedImage img = eldest.getValue();
                 if (img != null) {
                     currentCacheBytes -= (long) img.getWidth() * img.getHeight() * 4;
+                    recycleBuffer(img);
                 }
                 return true;
             }
@@ -105,8 +109,8 @@ public class MediaSource {
         }
 
         if (!isVideo && !isAudio) {
-            // Image handling (Default 3 seconds @ 30 FPS)
-            this.totalFrames = 90;
+            // Image handling (Default 3 seconds @ Current FPS)
+            this.totalFrames = (long) (3.0 * fps);
             this.width = 1920;
             this.height = 1080;
         }
@@ -167,12 +171,27 @@ public class MediaSource {
     private BufferedImage cloneToARGBPre(BufferedImage src) {
         if (src == null)
             return null;
+            
+        int w = src.getWidth();
+        int h = src.getHeight();
+            
         // Standardize on TYPE_INT_ARGB_PRE for the entire pipe
-        BufferedImage dest = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB_PRE);
+        // Attempt to reuse from pool
+        BufferedImage dest = localBufferPool.poll();
+        if (dest == null || dest.getWidth() != w || dest.getHeight() != h) {
+            dest = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB_PRE);
+        }
+        
         java.awt.Graphics2D g = dest.createGraphics();
         g.drawImage(src, 0, 0, null);
         g.dispose();
         return dest;
+    }
+
+    public void recycleBuffer(BufferedImage img) {
+        if (img != null && localBufferPool.size() < 20) {
+            localBufferPool.offer(img);
+        }
     }
 
     public void setProjectSettings(double fps, int sampleRate) {

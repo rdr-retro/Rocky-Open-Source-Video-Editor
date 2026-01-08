@@ -30,18 +30,16 @@ public class FrameServer {
     private final java.util.concurrent.ConcurrentLinkedQueue<BufferedImage> bufferPool = new java.util.concurrent.ConcurrentLinkedQueue<>();
     private final java.util.concurrent.atomic.AtomicLong latestTargetFrame = new java.util.concurrent.atomic.AtomicLong(
             -1);
+    private final java.util.concurrent.atomic.AtomicLong lastShownFrame = new java.util.concurrent.atomic.AtomicLong(-1);
+    private final java.util.concurrent.atomic.AtomicLong totalRequests = new java.util.concurrent.atomic.AtomicLong(0);
     private BufferedImage currentVisibleBuffer = null;
     private long lastRequestTime = 0;
     private double currentScrubbingVelocity = 0; // frames per ms
-    private final int MAX_POOL_SIZE = 100; // Increased for aggressive mode
-    
-    // REC-001: Adaptive Latency Feedback
-    private final java.util.concurrent.ConcurrentLinkedQueue<Long> recentDecodeTimes = new java.util.concurrent.ConcurrentLinkedQueue<>();
-    private volatile double averageDecodeMs = 150.0; // Initial estimate
-    
-    // Diagnostic Integration
-    private rocky.core.diagnostics.DiagnosticPanel diagnosticPanel;
-    private final rocky.core.diagnostics.FPSTracker fpsTracker = new rocky.core.diagnostics.FPSTracker();
+    private final int MAX_POOL_SIZE = 100; // Increased for high core counts and deep pipelining
+
+    // --- OPTIMIZATION: List and Object Pooling to reduce GC ---
+    private final java.util.concurrent.ConcurrentLinkedQueue<java.util.ArrayList<TimelineClip>> clipListPool = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private final ClipTransform reusableTransform = new ClipTransform();
 
     // Vegas Adaptive Quality
 
@@ -52,38 +50,9 @@ public class FrameServer {
         this.monitor = new rocky.core.diagnostics.PerformanceMonitor();
 
         int cores = Runtime.getRuntime().availableProcessors();
-        
-        // AGGRESSIVE MODE: Use all available RAM
-        // Queue: 2000 tasks for deep buffering with HEVC 4K @ 60fps
-        // Max memory: 2000 * 8MB (1080p) = 16GB - acceptable for modern Macs
-        java.util.concurrent.PriorityBlockingQueue<Runnable> boundedQueue = 
-            new java.util.concurrent.PriorityBlockingQueue<>(2000);
-        
         this.executor = new java.util.concurrent.ThreadPoolExecutor(
                 cores, cores, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
-                boundedQueue,
-                new java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy() {
-                    @Override
-                    public void rejectedExecution(Runnable r, java.util.concurrent.ThreadPoolExecutor e) {
-                        // Intelligent Discard: Remove task farthest from current playhead
-                        if (r instanceof RenderTask) {
-                            RenderTask rejected = (RenderTask) r;
-                            System.err.println("[FrameServer] Queue Full - Dropping Frame: " + rejected.frame);
-                            if (diagnosticPanel != null) diagnosticPanel.incrementDroppedFrames();
-                            
-                            // AUTO-PROXY TRIGGER
-                            // If we are dropping frames, we should tell the ProxyManager
-                            java.util.List<rocky.core.model.TimelineClip> clips = model.getClipsAt(rejected.frame);
-                            for (rocky.core.model.TimelineClip clip : clips) {
-                                rocky.core.media.MediaSource src = pool.getSource(clip.getMediaSourceId());
-                                if (src != null && src.isVideo()) {
-                                    rocky.core.media.ProxyManager.getInstance().reportStress(src.getFilePath(), src);
-                                }
-                            }
-                        }
-                        super.rejectedExecution(r, e);
-                    }
-                });
+                new java.util.concurrent.PriorityBlockingQueue<Runnable>());
         
         // --- SAFE RECYCLE INTEGRATION ---
         this.visualizer.setRecycleCallback(img -> returnCanvasToPool(img));
@@ -91,39 +60,17 @@ public class FrameServer {
 
     private int getRamCacheLimitFrames() {
         if (properties == null)
-            return 200; // Increased default
-        
-        // AGGRESSIVE MODE: Fixed large cache, only reduce at critical threshold
-        Runtime runtime = Runtime.getRuntime();
-        long maxMemory = runtime.maxMemory();
-        long freeMemory = runtime.freeMemory();
-        long totalMemory = runtime.totalMemory();
-        long usedMemory = totalMemory - freeMemory;
-        
-        long actualFree = maxMemory - usedMemory;
-        double memoryPressure = 1.0 - ((double) actualFree / maxMemory);
-        
+            return 60;
+        int mbLimit = 512; // Fixed limit since slider is removed
         int width = properties.getPreviewWidth();
         int height = properties.getPreviewHeight();
+        // Bytes per frame = width * height * 4 (RGBA)
         long bytesPerFrame = (long) width * height * 4;
         if (bytesPerFrame == 0)
-            return 200;
-        
-        // Aggressive: Use 4GB cache, only reduce at 95% pressure
-        int baseLimit = 4096; // 4GB for maximum smoothness
-        if (memoryPressure > 0.95) {
-            baseLimit = 1024; // Emergency: Still 1GB
-            System.err.println("[FrameServer] CRITICAL MEMORY: " + (int)(memoryPressure*100) + "% - Emergency cache");
-        }
-        
-        // Diagnostic: Report memory pressure
-        if (diagnosticPanel != null) diagnosticPanel.setMemoryPressure(memoryPressure);
-        
-        long totalBytes = (long) baseLimit * 1024 * 1024;
-        int frameLimit = (int) (totalBytes / bytesPerFrame);
-        
-        // Cap at reasonable maximum to prevent integer overflow
-        return Math.min(frameLimit, 2000);
+            return 60;
+
+        long totalBytes = (long) mbLimit * 1024 * 1024;
+        return (int) (totalBytes / bytesPerFrame);
     }
 
     private class RenderTask implements Runnable, Comparable<RenderTask> {
@@ -143,12 +90,20 @@ public class FrameServer {
 
         @Override
         public void run() {
-            // 1. Revision Check
+            // 1. Revision and Sync Check
             if (model.getLayoutRevision() > taskRevision) {
                 return;
             }
 
-            if (latestTargetFrame.get() != -1 && !isPrefetch) {
+            long target = latestTargetFrame.get();
+            if (target != -1 && !isPrefetch) {
+                // SYNC SENTRY: Adaptive drop threshold (more lenient at higher FPS)
+                int dropThreshold = (properties != null && properties.getFPS() > 50) ? 6 : 4;
+                if (Math.abs(target - frame) > dropThreshold) {
+                    monitor.incrementDroppedFrames(); // Telemetry
+                    return; // Drop if too late
+                }
+                
                 if (latestTargetFrame.get() != frame)
                     return;
             }
@@ -158,72 +113,46 @@ public class FrameServer {
                 monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.SEEK_START);
             }
 
-            // ... checks ...
-
-            // 2. Decode with timing for adaptive latency
+            // 2. Render logic
             BufferedImage rendered;
-            long decodeStart = System.currentTimeMillis();
             try {
                 rendered = getFrameAt(frame, false);
             } catch (Exception e) {
                 e.printStackTrace();
                 return;
             }
-            long decodeEnd = System.currentTimeMillis();
-            long decodeDuration = decodeEnd - decodeStart;
-            
-            // REC-001: Track decode time for adaptive compensation
-            if (!isPrefetch && decodeDuration > 0) {
-                recentDecodeTimes.offer(decodeDuration);
-                // Keep only last 10 samples
-                while (recentDecodeTimes.size() > 10) {
-                    recentDecodeTimes.poll();
-                }
-                // Update rolling average
-                long sum = 0;
-                int count = 0;
-                for (Long time : recentDecodeTimes) {
-                    sum += time;
-                    count++;
-                }
-                if (count > 0) {
-                    averageDecodeMs = sum / (double) count;
-                    if (diagnosticPanel != null) diagnosticPanel.setAvgDecodeMs(averageDecodeMs);
-                }
-            }
 
-            // ... checks ...
+            // 3. Post-Render Sync Check
+            long postTarget = latestTargetFrame.get();
+            if (!isPrefetch && Math.abs(postTarget - frame) > 1) {
+                // If it took too long to render and we already moved on, don't update UI
+                frameCache.put(frame, rendered);
+                monitor.incrementDecoderStalls(); // Telemetry
+                return;
+            }
 
             frameCache.put(frame, rendered);
             manageCacheSize(frame);
 
             if (!isPrefetch) {
-                // --- SYNC-CATCH-UP: LATE FRAME REJECTION ---
-                // If decoding took too long and the playhead has moved on, DISCARD this frame.
-                // This prevents "Slow Motion" drift where we show 100ms old frames.
-                long currentTarget = latestTargetFrame.get();
-                long drift = Math.abs(currentTarget - frame);
-                
-                // Threshold: 2 frames (approx 33-66ms tolerance)
-                // If we are more than 2 frames behind, skip drawing to catch up.
-                if (drift > 2) {
-                     // Monitor: Mark as "Skipped for Sync"
-                     if (diagnosticPanel != null) diagnosticPanel.recordSyncSkip();
-                     return; // Skip update
-                }
-
-                // ASYNC TEXTURE UPLOAD: Move BufferedImage -> VRAM copy off the EDT
+                // ASYNC TEXTURE UPLOAD
                 visualizer.prepareVramFrame(rendered);
 
                 monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_START);
                 javax.swing.SwingUtilities.invokeLater(() -> {
-                    // Double-Check inside EDT (just in case)
-                    if (Math.abs(latestTargetFrame.get() - frame) > 4) return;
+                    // FINAL SYNC CHECK: Ensure we are not showing a stale/out-of-order frame
+                    long currentTarget = latestTargetFrame.get();
+                    long shown = lastShownFrame.get();
                     
+                    // Logic: If the frame is older than what's on screen, only allow it if 
+                    // we are scrubbing/seeking (indicated by a large gap between current target and shown frame)
+                    if (frame < shown && Math.abs(currentTarget - shown) < 20) {
+                        return; // Block jitter
+                    }
+                    
+                    lastShownFrame.set(frame);
                     currentVisibleBuffer = rendered;
                     visualizer.updateFrame(rendered);
-                    fpsTracker.recordFrame();
-                    if (diagnosticPanel != null) diagnosticPanel.setMeasuredFPS(fpsTracker.getMeasuredFPS());
                     monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_END);
                     monitor.endFrame();
                 });
@@ -250,6 +179,9 @@ public class FrameServer {
 
     public void setProperties(rocky.ui.timeline.ProjectProperties props) {
         this.properties = props;
+        if (monitor != null) {
+            monitor.setTargetFPS(props.getFPS());
+        }
     }
 
     public rocky.core.model.TimelineModel getModel() {
@@ -258,23 +190,6 @@ public class FrameServer {
 
     public MediaPool getMediaPool() {
         return pool;
-    }
-    
-    /**
-     * REC-001: Exposes average decode time for adaptive latency compensation.
-     * AudioServer can query this to dynamically adjust its pre-roll.
-     * @return Average decode time in milliseconds (rolling window of last 10 frames)
-     */
-    public double getAverageDecodeMs() {
-        return averageDecodeMs;
-    }
-    
-    public void setDiagnosticPanel(rocky.core.diagnostics.DiagnosticPanel panel) {
-        this.diagnosticPanel = panel;
-    }
-    
-    public int getQueueSize() {
-        return executor.getQueue().size();
     }
 
     /**
@@ -314,27 +229,33 @@ public class FrameServer {
     }
 
     public void processFrame(double timeInSeconds, boolean force) {
-        double fps = (properties != null) ? properties.getFPS() : 30.0;
-        long targetFrame = Math.round(timeInSeconds * fps);
-        
-        // Diagnostic: Report video timestamp
-        if (diagnosticPanel != null) {
-            diagnosticPanel.setVideoTimestamp(timeInSeconds);
-            diagnosticPanel.setQueueSize(getQueueSize());
+        double projectFPS = (properties != null) ? properties.getFPS() : 30.0;
+        double visorFPS = (properties != null) ? properties.getVisorFPS() : projectFPS;
+        long targetFrame = Math.round(timeInSeconds * projectFPS);
+
+        // --- VISOR FPS THROTTLING ---
+        // If we want lower preview fluidity than project FPS, we skip some frames here
+        if (!force && visorFPS < projectFPS) {
+            long visorMod = Math.round(projectFPS / visorFPS);
+            if (visorMod > 1 && totalRequests.get() % visorMod != 0) {
+                totalRequests.incrementAndGet();
+                return;
+            }
         }
+        totalRequests.incrementAndGet();
 
         if (force) {
             BufferedImage removed = frameCache.remove(targetFrame);
             if (removed != null)
                 returnCanvasToPool(removed);
-            if (diagnosticPanel != null) diagnosticPanel.recordCacheMiss();
         } else if (frameCache.containsKey(targetFrame)) {
             BufferedImage cached = frameCache.get(targetFrame);
             visualizer.prepareVramFrame(cached);
             visualizer.updateFrame(cached);
             prefetchFrames(targetFrame);
-            if (diagnosticPanel != null) diagnosticPanel.recordCacheHit();
             return;
+        } else {
+            monitor.incrementCacheMisses(); // Telemetry
         }
 
         long now = System.currentTimeMillis();
@@ -348,6 +269,13 @@ public class FrameServer {
         lastRequestTime = now;
         latestTargetFrame.set(targetFrame);
 
+        // --- QUEUE MANAGEMENT ---
+        // If the queue is too deep (> 5 pending frames), purge prefetch tasks of the same revision
+        if (executor.getQueue().size() > 5) {
+            // Custom cleanup logic could go here, but PriorityBlockingQueue handles priority.
+            // However, we can track and skip prefetch tasks if needed.
+        }
+
         executor.execute(new RenderTask(targetFrame, false, model.getLayoutRevision()));
         
         // --- SMART LOOK-AHEAD ---
@@ -358,7 +286,8 @@ public class FrameServer {
     }
 
     private void prefetchFrames(long centerFrame) {
-        int radius = 10;
+        double fps = (properties != null) ? properties.getFPS() : 30.0;
+        int radius = (fps > 50) ? 60 : ((fps > 40) ? 40 : 20); // Doubled radius for smoother playback
         // Prefetch forward
         int enqueued = 0;
         for (int i = 1; i <= radius; i++) {
@@ -382,17 +311,19 @@ public class FrameServer {
 
     private void manageCacheSize(long currentFrame) {
         int maxFrames = getRamCacheLimitFrames();
-        if (frameCache.size() > maxFrames) {
+        if (frameCache.size() > maxFrames * 1.5) { // Only clean when significantly over limit
             // Remove frames far away from current
-            java.util.Iterator<java.util.Map.Entry<Long, BufferedImage>> it = frameCache.entrySet().iterator();
-            while (it.hasNext()) {
-                java.util.Map.Entry<Long, BufferedImage> entry = it.next();
-                if (Math.abs(entry.getKey() - currentFrame) > maxFrames) {
-                    // DON'T recycle if it's currently on screen!
-                    if (entry.getValue() != currentVisibleBuffer) {
-                        returnCanvasToPool(entry.getValue());
-                    }
-                    it.remove();
+            java.util.List<Long> toRemove = new java.util.ArrayList<>();
+            for (Long f : frameCache.keySet()) {
+                if (Math.abs(f - currentFrame) > maxFrames) {
+                    toRemove.add(f);
+                }
+            }
+            
+            for (Long f : toRemove) {
+                BufferedImage img = frameCache.remove(f);
+                if (img != null && img != currentVisibleBuffer) {
+                    returnCanvasToPool(img);
                 }
             }
         }
@@ -423,6 +354,9 @@ public class FrameServer {
             canvasW = properties.getPreviewWidth();
             canvasH = properties.getPreviewHeight();
         }
+
+        final int fCanvasW = canvasW;
+        final int fCanvasH = canvasH;
 
         BufferedImage canvas = getCanvasFromPool(canvasW, canvasH);
         java.awt.Graphics2D g2 = canvas.createGraphics();
@@ -460,98 +394,130 @@ public class FrameServer {
         // index draws last/on top)
         // Get clips active at this frame using the new Interval Tree optimization
         // (O(logN + k) instead of O(N))
-        List<TimelineClip> activeClips = model.getClipsAt(targetFrame);
+        // Optimization: Use pooled list for query
+        java.util.ArrayList<TimelineClip> activeClips = clipListPool.poll();
+        if (activeClips == null) activeClips = new java.util.ArrayList<>();
+        else activeClips.clear();
+        
+        model.getClipTree().query(targetFrame, activeClips);
         
         // Filter by visible track types (Video only)
         // We still need to filter here because the tree returns all clips at time T regardless of track type
-        java.util.List<TimelineClip> videoClips = new java.util.ArrayList<>();
+        // Filter by visible track types (Video only)
+        // Use pooling to avoid new ArrayList creation
+        java.util.ArrayList<TimelineClip> videoClips = clipListPool.poll();
+        if (videoClips == null) videoClips = new java.util.ArrayList<>();
+        else videoClips.clear();
+
         for (TimelineClip clip : activeClips) {
-            // Need to check track type from model
-            // But model has trackTypes list.
             if (model.getTrackTypes().size() > clip.getTrackIndex()) {
                  if (model.getTrackTypes().get(clip.getTrackIndex()) == rocky.ui.timeline.TrackControlPanel.TrackType.VIDEO) {
                      videoClips.add(clip);
                  }
             } else {
-                 // default video
                  videoClips.add(clip);
             }
         }
         
         // Sort by track index (descending so lower index draws last/on top)
-        videoClips.sort((a, b) -> Integer.compare(b.getTrackIndex(), a.getTrackIndex()));
+        // Optimization: Skip sort if only one clip
+        if (videoClips.size() > 1) {
+            videoClips.sort((a, b) -> Integer.compare(b.getTrackIndex(), a.getTrackIndex()));
+        }
 
+        // Start measuring Decode time (Aggregate for all clips)
+        monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DECODE_START);
+
+        // 1. Identify all clips needed for this frame (Normal + Transition neighbors)
+        java.util.Set<TimelineClip> allNeededClips = new java.util.HashSet<>(videoClips);
         for (TimelineClip clip : videoClips) {
-            MediaSource source = pool.getSource(clip.getMediaSourceId());
-            
-            // If standard clip and no source, skip. But if it's a generator, we proceed.
-            if (source == null && clip.getMediaGenerator() == null)
-                continue;
-
-            // PRE-TOUCH: Inform the pool that this media is about to be used
-            // This prevents the LRU policy from evicting a decoder that is visible.
-            if (source != null) {
-                rocky.core.media.DecoderPool.touch(source.getFilePath());
+            if (properties.isPluginsEnabled() && clip.getFadeInTransition() != null && targetFrame - clip.getStartFrame() < clip.getFadeInFrames()) {
+                TimelineClip clipA = findOverlappingOutgoingClip(clip, targetFrame);
+                if (clipA != null) allNeededClips.add(clipA);
             }
+        }
+
+        // 2. Parallel Decode ALL needed clips
+        java.util.Map<TimelineClip, BufferedImage> assets = allNeededClips.parallelStream().collect(
+            java.util.stream.Collectors.toConcurrentMap(
+                clip -> clip,
+                clip -> {
+                    MediaSource source = pool.getSource(clip.getMediaSourceId());
+                    if (source == null && clip.getMediaGenerator() == null) return null;
+
+                    if (source != null) {
+                        rocky.core.media.DecoderPool.touch(source.getFilePath());
+                    }
+
+                    long frameInClip = targetFrame - clip.getStartFrame();
+                    long sourceFrame = TemporalMath.getSourceFrameAt(clip, frameInClip);
+                    
+                    if (clip.getMediaGenerator() != null) {
+                        BufferedImage genAsset = getCanvasFromPool(fCanvasW, fCanvasH);
+                        Graphics2D g2gen = genAsset.createGraphics();
+                        AppliedPlugin genInfo = clip.getMediaGenerator();
+                        if (genInfo.getPluginInstance() == null) {
+                            genInfo.setPluginInstance(PluginManager.getInstance().getGenerator(genInfo.getPluginName()));
+                        }
+                        if (genInfo.getPluginInstance() instanceof RockyMediaGenerator) {
+                            ((RockyMediaGenerator) genInfo.getPluginInstance()).generate(g2gen, fCanvasW, fCanvasH, frameInClip, genInfo.getParameters());
+                        }
+                        g2gen.dispose();
+                        return genAsset;
+                    } else {
+                        return source.getFrame(sourceFrame, forceFullRes);
+                    }
+                },
+                (u, v) -> u
+            )
+        );
+
+        monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.CONVERT_START);
+
+        // 3. Sequential Composition
+        for (TimelineClip clip : videoClips) {
+            BufferedImage asset = assets.get(clip);
+            if (asset == null) continue;
 
             long frameInClip = targetFrame - clip.getStartFrame();
-            long sourceFrame = TemporalMath.getSourceFrameAt(clip, frameInClip);
-            
-            BufferedImage asset = null;
-            if (clip.getMediaGenerator() != null) {
-                // GENERATOR CLIP: Use project dimensions as asset base
-                asset = new BufferedImage(canvasW, canvasH, BufferedImage.TYPE_INT_ARGB_PRE);
-                Graphics2D g2gen = asset.createGraphics();
-                AppliedPlugin genInfo = clip.getMediaGenerator();
-                if (genInfo.getPluginInstance() == null) {
-                    genInfo.setPluginInstance(PluginManager.getInstance().getGenerator(genInfo.getPluginName()));
-                }
-                if (genInfo.getPluginInstance() instanceof RockyMediaGenerator) {
-                    ((RockyMediaGenerator) genInfo.getPluginInstance()).generate(g2gen, canvasW, canvasH, frameInClip, genInfo.getParameters());
-                }
-                g2gen.dispose();
-            } else {
-                // STANDARD MEDIA CLIP
-                monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DECODE_START);
-                asset = source.getFrame(sourceFrame, forceFullRes);
-                monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.CONVERT_START);
-            }
-
-            if (asset == null)
-                continue;
-
-            monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_START);
-            monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_START);
             
             // --- TRANSITION HANDLING ---
             AppliedPlugin fadeInTrans = clip.getFadeInTransition();
             if (properties.isPluginsEnabled() && fadeInTrans != null && frameInClip < clip.getFadeInFrames()) {
-                // We are in a transition zone! 
-                // We need the "outgoing" clip (Clip A)
                 TimelineClip clipA = findOverlappingOutgoingClip(clip, targetFrame);
-                if (clipA != null) {
-                    float progress = (float) frameInClip / clip.getFadeInFrames();
+                BufferedImage assetA = (clipA != null) ? assets.get(clipA) : null;
+                
+                if (assetA != null) {
                     RockyTransition trans = PluginManager.getInstance().getTransition(fadeInTrans.getPluginName());
                     if (trans != null) {
-                        // Render Clip A frame
-                        long frameInA = targetFrame - clipA.getStartFrame();
-                        long sourceFrameA = TemporalMath.getSourceFrameAt(clipA, frameInA);
-                        BufferedImage assetA = pool.getSource(clipA.getMediaSourceId()).getFrame(sourceFrameA, forceFullRes);
+                        float progress = (float) frameInClip / clip.getFadeInFrames();
+                        trans.render(g2, canvasW, canvasH, assetA, asset, progress, fadeInTrans.getParameters());
                         
-                        if (assetA != null) {
-                            // Render transition
-                            // For simplicity, we assume transition handles the full canvas or at least Clip B's area
-                            trans.render(g2, canvasW, canvasH, assetA, asset, progress, fadeInTrans.getParameters());
-                            continue; // Skip normal drawing
-                        }
+                        // Cleanup generator asset if needed
+                        if (clip.getMediaGenerator() != null) returnCanvasToPool(asset);
+                        continue; 
                     }
                 }
             }
 
             drawAssetOnCanvas(g2, asset, clip, frameInClip, canvasW, canvasH);
+            
+            // Cleanup generator asset if needed
+            if (clip.getMediaGenerator() != null) {
+                returnCanvasToPool(asset);
+            }
         }
-
+        
+        // Mark for DRAW_START (composition finished)
+        monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_START);
+        
         g2.dispose();
+        
+        // RECYCLE ALL LISTS
+        if (clipListPool.size() < 10) {
+            clipListPool.offer(activeClips);
+            clipListPool.offer(videoClips);
+        }
 
         // --- ACES COLOR MANAGEMENT ---
         if (properties.isAcesEnabled() && !isScrubbingFast && highQuality) {
@@ -573,21 +539,22 @@ public class FrameServer {
         double fitScale = Math.min((double) canvasW / assetW, (double) canvasH / assetH);
 
         // 2. Apply Custom Transform (Interpolated if keyframes exist)
-        ClipTransform transform = TemporalMath.getInterpolatedTransform(clip, frameInClip);
-        double finalScaleX = fitScale * transform.getScaleX();
-        double finalScaleY = fitScale * transform.getScaleY();
+        // Optimization: Use in-place interpolation to avoid object creation
+        TemporalMath.getInterpolatedTransform(clip, frameInClip, reusableTransform);
+        double finalScaleX = fitScale * reusableTransform.getScaleX();
+        double finalScaleY = fitScale * reusableTransform.getScaleY();
 
         // Centering by default + user offset
         // User x=0, y=0 means centered in project
-        double centerX = (canvasW / 2.0) + transform.getX();
-        double centerY = (canvasH / 2.0) + transform.getY();
+        double centerX = (canvasW / 2.0) + reusableTransform.getX();
+        double centerY = (canvasH / 2.0) + reusableTransform.getY();
 
         float opacity = (float) TemporalMath.getOpacityAt(clip, frameInClip);
 
         // Identity Transform Optimization
         // (Modified to skip if effects exist, as effects need processing)
-        if (clip.getAppliedEffects().isEmpty() && transform.getRotation() == 0 && transform.getScaleX() == 1.0 && transform.getScaleY() == 1.0 &&
-                transform.getX() == 0 && transform.getY() == 0 && fitScale == 1.0 && opacity >= 1.0f) {
+        if (clip.getAppliedEffects().isEmpty() && reusableTransform.getRotation() == 0 && reusableTransform.getScaleX() == 1.0 && reusableTransform.getScaleY() == 1.0 &&
+                reusableTransform.getX() == 0 && reusableTransform.getY() == 0 && fitScale == 1.0 && opacity >= 1.0f) {
             g2.drawImage(asset, (canvasW - assetW) / 2, (canvasH - assetH) / 2, null);
             return;
         }
@@ -618,10 +585,10 @@ public class FrameServer {
 
         java.awt.geom.AffineTransform at = new java.awt.geom.AffineTransform();
         at.translate(centerX, centerY);
-        at.rotate(Math.toRadians(transform.getRotation()));
+        at.rotate(Math.toRadians(reusableTransform.getRotation()));
         at.scale(finalScaleX, finalScaleY);
         // Anchor point (default center of the image)
-        at.translate(-assetW * transform.getAnchorX(), -assetH * transform.getAnchorY());
+        at.translate(-assetW * reusableTransform.getAnchorX(), -assetH * reusableTransform.getAnchorY());
 
         java.awt.Composite oldComp = g2.getComposite();
         if (opacity < 1.0f) {
@@ -642,18 +609,14 @@ public class FrameServer {
     }
 
     private TimelineClip findOverlappingOutgoingClip(TimelineClip incomingClip, long targetFrame) {
-        // Look for a clip on the same track that is currently in its "Fade Out" zone
-        // or just overlapping the incoming clip's start.
-        for (TimelineClip other : model.getClips()) {
+        // Optimization: Use IntervalTree instead of iterating over all clips
+        List<TimelineClip> activeAtFrame = model.getClipsAt(targetFrame);
+        for (TimelineClip other : activeAtFrame) {
             if (other == incomingClip) continue;
             if (other.getTrackIndex() == incomingClip.getTrackIndex()) {
-                // Does it end after incomingClip starts?
-                if (other.getStartFrame() + other.getDurationFrames() > incomingClip.getStartFrame()) {
-                    // Is the current frame within 'other'?
-                    if (targetFrame >= other.getStartFrame() && targetFrame < other.getStartFrame() + other.getDurationFrames()) {
-                        return other;
-                    }
-                }
+                // Since it's active at targetFrame, it already overlaps or contains it
+                // We just need to ensure it's on the same track
+                return other;
             }
         }
         return null;

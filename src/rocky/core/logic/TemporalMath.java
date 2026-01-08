@@ -42,10 +42,24 @@ public class TemporalMath {
     }
 
     public static ClipTransform getInterpolatedTransform(TimelineClip clip, long clipFrame) {
+        ClipTransform target = new ClipTransform();
+        getInterpolatedTransform(clip, clipFrame, target);
+        return target;
+    }
+
+    public static void getInterpolatedTransform(TimelineClip clip, long clipFrame, ClipTransform result) {
         List<TimelineKeyframe> keyframes = clip.getTimeKeyframes();
         synchronized (keyframes) {
             if (keyframes.isEmpty()) {
-                return clip.getTransform();
+                ClipTransform source = clip.getTransform();
+                result.setX(source.getX());
+                result.setY(source.getY());
+                result.setScaleX(source.getScaleX());
+                result.setScaleY(source.getScaleY());
+                result.setRotation(source.getRotation());
+                result.setAnchorX(source.getAnchorX());
+                result.setAnchorY(source.getAnchorY());
+                return;
             }
 
             TimelineKeyframe left = null;
@@ -60,17 +74,22 @@ public class TemporalMath {
                 }
             }
 
-            if (left == null)
-                return new ClipTransform(keyframes.get(0).getTransform());
-            if (right == null)
-                return new ClipTransform(left.getTransform());
+            if (left == null) {
+                ClipTransform source = keyframes.get(0).getTransform();
+                result.copyFrom(source);
+                return;
+            }
+            if (right == null) {
+                ClipTransform source = left.getTransform();
+                result.copyFrom(source);
+                return;
+            }
 
             double t = (double) (clipFrame - left.getClipFrame()) / (right.getClipFrame() - left.getClipFrame());
 
             ClipTransform lt = left.getTransform();
             ClipTransform rt = right.getTransform();
 
-            ClipTransform result = new ClipTransform();
             result.setX(lt.getX() + t * (rt.getX() - lt.getX()));
             result.setY(lt.getY() + t * (rt.getY() - lt.getY()));
             result.setScaleX(lt.getScaleX() + t * (rt.getScaleX() - lt.getScaleX()));
@@ -78,8 +97,6 @@ public class TemporalMath {
             result.setRotation(lt.getRotation() + t * (rt.getRotation() - lt.getRotation()));
             result.setAnchorX(lt.getAnchorX() + t * (rt.getAnchorX() - lt.getAnchorX()));
             result.setAnchorY(lt.getAnchorY() + t * (rt.getAnchorY() - lt.getAnchorY()));
-
-            return result;
         }
     }
 

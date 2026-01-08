@@ -26,21 +26,35 @@ public class VisualizerPanel extends JPanel {
     private JPanel videoArea;
     private JLabel frameDisplayLabel;
     
-    // --- SIMPLE BUFFER STATE ---
-    private volatile BufferedImage displayFrame; 
+    // --- TRIPLE BUFFER / VOLATILE STATE ---
+    private volatile BufferedImage displayFrame; // Still used for metadata/labels
+    private volatile BufferedImage nextFrame;    
+    private BufferedImage lastSafeFrame;         
     
-    // Audit / FPS Logic
-    private long lastPaintTime = 0;
-    private int paintCount = 0;
-    private long lastFpsLog = 0;
+    // Asynchronous Texture Upload System (Ping-Pong)
+    private VolatileImage vramBufferA;
+    private VolatileImage vramBufferB;
+    private volatile VolatileImage frontBuffer; // The one ready to be drawn by EDT
     
-    // Member Variables
     private Consumer<BufferedImage> recycleCallback;
+    
     private long bluelineFrame = 0;
     private Runnable onPlay;
     private Runnable onPause;
     private Runnable onStop;
     private boolean lowResPreview = true;
+    private rocky.ui.timeline.ProjectProperties projectProps;
+    private boolean showHUD = true;
+    private double actualFPS = 0;
+    private long lastFrameNanos = 0;
+    private double[] fpsAlpha = {0.92}; 
+
+    // --- State caching for throttling ---
+    private String lastProjectValText = "";
+    private String lastPreviewValText = "";
+    private String lastDisplayValText = "";
+    private String lastFrameValText = "";
+    private String lastQualityValText = "";
 
     public VisualizerPanel() {
         setBackground(Color.BLACK);
@@ -51,46 +65,64 @@ public class VisualizerPanel extends JPanel {
             @Override
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
-                Graphics2D g2d = (Graphics2D) g;
-
-                // DIAGNOSTIC AUDIT: FPS Counter
-                paintCount++;
-                long now = System.currentTimeMillis();
-                if (now - lastFpsLog > 1000) {
-                    System.out.println("[Visualizer] Display FPS: " + paintCount);
-                    paintCount = 0;
-                    lastFpsLog = now;
+                
+                // 1. SWAP Heap References (for recycling logic)
+                if (nextFrame != null) {
+                    if (lastSafeFrame != null && recycleCallback != null) {
+                        recycleCallback.accept(lastSafeFrame);
+                    }
+                    lastSafeFrame = displayFrame;
+                    displayFrame = nextFrame;
+                    nextFrame = null;
                 }
 
-                if (displayFrame != null) {
-                    // DIRECT DRAW with Aspect Ratio Preservation
-                    int panelW = getWidth();
-                    int panelH = getHeight();
-                    int imgW = displayFrame.getWidth();
-                    int imgH = displayFrame.getHeight();
+                if (frontBuffer != null) {
+                    Graphics2D g2d = (Graphics2D) g;
+                    
+                    // FAST GPU-TO-GPU BLIT
+                    // No more texture uploads here!
+                    do {
+                        int val = frontBuffer.validate(getGraphicsConfiguration());
+                        if (val == VolatileImage.IMAGE_INCOMPATIBLE) {
+                            break; 
+                        }
+                        // Use 1:1 draw to avoid temporal/spatial jitter from Swing's internal scaling
+                        g2d.drawImage(frontBuffer, 0, 0, null);
+                    } while (frontBuffer.contentsLost());
 
-                    if (imgW > 0 && imgH > 0 && panelW > 0 && panelH > 0) {
-                        double scale = Math.min((double) panelW / imgW, (double) panelH / imgH);
-                        int drawW = (int) (imgW * scale);
-                        int drawH = (int) (imgH * scale);
-                        int x = (panelW - drawW) / 2;
-                        int y = (panelH - drawH) / 2;
-    
-                        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
-                        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                        g2d.drawImage(displayFrame, x, y, drawW, drawH, null);
-    
-                        displayVal.setText(imgW + "x" + imgH + "x32");
+                    if (showHUD) {
+                        g2d.setFont(new Font("Monospaced", Font.BOLD, 12));
+                        g2d.setColor(new Color(0, 255, 0, 180)); // Pro Green
+                        
+                        String res = (displayFrame != null) ? displayFrame.getWidth() + "x" + displayFrame.getHeight() : "No Signal";
+                        String fpsDisplay = String.format("Preview: %.2f fps", actualFPS);
+                        
+                        g2d.drawString(res, 20, getHeight() - 40);
+                        g2d.drawString(fpsDisplay, 20, getHeight() - 25);
+                        
+                        if (projectProps != null) {
+                            g2d.drawString("Project: " + projectProps.getFPS() + " fps", 20, getHeight() - 55);
+                        }
                     }
-                    frameVal.setText(String.valueOf(bluelineFrame)); 
-                } else {
-                    // Placeholder text if no frame
-                     g2d.setColor(Color.DARK_GRAY);
-                     g2d.drawString("NO SIGNAL", getWidth()/2 - 30, getHeight()/2);
+
+                    if (displayFrame != null) {
+                        String dText = displayFrame.getWidth() + "x" + displayFrame.getHeight() + "x32";
+                        if (!dText.equals(lastDisplayValText)) {
+                            displayVal.setText(dText);
+                            lastDisplayValText = dText;
+                        }
+                        
+                        String fText = String.valueOf(bluelineFrame);
+                        if (!fText.equals(lastFrameValText)) {
+                            frameVal.setText(fText);
+                            lastFrameValText = fText;
+                        }
+                    }
                 }
             }
         };
         videoArea.setBackground(new Color(30,30,30));
+        videoArea.setDoubleBuffered(false); // We handle our own buffering via VolatileImage
         
         frameDisplayLabel = new JLabel("", SwingConstants.CENTER);
         frameDisplayLabel.setForeground(ACCENT_LILAC);
@@ -170,11 +202,53 @@ public class VisualizerPanel extends JPanel {
     }
 
     /**
-     * Minimal VRAM prep - mostly legacy now as we draw direct.
-     * Kept to satisfy FrameServer calls.
+     * Uploads a BufferedImage to one of the VRAM buffers.
+     * CALL THIS FROM THE RENDER THREAD (FrameServer), NOT THE EDT.
      */
     public void prepareVramFrame(BufferedImage img) {
-        // No-op in direct draw mode
+        if (img == null || videoArea == null) return;
+
+        int w = videoArea.getWidth();
+        int h = videoArea.getHeight();
+        if (w <= 0 || h <= 0) return;
+
+        // Choose the back buffer (the one NOT currently being drawn)
+        VolatileImage backBuffer = (frontBuffer == vramBufferA) ? vramBufferB : vramBufferA;
+
+        // Ensure it exists and matches size
+        if (backBuffer == null || backBuffer.getWidth() != w || backBuffer.getHeight() != h) {
+            backBuffer = videoArea.createVolatileImage(w, h);
+            if (frontBuffer == vramBufferA) vramBufferB = backBuffer; else vramBufferA = backBuffer;
+        }
+
+        // ASYNC UPLOAD (CPU -> GPU)
+        do {
+            int val = backBuffer.validate(videoArea.getGraphicsConfiguration());
+            if (val == VolatileImage.IMAGE_INCOMPATIBLE) {
+                backBuffer = videoArea.createVolatileImage(w, h);
+                if (frontBuffer == vramBufferA) vramBufferB = backBuffer; else vramBufferA = backBuffer;
+            }
+
+            Graphics2D bg = backBuffer.createGraphics();
+            bg.setColor(Color.BLACK);
+            bg.fillRect(0, 0, w, h);
+
+            int projectW = img.getWidth();
+            int projectH = img.getHeight();
+            double scale = Math.min((double) w / projectW, (double) h / projectH);
+            int drawW = (int) (projectW * scale);
+            int drawH = (int) (projectH * scale);
+            int x = (w - drawW) / 2;
+            int y = (h - drawH) / 2;
+
+            bg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            bg.drawImage(img, x, y, drawW, drawH, null);
+            bg.dispose();
+
+        } while (backBuffer.contentsLost());
+
+        // ATOMIC SWAP: The new frame is now ready for the EDT to draw instantly
+        this.frontBuffer = backBuffer;
     }
 
     public void setRecycleCallback(Consumer<BufferedImage> callback) {
@@ -182,25 +256,25 @@ public class VisualizerPanel extends JPanel {
     }
 
     public void updateFrame(BufferedImage img) {
-        // Simple swap
-        BufferedImage old = this.displayFrame;
-        this.displayFrame = img;
-        
-        // Recycle old frame immediately since we don't hold VRAM references anymore
-        if (old != null && old != img && recycleCallback != null) {
-            try {
-                recycleCallback.accept(old);
-            } catch (Exception e) { /* safe ignore */ }
+        if (this.nextFrame != null && this.nextFrame != img && recycleCallback != null) {
+            recycleCallback.accept(this.nextFrame);
         }
+        this.nextFrame = img;
         
-        // Trigger repaint to show new frame
+        // Calculate ACTUAL playback FPS
+        long now = System.nanoTime();
+        if (lastFrameNanos > 0) {
+            double instantFPS = 1_000_000_000.0 / (now - lastFrameNanos);
+            actualFPS = (actualFPS * fpsAlpha[0]) + (instantFPS * (1.0 - fpsAlpha[0]));
+        }
+        lastFrameNanos = now;
+
         videoArea.repaint();
     }
 
     public void setFrameNumber(long frame) {
         this.bluelineFrame = frame;
-        // Don't repaint just for frame number, updateFrame handles it essentially
-        if (displayFrame == null) videoArea.repaint(); 
+        videoArea.repaint();
     }
 
     // --- CUSTOM VECTOR ICON CLASS ---
@@ -287,12 +361,27 @@ public class VisualizerPanel extends JPanel {
     }
 
     public void updateProperties(rocky.ui.timeline.ProjectProperties props) {
-        projectVal.setText(props.getProjectRes());
-        previewVal.setText(props.getPreviewRes());
-        displayVal.setText(props.getDisplayRes());
-        qualityVal.setText(props.getPreviewQuality());
+        this.projectProps = props;
+        updateLabelIfChanged(projectVal, props.getProjectRes(), "project");
+        updateLabelIfChanged(previewVal, props.getPreviewRes(), "preview");
+        updateLabelIfChanged(displayVal, props.getDisplayRes(), "display");
+        updateLabelIfChanged(qualityVal, props.getPreviewQuality(), "quality");
+        
         this.lowResPreview = props.isLowResPreview();
         repaint();
+    }
+
+    private void updateLabelIfChanged(JLabel label, String text, String cacheKey) {
+        boolean changed = false;
+        switch(cacheKey) {
+            case "project": if (!text.equals(lastProjectValText)) { lastProjectValText = text; changed = true; } break;
+            case "preview": if (!text.equals(lastPreviewValText)) { lastPreviewValText = text; changed = true; } break;
+            case "display": if (!text.equals(lastDisplayValText)) { lastDisplayValText = text; changed = true; } break;
+            case "quality": if (!text.equals(lastQualityValText)) { lastQualityValText = text; changed = true; } break;
+        }
+        if (changed) {
+            label.setText(text);
+        }
     }
 
     private JPanel createStatusLine(String labelStr, JLabel val, Color valueColor) {

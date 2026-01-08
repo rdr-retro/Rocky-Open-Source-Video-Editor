@@ -160,6 +160,7 @@ public class RockyMain {
                 frameServer.setProperties(projectProps);
                 audioServer.setProperties(projectProps);
                 frameServer.processFrame(timeline.getPlayheadTime(), true);
+                model.getBlueline().setFps(projectProps.getFPS());
                 for (rocky.core.media.MediaSource source : mediaPool.getAllSources().values()) {
                     source.setProjectSettings(projectProps.getFPS(), projectProps.getAudioSampleRate());
                 }
@@ -236,18 +237,29 @@ public class RockyMain {
                 SettingsDialog dialog = new SettingsDialog(frame, projectProps);
                 dialog.setVisible(true);
                 if (dialog.isApproved()) {
+                    double oldFPS = projectProps.getFPS();
                     history.pushState(timeline, projectProps, mediaPool);
                     dialog.applyTo(projectProps);
+                    double newFPS = projectProps.getFPS();
+
+                    // --- TIME-PRESERVATION LOGIC ---
+                    // If project FPS changed, we MUST rescale the entire timeline
+                    // to keep the clips at the same absolute time.
+                    if (Math.abs(oldFPS - newFPS) > 0.001) {
+                        System.out.println("[RockyMain] Rescaling timeline: " + oldFPS + " -> " + newFPS);
+                        timeline.getModel().rescaleToFPS(oldFPS, newFPS);
+                    }
 
                     // Force components to acknowledge new settings
                     visualizer.updateProperties(projectProps);
                     frameServer.setProperties(projectProps);
                     audioServer.setProperties(projectProps);
+                    // Blueline FPS is already handled inside timeline.rescaleToFPS if called,
+                    // but we do it again here for cases where rescaling wasn't needed but FPS might have changed slightly
+                    timeline.getModel().getBlueline().setFps(projectProps.getFPS());
 
                     // Re-init decoders with new scaling (improves performance for 4K)
                     double scale = projectProps.getPreviewScale();
-                    // VEGAS PROXY MODEL: Cap scale at 0.25 (1/4) if Proxy Mode is enabled
-                    // Logic removed
 
                     for (rocky.core.media.MediaSource source : mediaPool.getAllSources().values()) {
                         source.reinitDecoder(scale);
@@ -257,6 +269,8 @@ public class RockyMain {
 
                     frameServer.processFrame(timeline.getPlayheadTime(), true);
                     timeline.repaint();
+                    ruler.repaint();
+                    if (navPanel != null) navPanel.repaint();
                 }
             });
             toolbar.setOnRender(() -> {

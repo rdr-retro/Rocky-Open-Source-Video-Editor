@@ -43,40 +43,23 @@ public class TimelineModel {
 
     // --- Clip Management ---
 
-    private final java.util.concurrent.locks.ReentrantReadWriteLock treeLock = new java.util.concurrent.locks.ReentrantReadWriteLock();
-
     public void addClip(TimelineClip clip) {
         clips.add(clip);
-        treeLock.writeLock().lock();
-        try {
-            clipTree.add(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
-        } finally {
-            treeLock.writeLock().unlock();
-        }
+        clipTree.add(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
         incrementRevision();
         fireUpdate();
     }
 
     public void removeClip(TimelineClip clip) {
         clips.remove(clip);
-        treeLock.writeLock().lock();
-        try {
-            clipTree.remove(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
-        } finally {
-             treeLock.writeLock().unlock();
-        }
+        clipTree.remove(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
         incrementRevision();
         fireUpdate();
     }
 
     public void clearClips() {
         clips.clear();
-        treeLock.writeLock().lock();
-        try {
-            clipTree.clear();
-        } finally {
-            treeLock.writeLock().unlock();
-        }
+        clipTree.clear();
         incrementRevision();
         fireUpdate();
     }
@@ -86,20 +69,50 @@ public class TimelineModel {
      * Use this when moving/resizing clips to keep the tree consistent.
      */
     public void updateClipPosition(TimelineClip clip, Runnable modification) {
-        treeLock.writeLock().lock();
-        try {
-            // Remove from tree with OLD coordinates
-            clipTree.remove(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
-            
-            // Execute the change properties
-            modification.run();
-            
-            // Re-insert with NEW coordinates
-            clipTree.add(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
-        } finally {
-            treeLock.writeLock().unlock();
-        }
+        // Remove from tree with OLD coordinates
+        clipTree.remove(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
+        
+        // Execute the change properties
+        modification.run();
+        
+        // Re-insert with NEW coordinates
+        clipTree.add(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
         incrementRevision();
+    }
+
+    /**
+     * Rescales the entire timeline to a new FPS while preserving absolute time.
+     */
+    public void rescaleToFPS(double oldFPS, double newFPS) {
+        if (Math.abs(oldFPS - newFPS) < 0.001) return;
+        double factor = newFPS / oldFPS;
+
+        synchronized (clips) {
+            // We clear and re-add to the tree to be safe
+            clipTree.clear();
+            for (TimelineClip clip : clips) {
+                clip.setStartFrame(Math.round(clip.getStartFrame() * factor));
+                clip.setDurationFrames(Math.round(clip.getDurationFrames() * factor));
+                clip.setSourceOffsetFrames(Math.round(clip.getSourceOffsetFrames() * factor));
+                clip.setFadeInFrames(Math.round(clip.getFadeInFrames() * factor));
+                clip.setFadeOutFrames(Math.round(clip.getFadeOutFrames() * factor));
+                
+                synchronized (clip.getTimeKeyframes()) {
+                    for (TimelineKeyframe k : clip.getTimeKeyframes()) {
+                        k.setClipFrame(Math.round(k.getClipFrame() * factor));
+                    }
+                }
+                
+                clipTree.add(clip.getStartFrame(), clip.getStartFrame() + clip.getDurationFrames(), clip);
+            }
+        }
+        
+        // Rescale playhead in blueline
+        blueline.setPlayheadFrame(Math.round(blueline.getPlayheadFrame() * factor));
+        blueline.setFps(newFPS);
+        
+        incrementRevision();
+        fireUpdate();
     }
 
     public List<TimelineClip> getClips() {
@@ -120,12 +133,7 @@ public class TimelineModel {
     }
 
     public List<TimelineClip> getClipsAt(long frame) {
-        treeLock.readLock().lock();
-        try {
-            return clipTree.query(frame);
-        } finally {
-            treeLock.readLock().unlock();
-        }
+        return clipTree.query(frame);
     }
 
     public IntervalTree<TimelineClip> getClipTree() {

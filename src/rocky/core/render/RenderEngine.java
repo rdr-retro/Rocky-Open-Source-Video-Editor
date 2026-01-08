@@ -119,12 +119,13 @@ public class RenderEngine {
                 ByteBuffer reusableBuffer = ByteBuffer.allocate(width * height * 4);
                 reusableBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
-                // Parallel Frame Prefetching for Render
-                final int numWorkers = Math.max(2, Runtime.getRuntime().availableProcessors() - 1);
+                // Parallel Frame Prefetching for Render (Aggressive for multi-core CPUs)
+                final int numWorkers = Math.max(4, Runtime.getRuntime().availableProcessors());
                 java.util.concurrent.ExecutorService renderPool = java.util.concurrent.Executors
                         .newFixedThreadPool(numWorkers);
+                // Larger queue for better prefetching depth
                 java.util.concurrent.BlockingQueue<java.util.concurrent.Future<BufferedImage>> frameQueue = new java.util.concurrent.LinkedBlockingQueue<>(
-                        numWorkers * 2);
+                        numWorkers * 4);
 
                 final int finalW = width;
                 final int finalH = height;

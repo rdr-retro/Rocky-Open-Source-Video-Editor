@@ -4,6 +4,7 @@ import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import javax.swing.SwingUtilities;
 
 /**
@@ -36,8 +37,15 @@ public class PerformanceMonitor {
     // Buffer Health
     private final AtomicInteger bufferSize = new AtomicInteger(0);
     
+    // Telemetry Counters
+    private final AtomicLong droppedFrames = new AtomicLong(0);
+    private final AtomicLong decoderStalls = new AtomicLong(0);
+    private final AtomicLong cacheMisses = new AtomicLong(0);
+    
     // Moving Averages (EMA)
     private double avgTotal = 0;
+    private double targetFPS = 30.0;
+    private long lastThresholdMs = 30;
 
     public PerformanceMonitor() {
         this.gcBeans = ManagementFactory.getGarbageCollectorMXBeans();
@@ -65,6 +73,11 @@ public class PerformanceMonitor {
         }, "Perf-EDT-Monitor");
         edtMonitor.setDaemon(true);
         edtMonitor.start();
+    }
+
+    public void setTargetFPS(double fps) {
+        this.targetFPS = fps;
+        this.lastThresholdMs = (long)(1000.0 / fps) - 2; // -2ms safety margin
     }
 
     public void startFrame() {
@@ -96,8 +109,8 @@ public class PerformanceMonitor {
         if (avgTotal == 0) avgTotal = totalMs;
         else avgTotal = avgTotal * 0.9 + totalMs * 0.1;
 
-        // Only log if slow (e.g. < 30 FPS => > 33ms)
-        if (totalMs > 30) {
+        // Only log if slow (threshold depends on target FPS)
+        if (totalMs > lastThresholdMs) {
             StringBuilder sb = new StringBuilder();
             sb.append(String.format("[PERF] Frame: %dms", totalMs));
             
@@ -117,9 +130,21 @@ public class PerformanceMonitor {
                  sb.append(" [BUFFER UNDERRUN]");
             }
 
+            // Append Counters
+            sb.append(String.format(" | Stats[Drops: %d, Stalls: %d, Miss: %d]", 
+                droppedFrames.get(), decoderStalls.get(), cacheMisses.get()));
+
             System.out.println(sb.toString());
         }
     }
+
+    public void incrementDroppedFrames() { droppedFrames.incrementAndGet(); }
+    public void incrementDecoderStalls() { decoderStalls.incrementAndGet(); }
+    public void incrementCacheMisses() { cacheMisses.incrementAndGet(); }
+
+    public long getDroppedFrames() { return droppedFrames.get(); }
+    public long getDecoderStalls() { return decoderStalls.get(); }
+    public long getCacheMisses() { return cacheMisses.get(); }
     
     private long getDuration(Mark start, Mark end) {
         return getDuration(start, end, -1);

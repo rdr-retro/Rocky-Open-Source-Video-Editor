@@ -49,7 +49,6 @@ public class PanCropEditor extends JPanel {
         sidebar.setOnToolSelected(canvas::setCurrentTool);
 
         canvas.addPropertyChangeListener("transform", e -> {
-            treePanel.updateValues();
             if (onUpdate != null)
                 onUpdate.run();
         });

@@ -73,28 +73,4 @@ public class Platform {
             return "unknown";
         }
     }
-    
-    /**
-     * Applies system-wide optimizations and returns the recommended Audio/Video Sync Latency.
-     * Use this at startup.
-     * @return latency compensation in seconds (e.g. 0.15 for Mac).
-     */
-    public static double applyOptimizations() {
-        if (IS_MAC) {
-            System.setProperty("sun.java2d.opengl", "true");
-            System.setProperty("apple.awt.application.appearance", "system");
-            System.setProperty("apple.laf.useScreenMenuBar", "true");
-            // INCREASED: 0.25s for HEVC which is 3-5x slower than H.264
-            return 0.25; // Tuned for CoreAudio + VideoToolbox HEVC latency
-        } else if (IS_WINDOWS) {
-            System.setProperty("sun.java2d.d3d", "true");
-            System.setProperty("sun.java2d.ddscale", "true");
-            return 0.20; // DirectSound often has higher latency buffer
-        } else if (IS_LINUX) {
-            System.setProperty("sun.java2d.xrender", "true");
-            return 0.12; // Pulse/ALSA is usually quite snappy
-        } else {
-            return 0.10; // Generic fallback
-        }
-    }
 }

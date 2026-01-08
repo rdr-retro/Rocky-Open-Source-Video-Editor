@@ -26,8 +26,6 @@ public class AudioServer {
     private long lastTimelineFrame = -1;
     private long samplesWrittenToLine = 0;
     private AudioClock audioClock;
-    private java.util.function.Consumer<Double> onClockTick;
-    private double latencyCompensation = 0.15; // Default "Magic Number" for Mac/MOV
 
     // Persistent buffers to reduce GC pressure
     private float[] mixedBuffer;
@@ -41,15 +39,6 @@ public class AudioServer {
         this.audioClock = new AudioClock(sampleRate, fps);
         initAudio();
         startThread();
-    }
-    
-    public void setOnClockTick(java.util.function.Consumer<Double> callback) {
-        this.onClockTick = callback;
-    }
-    
-    public void setLatencyCompensation(double seconds) {
-        this.latencyCompensation = seconds;
-        System.out.println("[AudioServer] Architecture Sync Applied: Video Pre-Roll = " + (seconds * 1000) + "ms");
     }
 
     public void setProperties(rocky.ui.timeline.ProjectProperties props) {
@@ -95,8 +84,6 @@ public class AudioServer {
 
             while (running) {
                 if (model.getBlueline().isPlaying()) {
-                    model.getBlueline().setExternalClockMode(true);
-                    
                     double rate = model.getBlueline().getPlaybackRate();
                     long currentPlayhead = model.getBlueline().getPlayheadFrame();
 
@@ -107,8 +94,9 @@ public class AudioServer {
                         audioClock.reset(processedTimelineFrame, line.getLongFramePosition());
                         audioClock.setPlaybackRate(rate, line.getLongFramePosition());
 
-                        // Prime the buffer (Pre-read roughly 5 frames for lower latency)
-                        for (int i = 0; i < 5; i++) {
+                        // Prime the buffer (Pre-read roughly 250ms for lower latency at high FPS)
+                        int primeFrames = (int)(fps * 0.25); 
+                        for (int i = 0; i < primeFrames; i++) {
                             processAudioChunk(processedTimelineFrame);
                             if (rate >= 0)
                                 processedTimelineFrame++;
@@ -140,20 +128,16 @@ public class AudioServer {
                         final long finalFrame = currentClockFrame; // Local final copy for lambda
                         // Update Model directly
                         model.getBlueline().setPlayheadFrame(finalFrame);
-                        
-                        // FIX: DO NOT call model.fireUpdate() here. 
-                        // It triggers cache invalidation in MainTimelineListener/TimelinePanel.
-                        // Instead, we use the direct callback to drive video frame immediately.
-                        if (onClockTick != null) {
-                             // LATENCY COMPENSATION: Request video slightly ahead of audio to account for decode time.
-                             // Optimized for Platform (Mac=0.15, Win=0.20, Lin=0.10)
-                             onClockTick.accept((finalFrame / fps) + latencyCompensation);
-                        }
+                        // Notify listeners (UI) on EDT
+                        javax.swing.SwingUtilities.invokeLater(() -> {
+                            model.fireUpdate(); 
+                        });
                     }
 
-                    // Fill ahead: up to 10 frames (responsive read ahead)
-                    boolean needsMore = (rate >= 0) ? (processedTimelineFrame < currentClockFrame + 10)
-                            : (processedTimelineFrame > currentClockFrame - 10);
+                    // Fill ahead: up to 250ms (responsive read ahead)
+                    int readAhead = (int)(fps * 0.25);
+                    boolean needsMore = (rate >= 0) ? (processedTimelineFrame < currentClockFrame + readAhead)
+                            : (processedTimelineFrame > currentClockFrame - readAhead);
                     if (needsMore) {
                         processAudioChunk(processedTimelineFrame);
                         if (rate >= 0)
@@ -173,10 +157,6 @@ public class AudioServer {
                     if (line != null && line.isActive()) {
                         line.flush();
                     }
-                    
-                    // Release Blueline control
-                    model.getBlueline().setExternalClockMode(false);
-                    
                     try {
                         Thread.sleep(10);
                     } catch (Exception e) {

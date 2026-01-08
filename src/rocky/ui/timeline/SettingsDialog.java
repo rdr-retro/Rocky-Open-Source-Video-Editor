@@ -28,7 +28,7 @@ public class SettingsDialog extends JDialog {
 
     // Performance (Proxy & Visor)
     private JComboBox<String> proxyResCombo, proxyBitrateCombo;
-    private JComboBox<String> visorScaleCombo, visorBitrateCombo;
+    private JComboBox<String> visorScaleCombo, visorBitrateCombo, visorFPSCombo;
 
     private boolean approved = false;
 
@@ -81,8 +81,26 @@ public class SettingsDialog extends JDialog {
         gbc.gridx = 0; gbc.gridy = 0;
         p.add(createLabel("Plantilla:"), gbc);
         gbc.gridx = 1; gbc.weightx = 1.0;
-        String[] templates = { "HD 1080-24p (1920x1080; 23,976 fps)", "HD 720-30p (1280x720; 29,970 fps)", "Custom" };
+        String[] templates = { 
+            "HD 1080-60p (1920x1080; 60,000 fps)",
+            "HD 1080-30p (1920x1080; 29,970 fps)",
+            "HD 1080-24p (1920x1080; 23,976 fps)", 
+            "HD 720-60p (1280x720; 60,000 fps)",
+            "HD 720-30p (1280x720; 29,970 fps)", 
+            "Custom" 
+        };
         templateCombo = createStyledCombo(templates, props.getTemplate());
+        
+        // Template Logic: Update other fields when template changes
+        templateCombo.addActionListener(e -> {
+            String sel = (String) templateCombo.getSelectedItem();
+            if (sel.contains("1080")) { widthField.setText("1920"); heightField.setText("1080"); }
+            if (sel.contains("720")) { widthField.setText("1280"); heightField.setText("720"); }
+            if (sel.contains("60p")) { fpsCombo.setSelectedItem("60,000"); }
+            if (sel.contains("30p")) { fpsCombo.setSelectedItem("29,970"); }
+            if (sel.contains("24p")) { fpsCombo.setSelectedItem("23,976 (IVTC)"); }
+        });
+        
         p.add(templateCombo, gbc);
 
         // Prerender Folder
@@ -295,6 +313,12 @@ public class SettingsDialog extends JDialog {
         visorBitrateCombo = createStyledCombo(new String[] { "Alta (Bilineal)", "Media", "Baja (Nearest Neighbor)" }, props.getVisorBitrate());
         p.add(visorBitrateCombo, gbc);
 
+        gbc.gridy++;
+        gbc.gridx = 0; p.add(createLabel("Visor FPS (Fluidez):"), gbc);
+        gbc.gridx = 1;
+        visorFPSCombo = createStyledCombo(new String[] { "24,000", "30,000", "60,000" }, String.valueOf(props.getVisorFPS()));
+        p.add(visorFPSCombo, gbc);
+
         // Spacer
         gbc.gridy++; gbc.gridwidth = 2; gbc.weighty = 1.0;
         p.add(new JPanel() {{ setOpaque(false); }}, gbc);
@@ -423,6 +447,8 @@ public class SettingsDialog extends JDialog {
         else if (vScale.contains("Octavo")) props.setVisorScale(0.125);
         
         props.setVisorBitrate(((String) visorBitrateCombo.getSelectedItem()).split(" ")[0]);
+        
+        props.setVisorFPS(Double.parseDouble(((String) visorFPSCombo.getSelectedItem()).split(" ")[0].replace(",", ".")));
     }
 }
 

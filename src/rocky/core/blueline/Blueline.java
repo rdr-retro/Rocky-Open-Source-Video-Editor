@@ -10,7 +10,7 @@ import java.util.List;
  */
 public class Blueline {
     // --- Configuración y Estado ---
-    private int fps = 30;
+    private double fps = 30.0;
     private double playbackRate = 1.0;
     private long maxFrames = Long.MAX_VALUE;
 
@@ -32,32 +32,7 @@ public class Blueline {
         listeners.add(l); 
     }
 
-    // --- Clock Source Interface ---
-    public interface ClockSource {
-        /**
-         * Returns the current time in seconds.
-         */
-        double getTimeInSeconds();
-        boolean isRunning();
-    }
-
-    private ClockSource clockSource;
-
-    public void setClockSource(ClockSource source) {
-        this.clockSource = source;
-    }
-
     // --- Lógica de Movimiento (Core) ---
-
-    private boolean externalClockMode = false;
-
-    public void setExternalClockMode(boolean active) {
-        this.externalClockMode = active;
-    }
-
-    public boolean isExternalClockMode() {
-        return externalClockMode;
-    }
 
     /**
      * Actualiza la posición del cabezal basándose en el tiempo transcurrido real.
@@ -69,35 +44,16 @@ public class Blueline {
             return;
         }
 
-        // MODE A: External Clock (Audio Server PUSH)
-        // If audio is driving, we trust the playheadFrame it sets.
-        // We do NOT update strictly by system time here to avoid "fighting" the audio thread.
-        if (externalClockMode) {
-            lastUpdateNanos = System.nanoTime(); 
-            return; 
+        long now = System.nanoTime();
+        if (lastUpdateNanos > 0) {
+            long elapsedNanos = now - lastUpdateNanos;
+            double secondsElapsed = elapsedNanos / 1_000_000_000.0;
+            
+            // Delta timing: avance preciso independiente de los FPS de la UI
+            double framesToAdvance = secondsElapsed * fps * playbackRate;
+            setPlayheadFramePrecise(this.playheadFrame + framesToAdvance);
         }
-
-        // MODE B: Legacy API Clock (Pull)
-        if (clockSource != null && clockSource.isRunning()) {
-            double audioTime = clockSource.getTimeInSeconds();
-            // Convert seconds to frames
-            double frame = audioTime * fps;
-            setPlayheadFramePrecise(frame);
-            lastUpdateNanos = System.nanoTime(); // Sync system clock to audio
-        } 
-        // MODE C: System Timer Fallback
-        else {
-            long now = System.nanoTime();
-            if (lastUpdateNanos > 0) {
-                long elapsedNanos = now - lastUpdateNanos;
-                double secondsElapsed = elapsedNanos / 1_000_000_000.0;
-                
-                // Delta timing: avance preciso independiente de los FPS de la UI
-                double framesToAdvance = secondsElapsed * fps * playbackRate;
-                setPlayheadFramePrecise(this.playheadFrame + framesToAdvance);
-            }
-            lastUpdateNanos = now;
-        }
+        lastUpdateNanos = now;
     }
 
     private void setPlayheadFramePrecise(double frame) {
@@ -114,7 +70,7 @@ public class Blueline {
     public void startPlayback() {
         if (isPlaying) return;
         
-        this.playbackStartFrame = getPlayheadFrame(); 
+        this.playbackStartFrame = getPlayheadFrame(); // Guarda dónde inició (Arregla el error de compilación)
         this.lastUpdateNanos = System.nanoTime();
         this.isPlaying = true;
         
@@ -139,8 +95,8 @@ public class Blueline {
      * Convierte frames a formato HH:MM:SS:FF
      */
     public String formatTimecode(long frames) {
-        long f = Math.abs(frames % fps);
-        long totalSeconds = Math.abs(frames / fps);
+        long f = (long) Math.abs(frames % (long)fps);
+        long totalSeconds = (long) Math.abs(frames / (long)fps);
         long s = totalSeconds % 60;
         long m = (totalSeconds / 60) % 60;
         long h = totalSeconds / 3600;
@@ -155,10 +111,6 @@ public class Blueline {
 
     public long getPlayheadFrame() {
         return (long) Math.floor(playheadFrame);
-    }
-
-    public double getPlayheadFramePrecise() {
-        return playheadFrame;
     }
 
     public void setPlayheadFrame(long frame) {
@@ -180,7 +132,7 @@ public class Blueline {
     
     public void setPlaybackRate(double rate) { this.playbackRate = rate; }
     
-    public void setFps(int fps) { this.fps = fps; }
+    public void setFps(double fps) { this.fps = fps; }
 
     /**
      * Lógica para que la línea de tiempo siga al cabezal automáticamente.
