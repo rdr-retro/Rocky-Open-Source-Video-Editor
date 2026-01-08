@@ -233,27 +233,24 @@ public class VideoDecoder {
                 return lastImage;
             }
 
-            // Fuzzy Sequential Logic
+            // Fuzzy Sequential Logic - CRITICAL FOR 60FPS
+            // Increase threshold: at 60fps, decoding 15 frames is often faster than one I-Frame seek
+            int sequentialThreshold = (sourceNativeFPS > 50) ? 15 : 8; 
             boolean isSequential = (nativeFrame == lastNativeFrame + 1);
-            boolean isCloseEnough = (nativeFrame > lastNativeFrame && nativeFrame <= lastNativeFrame + 3);
+            boolean isForwardAndClose = (nativeFrame > lastNativeFrame && nativeFrame <= lastNativeFrame + sequentialThreshold);
             
             if (!isSequential) {
-                if (isCloseEnough) {
-                    // Consume intervening frames
+                if (isForwardAndClose) {
+                    // Optimized: Consume intervening frames instead of seeking
+                    // This keeps the decoder pipeline hot.
                     int framesToSkip = (int)(nativeFrame - lastNativeFrame - 1);
                     for (int i = 0; i < framesToSkip; i++) {
-                        grabber.grabImage(); // Discard
+                        grabber.grabImage(); 
                     }
                 } else {
-                    // Long Seek
-                    String fmt = grabber.getFormat();
-                    if (fmt != null && (fmt.contains("mp4") || fmt.contains("mov"))) {
-                        grabber.setVideoFrameNumber((int)nativeFrame);
-                    } else {
-                        // Use timestamp-based seek for better accuracy across different FPS
-                        long timestamp = Math.round((nativeFrame / sourceNativeFPS) * 1000000);
-                        grabber.setTimestamp(timestamp);
-                    }
+                    // Long Seek: Use timestamp primarily for better accuracy and performance
+                    long timestamp = Math.round(((double)nativeFrame / sourceNativeFPS) * 1000000);
+                    grabber.setTimestamp(timestamp);
                 }
             }
             

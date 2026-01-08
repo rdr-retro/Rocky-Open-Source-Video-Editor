@@ -49,7 +49,7 @@ public class FrameServer {
         this.visualizer = visualizer;
         this.monitor = new rocky.core.diagnostics.PerformanceMonitor();
 
-        int cores = Runtime.getRuntime().availableProcessors();
+        int cores = 10; // Optimized for M4 (10-core CPU)
         this.executor = new java.util.concurrent.ThreadPoolExecutor(
                 cores, cores, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
                 new java.util.concurrent.PriorityBlockingQueue<Runnable>());
@@ -104,8 +104,6 @@ public class FrameServer {
                     return; // Drop if too late
                 }
                 
-                if (latestTargetFrame.get() != frame)
-                    return;
             }
 
             if (!isPrefetch) {
@@ -135,19 +133,21 @@ public class FrameServer {
             manageCacheSize(frame);
 
             if (!isPrefetch) {
-                // ASYNC TEXTURE UPLOAD
-                visualizer.prepareVramFrame(rendered);
-
                 monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.DRAW_START);
                 javax.swing.SwingUtilities.invokeLater(() -> {
                     // FINAL SYNC CHECK: Ensure we are not showing a stale/out-of-order frame
                     long currentTarget = latestTargetFrame.get();
                     long shown = lastShownFrame.get();
+                    boolean isPlaying = model.getBlueline().isPlaying();
                     
-                    // Logic: If the frame is older than what's on screen, only allow it if 
-                    // we are scrubbing/seeking (indicated by a large gap between current target and shown frame)
-                    if (frame < shown && Math.abs(currentTarget - shown) < 20) {
-                        return; // Block jitter
+                    // Jitter Blocking Logic:
+                    // During playback, never show a frame older than the current one on screen.
+                    // During scrubbing/seeking, allow backward movement so the UI feels responsive.
+                    if (isPlaying) {
+                        if (frame < shown) return; // Block out-of-order frames during playback
+                    } else {
+                        // Not playing: allow any frame as long as it's the LATEST requested
+                        if (frame != currentTarget) return; 
                     }
                     
                     lastShownFrame.set(frame);
@@ -250,7 +250,6 @@ public class FrameServer {
                 returnCanvasToPool(removed);
         } else if (frameCache.containsKey(targetFrame)) {
             BufferedImage cached = frameCache.get(targetFrame);
-            visualizer.prepareVramFrame(cached);
             visualizer.updateFrame(cached);
             prefetchFrames(targetFrame);
             return;
@@ -280,27 +279,35 @@ public class FrameServer {
         
         // --- SMART LOOK-AHEAD ---
         // Only prefetch if scrubbing is slow or we are playing (vel approx 0 or steady 1x)
-        if (currentScrubbingVelocity < 1.0) {
+        if (currentScrubbingVelocity < 1.2) {
             prefetchFrames(targetFrame);
         }
     }
 
     private void prefetchFrames(long centerFrame) {
         double fps = (properties != null) ? properties.getFPS() : 30.0;
-        int radius = (fps > 50) ? 60 : ((fps > 40) ? 40 : 20); // Doubled radius for smoother playback
+        int radius = (fps > 50) ? 60 : ((fps > 40) ? 40 : 20); 
+        
+        // If the cache is empty, increase radius immediately to fill the pipe
+        if (frameCache.size() < 10) radius *= 2;
+
+        int maxQueueSize = (fps > 50) ? 150 : 80;
+
+        // Skip if we are already ahead
+        if (executor.getQueue().size() > maxQueueSize) return;
+
         // Prefetch forward
-        int enqueued = 0;
         for (int i = 1; i <= radius; i++) {
             final long f = centerFrame + i;
-            if (!frameCache.containsKey(f)) {
+            if (f >= 0 && !frameCache.containsKey(f)) {
                 executor.execute(new RenderTask(f, true, model.getLayoutRevision()));
-            } else {
-                enqueued++;
+                if (executor.getQueue().size() > maxQueueSize) break;
             }
         }
         monitor.updateBufferSize(frameCache.size());
-        // Prefetch backward (useful for scrubbing left)
-        for (int i = 1; i <= radius / 2; i++) {
+        
+        // Prefetch backward (lower priority)
+        for (int i = 1; i <= radius / 3; i++) {
             final long f = centerFrame - i;
             if (f >= 0 && !frameCache.containsKey(f)) {
                 executor.execute(new RenderTask(f, true, model.getLayoutRevision()));
@@ -437,40 +444,36 @@ public class FrameServer {
             }
         }
 
-        // 2. Parallel Decode ALL needed clips
-        java.util.Map<TimelineClip, BufferedImage> assets = allNeededClips.parallelStream().collect(
-            java.util.stream.Collectors.toConcurrentMap(
-                clip -> clip,
-                clip -> {
-                    MediaSource source = pool.getSource(clip.getMediaSourceId());
-                    if (source == null && clip.getMediaGenerator() == null) return null;
+        // 2. Sequential Decode (Parallel overhead is too high on M4 + synchronized decoders)
+        java.util.Map<TimelineClip, BufferedImage> assets = new java.util.HashMap<>();
+        for (TimelineClip clip : allNeededClips) {
+            MediaSource source = pool.getSource(clip.getMediaSourceId());
+            if (source == null && clip.getMediaGenerator() == null) continue;
 
-                    if (source != null) {
-                        rocky.core.media.DecoderPool.touch(source.getFilePath());
-                    }
+            if (source != null) {
+                rocky.core.media.DecoderPool.touch(source.getFilePath());
+            }
 
-                    long frameInClip = targetFrame - clip.getStartFrame();
-                    long sourceFrame = TemporalMath.getSourceFrameAt(clip, frameInClip);
-                    
-                    if (clip.getMediaGenerator() != null) {
-                        BufferedImage genAsset = getCanvasFromPool(fCanvasW, fCanvasH);
-                        Graphics2D g2gen = genAsset.createGraphics();
-                        AppliedPlugin genInfo = clip.getMediaGenerator();
-                        if (genInfo.getPluginInstance() == null) {
-                            genInfo.setPluginInstance(PluginManager.getInstance().getGenerator(genInfo.getPluginName()));
-                        }
-                        if (genInfo.getPluginInstance() instanceof RockyMediaGenerator) {
-                            ((RockyMediaGenerator) genInfo.getPluginInstance()).generate(g2gen, fCanvasW, fCanvasH, frameInClip, genInfo.getParameters());
-                        }
-                        g2gen.dispose();
-                        return genAsset;
-                    } else {
-                        return source.getFrame(sourceFrame, forceFullRes);
-                    }
-                },
-                (u, v) -> u
-            )
-        );
+            long frameInClip = targetFrame - clip.getStartFrame();
+            long sourceFrame = TemporalMath.getSourceFrameAt(clip, frameInClip);
+            
+            BufferedImage asset = null;
+            if (clip.getMediaGenerator() != null) {
+                asset = getCanvasFromPool(fCanvasW, fCanvasH);
+                Graphics2D g2gen = asset.createGraphics();
+                AppliedPlugin genInfo = clip.getMediaGenerator();
+                if (genInfo.getPluginInstance() == null) {
+                    genInfo.setPluginInstance(PluginManager.getInstance().getGenerator(genInfo.getPluginName()));
+                }
+                if (genInfo.getPluginInstance() instanceof RockyMediaGenerator) {
+                    ((RockyMediaGenerator) genInfo.getPluginInstance()).generate(g2gen, fCanvasW, fCanvasH, frameInClip, genInfo.getParameters());
+                }
+                g2gen.dispose();
+            } else {
+                asset = source.getFrame(sourceFrame, forceFullRes);
+            }
+            if (asset != null) assets.put(clip, asset);
+        }
 
         monitor.mark(rocky.core.diagnostics.PerformanceMonitor.Mark.CONVERT_START);
 

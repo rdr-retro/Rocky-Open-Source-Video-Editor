@@ -346,15 +346,15 @@ public class MediaSource {
                 } else {
                     frame = videoDecoder.getFrame(finalIndex);
                 }
-            }
 
-            if (frame != null) {
-                BufferedImage optimized = cloneToARGBPre(frame);
-                synchronized (lruFrameCache) {
-                    lruFrameCache.put(finalIndex, optimized);
-                    currentCacheBytes += (long) optimized.getWidth() * optimized.getHeight() * 4;
+                if (frame != null) {
+                    BufferedImage optimized = cloneToARGBPre(frame);
+                    synchronized (lruFrameCache) {
+                        lruFrameCache.put(finalIndex, optimized);
+                        currentCacheBytes += (long) optimized.getWidth() * optimized.getHeight() * 4;
+                    }
+                    return optimized;
                 }
-                return optimized;
             }
         }
         return getOrLoadImage();

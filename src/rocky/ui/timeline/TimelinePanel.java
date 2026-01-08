@@ -26,6 +26,7 @@ public class TimelinePanel extends JPanel {
     private static TimelineClip copiedClip = null;
     private rocky.core.model.TimelineModel model;
     private final Map<TimelineClip, TimelineClipView> viewProxies = new HashMap<>();
+    private long lastSeenLayoutRevision = -1;
 
     // View State
     private double pixelsPerSecond = 100.0; // Dynamic Zoom Scale
@@ -234,7 +235,10 @@ public class TimelinePanel extends JPanel {
 
         for (TimelineListener listener : listeners) {
             listener.onTimeUpdate(time, frame, model.getBlueline().formatTimecode(frame), force);
-            listener.onTimelineUpdated();
+            // ONLY if forced (usually on scrub/jump/change) we sync everything
+            if (force) {
+                listener.onTimelineUpdated();
+            }
         }
         repaint();
     }
@@ -1425,7 +1429,7 @@ public class TimelinePanel extends JPanel {
                 g2d.fillRect(x, trackY + 1, w, trackH - 2);
 
                 // --- THUMBNAIL RENDERING (Vegas Style Filmstrip) ---
-                if (ttype == TrackControlPanel.TrackType.VIDEO) {
+                if (ttype == TrackControlPanel.TrackType.VIDEO && !isPlaying()) {
                     rocky.core.media.MediaSource source = mediaPool.getSource(clip.getMediaSourceId());
                     if (source != null) {
                         int thumbH = trackH - 22;
@@ -1787,9 +1791,15 @@ public class TimelinePanel extends JPanel {
             }
         }
 
+        long currentLayoutRev = model.getLayoutRevision();
+        boolean layoutChanged = currentLayoutRev != lastSeenLayoutRevision;
+        lastSeenLayoutRevision = currentLayoutRev;
+
         for (TimelineListener listener : listeners) {
             listener.onTimeUpdate(time, currentFrame, timecode, false);
-            listener.onTimelineUpdated();
+            if (layoutChanged) {
+                listener.onTimelineUpdated();
+            }
         }
         repaint();
     }
