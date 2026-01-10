@@ -75,15 +75,17 @@ class SidebarPanel(QWidget):
         self.scroll.setStyleSheet("""
             QScrollArea { 
                 border: 0px;
+                border-right: 1px solid #000;
                 margin: 0px;
                 padding: 0px;
-                background: #242424;
+                background: #111111;
             }
             QWidget {
-                background: #242424;
+                background: #111111;
             }
             QScrollBar:vertical { width: 0px; }
         """)
+
         
         # TRACK CONTAINER - CERO MÁRGENES
         self.track_container = QWidget()
@@ -94,9 +96,10 @@ class SidebarPanel(QWidget):
         
         self.empty_area = QFrame()
         self.empty_area.setMinimumHeight(2000)
-        self.empty_area.setStyleSheet("background-color: #242424; border: none;") # Match Timeline BG
+        self.empty_area.setStyleSheet("background-color: #111111; border: none;") # Darkest contrast
         self.empty_area.setContentsMargins(0, 0, 0, 0)
         self.track_layout.addWidget(self.empty_area)
+
         
         self.track_widgets = []
         self.scroll.setWidget(self.track_container)
@@ -255,7 +258,9 @@ class TrackControlWidget(QFrame):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         is_selected = self.index in self.sidebar.model.selected_tracks
-        p.fillRect(self.rect(), QColor('#748a91') if is_selected else QColor('#242424'))
+        # Use a slightly lighter gray for the track itself to pop against the #111 sidebar
+        p.fillRect(self.rect(), QColor('#748a91') if is_selected else QColor('#1e1e1e'))
+
         
         # Franja lateral (Refined Maroon for Video, Teal for Audio)
         scol = QColor("#9e364a") if self.track_type == TrackType.VIDEO else QColor("#369e93")

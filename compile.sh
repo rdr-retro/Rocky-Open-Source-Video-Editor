@@ -1,21 +1,37 @@
 #!/bin/bash
+# Rocky Video Editor - Compile Script for macOS/Linux
 
-# Script para compilar el núcleo C++ (Linux/macOS)
+echo "========================================"
+echo "  Rocky Video Editor - Compilación"
+echo "========================================"
+echo ""
 
-echo "--- Compilando Rocky Core ---"
-
-# 1. Asegurar que el entorno virtual existe y tiene las dependencias
+# Check if venv exists
 if [ ! -d "venv" ]; then
     echo "Creando entorno virtual..."
     python3 -m venv venv
 fi
 
+# Activate venv
 source venv/bin/activate
-echo "Verificando dependencias (setuptools, pybind11, pyqt5)..."
-pip install -r requirements.txt
 
-# 2. Compilar
-echo "Ejecutando setup.py..."
-python3 setup.py build_ext --inplace
+# Upgrade pip
+python -m pip install --upgrade pip
 
-echo "--- Compilación finalizada ---"
+# Install dependencies
+echo "Instalando dependencias..."
+pip install setuptools pybind11
+if [ -f "requirements.txt" ]; then
+    pip install -r requirements.txt
+else
+    pip install PyQt5==5.15.10 numpy
+fi
+
+# Compile C++ core
+echo ""
+echo "Compilando motor C++..."
+python setup.py build_ext --inplace
+
+echo ""
+echo "Compilación completada!"
+echo "Ejecuta ./run.sh para iniciar el editor."

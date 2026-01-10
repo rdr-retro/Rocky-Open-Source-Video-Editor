@@ -15,7 +15,14 @@ class ViewerPanel(QWidget):
         """Standardized UI initialization following Clean Code standards."""
         self.setMinimumWidth(500)
         self.setObjectName("ViewerPanel")
-        self.setStyleSheet("background-color: #333333; color: #ffffff;")
+        self.setStyleSheet("""
+            #ViewerPanel {
+                background-color: #1a1a1a;
+                border-left: 1px solid #000000;
+            }
+        """)
+
+
         
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)

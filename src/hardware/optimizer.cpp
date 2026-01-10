@@ -108,7 +108,6 @@ size_t HardwareOptimizer::calculateCacheSize(size_t total_ram_mb, size_t availab
     size_t cache_budget_mb = available_ram_mb / 4;
     
     // Asumir ~10MB por frame 1080p RGBA
-    size_t frames_per_10mb = 1;
     size_t max_frames = cache_budget_mb / 10;
     
     // Límites razonables

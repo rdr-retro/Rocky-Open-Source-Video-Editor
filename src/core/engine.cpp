@@ -57,8 +57,13 @@ py::array_t<uint8_t> RockyEngine::evaluate(double time) {
 
     const size_t totalPixelBytes = static_cast<size_t>(curW * curH * 4);
     std::vector<uint8_t> canvas(totalPixelBytes, 0);
-    // Set background to opaque black
-    for (size_t i = 3; i < totalPixelBytes; i += 4) canvas[i] = 255;
+    // Professional Gray Background for the project canvas (RGB 45, 45, 45)
+    for (size_t i = 0; i < totalPixelBytes; i += 4) {
+        canvas[i]     = 45;  // R
+        canvas[i + 1] = 45;  // G
+        canvas[i + 2] = 45;  // B
+        canvas[i + 3] = 255; // A
+    }
 
     {
         // HEAVY WORK: Release GIL

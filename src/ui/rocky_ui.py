@@ -4,9 +4,9 @@ import random
 import rocky_core
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter, 
                              QApplication, QScrollArea, QFrame, QMainWindow, QLabel, QFileDialog, QProgressDialog, QMessageBox)
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QImage, QPixmap, QIcon, QPainter, QPainterPath, QPen, QColor
 import subprocess
-from PyQt5.QtCore import Qt, QTimer, QIODevice, QByteArray, QMutex, QMutexLocker
+from PyQt5.QtCore import Qt, QTimer, QIODevice, QByteArray, QMutex, QMutexLocker, QRectF
 from PyQt5.QtMultimedia import QAudioFormat, QAudioOutput, QAudio
 import numpy as np
 
@@ -19,6 +19,8 @@ from .viewer import ViewerPanel
 from .toolbar import RockyToolbar
 from .settings_dialog import SettingsDialog
 from .styles import MODERN_LABEL
+from .asset_tabs import AssetTabsPanel
+
 from PyQt5.QtCore import QThread, pyqtSignal
 
 # Infrastructure (Workers)
@@ -46,8 +48,11 @@ class AudioPlayer(QIODevice):
         format.setSampleType(QAudioFormat.Float)
         
         self.output = QAudioOutput(format)
+        # Increase internal buffer to 200ms to handle OS scheduling jitters
+        self.output.setBufferSize(int(sample_rate * channels * 4 * 0.2)) 
         self.open(QIODevice.ReadOnly)
         self.output.start(self)
+
 
     def write_samples(self, samples_np):
         if samples_np is not None:
@@ -72,7 +77,8 @@ class AudioPlayer(QIODevice):
         
         actual = min(len(self.buffer), maxlen)
         chunk_bytes = bytes(self.buffer[:actual])
-        self.buffer = self.buffer[actual:]
+        del self.buffer[:actual] # Much faster than slicing for bytearray
+
 
         # Live Level Detection for Meters
         try:
@@ -109,11 +115,12 @@ class AudioWorker(QThread):
                 continue
 
             current_buffer_ms = self.player.get_buffer_duration_ms()
-            # Mantenemos siempre un buffer generoso de 1200ms
-            if current_buffer_ms < 800:
-                # Calculamos cuánto falta para llegar a 1500ms
-                missing_ms = 1500 - current_buffer_ms
+            # Mantenemos un buffer mucho más agresivo (mínimo 1s, objetivo 2s)
+            if current_buffer_ms < 1000:
+                # Calculamos cuánto falta para llegar a 2000ms
+                missing_ms = 2000 - current_buffer_ms
                 missing_duration = missing_ms / 1000.0
+
                 
                 try:
                     # Usamos el conteo de muestras para el tiempo exacto
@@ -121,12 +128,17 @@ class AudioWorker(QThread):
                         self.model.audio_samples_rendered = 0
                         
                     render_start_time = self.model.audio_samples_rendered / 44100.0
+                    
+                    # Protect engine during render
+                    locker = QMutexLocker(self.player.app_engine_lock) 
                     audio_extra = self.engine.render_audio(render_start_time, missing_duration)
+                    del locker # Release immediately
                     
                     if audio_extra is not None and audio_extra.size > 0:
                         self.player.write_samples(audio_extra)
                         self.model.audio_samples_rendered += (audio_extra.size // 2)
                 except Exception as e:
+
                     print(f"AudioWorker Error: {e}")
             
             self.msleep(20) # Más agresivo para evitar underruns
@@ -137,9 +149,10 @@ class AudioWorker(QThread):
         # Convertimos el tiempo inicial a muestras exactas
         self.model.audio_samples_rendered = int(start_time * 44100)
         
-        # Pre-buffer inicial potente (800ms)
-        initial = self.engine.render_audio(start_time, 0.8)
+        # Pre-buffer inicial muy potente (1.2s) para garantizar arranque suave
+        initial = self.engine.render_audio(start_time, 1.2)
         self.player.write_samples(initial)
+
         self.model.audio_samples_rendered += (initial.size // 2)
         
         self.player.output.resume()
@@ -232,9 +245,61 @@ class RockyApp(QMainWindow):
     def __init__(self, model):
         super().__init__()
         self.model = model
+        self.engine_lock = QMutex() # Protection for concurrent C++/Python access
+        self.setWindowTitle("Rocky Video Editor")
         self.initialize_engine()
+
         self.initialize_ui_components()
         self.setup_event_connections()
+        
+        # Set Window Icon
+        icon_path = os.path.join(os.getcwd(), "logo.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(self._get_rounded_icon(icon_path))
+        else:
+            # Try to find it relative to the script if CWD is different
+            script_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            icon_path_alt = os.path.join(script_dir, "logo.png")
+            if os.path.exists(icon_path_alt):
+                self.setWindowIcon(self._get_rounded_icon(icon_path_alt))
+        
+    def _get_rounded_icon(self, path):
+        """On macOS, applies a squircle-style rounding to the icon for better integration."""
+        original = QPixmap(path)
+        if sys.platform != "darwin":
+            return QIcon(original)
+            
+        # Create a rounded version for macOS with internal padding (Visual Weight fix)
+        size = original.size()
+        rounded = QPixmap(size)
+        rounded.fill(Qt.transparent)
+        
+        painter = QPainter(rounded)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # macOS standard icons occupy ~82% of the canvas for correct visual weight
+        padding = size.width() * 0.09 # 9% padding on each side
+        content_size = size.width() - (padding * 2)
+        radius = content_size * 0.175
+        
+        path = QPainterPath()
+        rect = QRectF(padding, padding, content_size, content_size)
+        path.addRoundedRect(rect, radius, radius)
+        
+        painter.setClipPath(path)
+        # Draw the original scaled to fit the content area
+        painter.drawPixmap(rect.toRect(), original)
+        
+        # Glass Border (Enhanced)
+        painter.setClipping(False)
+        glass_pen = QPen(QColor(255, 255, 255, 180)) # More opaque white (180/255)
+        glass_pen.setWidth(3) # Slightly thicker
+        painter.setPen(glass_pen)
+        painter.drawPath(path)
+        
+        painter.end()
+        
+        return QIcon(rounded)
         
         # Start the heavy engine thread only after UI is ready (moved to showEvent)
         # self.audio_worker.start() <--- MOVED
@@ -243,8 +308,9 @@ class RockyApp(QMainWindow):
         """Called when the window is shown. Safe place to start threads."""
         super().showEvent(event)
         if hasattr(self, 'audio_worker') and not self.audio_worker.isRunning():
-            print("DEBUG: Starting AudioWorker...", flush=True)
-            self.audio_worker.start()
+            print("DEBUG: Starting AudioWorker with High Priority...", flush=True)
+            self.audio_worker.start(QThread.HighPriority)
+
 
     def initialize_engine(self):
         """Initializes the C++ rendering engine."""
@@ -256,6 +322,8 @@ class RockyApp(QMainWindow):
             self.audio_player = AudioPlayer()
             print("DEBUG: initializing AudioWorker...", flush=True)
             self.audio_worker = AudioWorker(self.engine, self.audio_player, self.model)
+            self.audio_player.app_engine_lock = self.engine_lock # Share the lock
+
         except Exception as e:
             print(f"Critical Error: Could not initialize RockyEngine/Audio: {e}")
 
@@ -316,15 +384,15 @@ class RockyApp(QMainWindow):
         self.lower_section = self._create_lower_section()
         self.main_vertical_splitter.addWidget(self.lower_section)
         
-        self.main_vertical_splitter.setStretchFactor(0, 1)  # Upper: menos espacio
-        self.main_vertical_splitter.setStretchFactor(1, 2)  # Lower: MÁS espacio para el timeline
+        self.main_vertical_splitter.setStretchFactor(0, 2)  # Upper: MÁS espacio para el visor/assets
+        self.main_vertical_splitter.setStretchFactor(1, 1)  # Lower: menos espacio para el timeline por defecto
         
         # Splitter styling (Universal)
         self.main_vertical_splitter.setHandleWidth(1)
         self.main_vertical_splitter.setStyleSheet("QSplitter::handle { background-color: #1a1a1a; }")
 
-        # Establecer tamaños iniciales (Upper: 400px, Lower: 600px)
-        self.main_vertical_splitter.setSizes([400, 600])
+        # Establecer tamaños iniciales (Upper: mayor protagonismo, Lower: más compacto)
+        self.main_vertical_splitter.setSizes([650, 350])
         
         main_layout.addWidget(self.main_vertical_splitter)
         
@@ -356,18 +424,18 @@ class RockyApp(QMainWindow):
         
         self.top_splitter = QSplitter(Qt.Horizontal)
         
-        self.explorer_placeholder = QFrame()
-        self.explorer_placeholder.setStyleSheet("background-color: #05020a; border-bottom: 2px solid #1a0b2e;")
-        self.explorer_placeholder.setMinimumHeight(450)
-        
+        self.asset_tabs = AssetTabsPanel()
         self.viewer = ViewerPanel()
         self.master_meter = MasterMeterPanel()
         
-        self.top_splitter.addWidget(self.explorer_placeholder)
+        self.top_splitter.addWidget(self.asset_tabs)
         self.top_splitter.addWidget(self.viewer)
         self.top_splitter.addWidget(self.master_meter)
-        self.top_splitter.setStretchFactor(0, 1)
-        self.top_splitter.setStretchFactor(1, 2)
+        
+        self.top_splitter.setStretchFactor(0, 1) # Asset Tabs (General/Media)
+        self.top_splitter.setStretchFactor(1, 2) # Viewer
+        self.top_splitter.setStretchFactor(2, 0) # Master Meter
+
         
         layout.addWidget(self.top_splitter)
         return container
@@ -518,6 +586,10 @@ class RockyApp(QMainWindow):
         self.viewer.btn_rewind.clicked.connect(lambda: self.timeline_widget.update_playhead_to_x(0))
         self.viewer.btn_play_pause.clicked.connect(self.toggle_play)
         self.viewer.btn_fullscreen.clicked.connect(self._toggle_fullscreen_viewer)
+
+        # Asset Tabs
+        self.asset_tabs.resolution_changed.connect(self.on_resolution_changed)
+
 
     def _toggle_fullscreen_viewer(self):
         if self.viewer.isFullScreen():
@@ -763,8 +835,12 @@ class RockyApp(QMainWindow):
         
         self.timeline_ruler.update() # Ensure ruler handle moves
         
+        locker = QMutexLocker(self.engine_lock)
         rendered_frame = self.engine.evaluate(timestamp)
+        del locker
+        
         self.viewer.display_frame(rendered_frame)
+
 
     def on_structure_changed(self):
         """Triggered when clips are moved, added, or deleted."""
@@ -778,6 +854,35 @@ class RockyApp(QMainWindow):
         gain = value / 75.0
         self.engine.set_master_gain(gain)
         self.status_label.setText(f"Master Volume: {int(value)}%")
+
+    def on_resolution_changed(self, width, height):
+        """
+        Updates the global project resolution in the engine.
+        Affects both preview and final render.
+        """
+        print(f"Project Resolution Changed: {width}x{height}")
+        
+        # Stop playback to avoid engine contention during resolution swap
+        was_playing = self.model.blueline.playing
+        if was_playing:
+            self.toggle_play()
+
+        locker = QMutexLocker(self.engine_lock)
+        self.engine.set_resolution(width, height)
+        del locker
+
+        self.status_label.setText(f"Resolución: {width}x{height}")
+        
+        # Trigger a re-render of the current frame to show the new aspect ratio
+        current_frame = self.model.blueline.playhead_frame
+        active_fps = self.timeline_widget.get_fps()
+        tc = self.model.format_timecode(current_frame, active_fps)
+        self.on_time_changed(current_frame / active_fps, int(current_frame), tc, True)
+        
+        if was_playing:
+            self.toggle_play()
+
+
 
     def _start_waveform_analysis(self, clip):
         """Launches a background thread to calculate the real audio waveform."""
@@ -803,9 +908,15 @@ class RockyApp(QMainWindow):
         clip.waveform = peaks
         clip.waveform_computing = False
         self.timeline_widget.update()
-        # Clean up worker reference
+        
+        # Cleanup worker safely
         if hasattr(self, "_waveform_workers"):
-            self._waveform_workers = [w for w in self._waveform_workers if w.clip != clip]
+            # Find the sender worker
+            sender = self.sender()
+            if sender in self._waveform_workers:
+                self._waveform_workers.remove(sender)
+                sender.deleteLater()
+
 
 
 
@@ -1052,11 +1163,74 @@ if __name__ == "__main__":
     faulthandler.enable() # Dump stack trace on crash
 
     print("DEBUG: Initializing QApplication...", flush=True)
+    
+    # macOS branding fix
+    if sys.platform == "darwin":
+        sys.argv[0] = "Rocky Video Editor"
+        try:
+            import ctypes
+            libc = ctypes.CDLL(None)
+            libc.setprogname(b"Rocky Video Editor")
+        except Exception:
+            pass
+
+    # Enable High DPI (Must be before QApplication)
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
+
     app = QApplication(sys.argv)
     
-    # Enable High DPI
-    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-    app.setAttribute(Qt.AA_EnableHighDpiScaling)
+    # Set Application Identity
+    app.setApplicationName("Rocky Video Editor")
+    app.setApplicationDisplayName("Rocky Video Editor")
+    app.setOrganizationName("Antigravity")
+    
+    # Windows Taskbar Icon Fix (AppUserModelID)
+    if os.name == 'nt':
+        import ctypes
+        myappid = 'antigravity.rocky.videoeditor.1.0'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    
+    # Set Taskbar Icon (Windows/Linux)
+    icon_path = os.path.join(os.getcwd(), "logo.png")
+    if not os.path.exists(icon_path):
+        # Fallback to relative path
+        script_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        icon_path = os.path.join(script_dir, "logo.png")
+
+    if os.path.exists(icon_path):
+        if sys.platform == "darwin":
+            # Round for macOS Dock and add padding for visual consistency
+            original = QPixmap(icon_path)
+            size = original.size()
+            rounded = QPixmap(size)
+            rounded.fill(Qt.transparent)
+            
+            painter = QPainter(rounded)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            # visual weight padding
+            padding = size.width() * 0.09
+            content_size = size.width() - (padding * 2)
+            
+            path = QPainterPath()
+            rect = QRectF(padding, padding, content_size, content_size)
+            path.addRoundedRect(rect, content_size*0.175, content_size*0.175)
+            
+            painter.setClipPath(path)
+            painter.drawPixmap(rect.toRect(), original)
+            
+            # Glass Border (Enhanced)
+            painter.setClipping(False)
+            glass_pen = QPen(QColor(255, 255, 255, 180)) # More opaque white
+            glass_pen.setWidth(3) # Slightly thicker
+            painter.setPen(glass_pen)
+            painter.drawPath(path)
+            
+            painter.end()
+            app.setWindowIcon(QIcon(rounded))
+        else:
+            app.setWindowIcon(QIcon(icon_path))
 
     print("DEBUG: Creating TimelineModel...", flush=True)
     model = TimelineModel()

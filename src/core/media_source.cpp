@@ -134,12 +134,29 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
                     if (av_frame->pts >= targetPts) {
                         Frame outputFrame(w, h, 4);
                         
-                        // Optimized scaling context management
+                        // Smart Scaling: Maintain aspect ratio (Uniform Fit)
+                        float srcAspect = (float)av_frame->width / av_frame->height;
+                        float dstAspect = (float)w / h;
+                        
+                        int outW, outH, outX, outY;
+                        if (srcAspect > dstAspect) {
+                            outW = w;
+                            outH = (int)(w / srcAspect);
+                            outX = 0;
+                            outY = (h - outH) / 2;
+                        } else {
+                            outH = h;
+                            outW = (int)(h * srcAspect);
+                            outY = 0;
+                            outX = (w - outW) / 2;
+                        }
+
                         sws_ctx = sws_getCachedContext(sws_ctx, 
                             av_frame->width, av_frame->height, static_cast<AVPixelFormat>(av_frame->format),
-                            w, h, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+                            outW, outH, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
                         
-                        uint8_t* destPointers[4] = { outputFrame.data.data(), nullptr, nullptr, nullptr };
+                        // Draw into the calculated sub-rectangle of the output frame
+                        uint8_t* destPointers[4] = { outputFrame.data.data() + (outY * w * 4) + (outX * 4), nullptr, nullptr, nullptr };
                         int destStrides[4] = { w * 4, 0, 0, 0 };
                         
                         sws_scale(sws_ctx, av_frame->data, av_frame->linesize, 0, 
@@ -156,6 +173,7 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
                     }
                 }
             }
+
         }
         av_packet_unref(pkt);
     }
@@ -410,17 +428,35 @@ void ImageSource::load(int w, int h) {
             if (avcodec_receive_frame(imgCodecCtx, tempFrame) >= 0) {
                 cached_frame = Frame(w, h, 4);
                 
+                // Smart Scaling for Static Images
+                float srcAspect = (float)tempFrame->width / tempFrame->height;
+                float dstAspect = (float)w / h;
+                
+                int outW, outH, outX, outY;
+                if (srcAspect > dstAspect) {
+                    outW = w;
+                    outH = (int)(w / srcAspect);
+                    outX = 0;
+                    outY = (h - outH) / 2;
+                } else {
+                    outH = h;
+                    outW = (int)(h * srcAspect);
+                    outY = 0;
+                    outX = (w - outW) / 2;
+                }
+
                 SwsContext* scaler = sws_getContext(
                     tempFrame->width, tempFrame->height, static_cast<AVPixelFormat>(tempFrame->format),
-                    w, h, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+                    outW, outH, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
                 
-                uint8_t* dest[4] = { cached_frame.data.data(), nullptr, nullptr, nullptr };
+                uint8_t* dest[4] = { cached_frame.data.data() + (outY * w * 4) + (outX * 4), nullptr, nullptr, nullptr };
                 int destLinesizes[4] = { w * 4, 0, 0, 0 };
                 
                 sws_scale(scaler, tempFrame->data, tempFrame->linesize, 0, 
                           tempFrame->height, dest, destLinesizes);
                 
                 sws_freeContext(scaler);
+
                 loaded = true;
                 last_w = w; 
                 last_h = h;
