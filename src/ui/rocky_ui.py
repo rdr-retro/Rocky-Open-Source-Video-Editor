@@ -1,7 +1,9 @@
 import sys
 import os
 import random
+import time
 import rocky_core
+
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter, 
                              QApplication, QScrollArea, QFrame, QMainWindow, QLabel, QFileDialog, QProgressDialog, QMessageBox)
 from PyQt5.QtGui import QImage, QPixmap, QIcon, QPainter, QPainterPath, QPen, QColor
@@ -789,21 +791,28 @@ class RockyApp(QMainWindow):
             self.audio_worker.stop_playback()
         else:
             active_fps = self.timeline_widget.get_fps()
+            # Capturamos el estado inicial para el Reloj Maestro
+            self.playback_start_frame = self.model.blueline.playhead_frame
+            self.playback_start_wall_time = time.perf_counter()
+            
             start_time = self.model.blueline.playhead_frame / active_fps
             self.audio_worker.start_playback(start_time, active_fps)
+
 
     def on_playback_tick(self):
         """
         Main execution pulse for project playback.
-        Calculates sub-frame increments to maintain 60FPS visual fluidity.
+        Uses a Wall-Clock Master Sync to prevent A/V drift.
         """
         if not self.model.blueline.playing:
             return
 
         active_fps = self.timeline_widget.get_fps()
-        # We increment based on a 60Hz tick assumption (16ms timer)
-        frame_increment = active_fps / 60.0
-        current_frame = self.model.blueline.playhead_frame + frame_increment
+        
+        # RELOJ MAESTRO: Calculamos el tiempo transcurrido real desde el inicio
+        elapsed_real_time = time.perf_counter() - self.playback_start_wall_time
+        current_frame = self.playback_start_frame + (elapsed_real_time * active_fps)
+
         
         # 1. Synchronize UI (Playhead and Timeline)
         playhead_screen_x = self.timeline_widget.update_playhead_position(current_frame)

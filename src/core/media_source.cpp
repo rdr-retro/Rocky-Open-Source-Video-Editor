@@ -118,7 +118,7 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
     }
 
     const AVRational timeBase = fmt_ctx->streams[video_stream_idx]->time_base;
-    const int64_t targetPts = static_cast<int64_t>(localTime / av_q2d(timeBase));
+    const int64_t targetPts = static_cast<int64_t>(localTime / av_q2d(timeBase) + 0.001);
     
     // Seeking logic: Only seek if we are going backwards or jumping too far ahead
     if (localTime < last_time || localTime > last_time + 1.0) {

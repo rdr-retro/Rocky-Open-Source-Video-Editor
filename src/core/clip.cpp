@@ -37,7 +37,8 @@ float Clip::getOpacityAt(long absoluteFrame) {
 }
 
 Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
-    double localTime = (time - (double)startFrame/fps) + sourceOffset;
+    // Usar absoluteFrame (entero) en lugar de time (double) para evitar jitter de redondeo
+    double localTime = (double)(absoluteFrame - startFrame) / fps + sourceOffset;
     Frame f = source->getFrame(localTime, w, h);
     
     float finalAlphaMult = getOpacityAt(absoluteFrame);

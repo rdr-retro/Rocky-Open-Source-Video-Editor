@@ -48,6 +48,8 @@ class TimelinePanel(QWidget, TimelineRenderer, TimelineInteractions):
         self.active_node_idx = -1
         self.press_track_y = 0
         self.press_track_h = 0
+        self.clipboard_clip = None
+
         
     def _initialize_design_system(self):
         self._stipple_brush = self._create_stipple_brush()
@@ -255,8 +257,10 @@ class TimelinePanel(QWidget, TimelineRenderer, TimelineInteractions):
 
     def contextMenuEvent(self, event):
         clip = self.find_clip_at(event.x(), event.y())
+        playhead_frame = int(self.model.blueline.playhead_frame)
         from PyQt5.QtWidgets import QMenu
         menu = QMenu(self)
+
         if clip:
             mode, _ = self.query_interaction_at(event.x(), event.y())
             if mode in [MODE_FADE_IN, MODE_FADE_OUT]:
@@ -271,8 +275,24 @@ class TimelinePanel(QWidget, TimelineRenderer, TimelineInteractions):
                     act.triggered.connect(set_f)
                 menu.exec_(event.globalPos())
                 return
+            
             menu.addAction("Eliminar").triggered.connect(lambda: self._remove_clip(clip))
+            
+            # Split only if playhead is inside the clip
+            split_act = menu.addAction("Dividir")
+            is_inside = clip.start_frame < playhead_frame < (clip.start_frame + clip.duration_frames)
+            split_act.setEnabled(is_inside)
+            split_act.triggered.connect(lambda: self._split_clip(clip, playhead_frame))
+            
+            menu.addAction("Copiar").triggered.connect(lambda: self._copy_clip(clip))
+        
+        menu.addSeparator()
+        paste_act = menu.addAction("Pegar")
+        paste_act.setEnabled(self.clipboard_clip is not None)
+        paste_act.triggered.connect(lambda: self._paste_clip(event.x(), event.y()))
+        
         menu.exec_(event.globalPos())
+
 
     def keyPressEvent(self, event):
         mods = event.modifiers()
@@ -330,13 +350,67 @@ class TimelinePanel(QWidget, TimelineRenderer, TimelineInteractions):
         self.update()
         self.structure_changed.emit()
 
+    def _copy_clip(self, clip):
+        self.clipboard_clip = clip.copy()
+
+    def _paste_clip(self, x, y):
+        if not self.clipboard_clip: return
+        
+        new_clip = self.clipboard_clip.copy()
+        # Find track index at Y
+        track_idx = -1
+        curr_y = 0
+        for i, h in enumerate(self.model.track_heights):
+            if curr_y <= y < curr_y + h:
+                track_idx = i
+                break
+            curr_y += h
+            
+        if track_idx == -1: track_idx = 0 
+        
+        new_clip.track_index = track_idx
+        paste_frame = max(0, int(self.screenToTime(x) * self.get_fps()))
+        
+        snap = self.find_snap_frame(paste_frame)
+        if snap != -1: paste_frame = snap
+            
+        new_clip.start_frame = paste_frame
+        new_clip.selected = False
+        self.model.add_clip(new_clip)
+        self.update()
+        self.structure_changed.emit()
+
     def _split_clip(self, clip, frame):
         offset = frame - clip.start_frame
+        if offset <= 0 or offset >= clip.duration_frames: return
+        
+        # 1. Split the main clip
         right = clip.copy()
+        right.source_offset_frames += offset
         right.start_frame = frame
         right.duration_frames = clip.duration_frames - offset
         clip.duration_frames = offset
         self.model.add_clip(right)
+        
+        # 2. Synchronized Split for Linked Items (Audio/Video Pairs)
+        if clip.linked_to:
+            linked = clip.linked_to
+            linked_offset = frame - linked.start_frame
+            
+            # Verify the playhead is indeed inside the linked clip boundaries
+            if 0 < linked_offset < linked.duration_frames:
+                linked_right = linked.copy()
+                linked_right.source_offset_frames += linked_offset
+                linked_right.start_frame = frame
+                linked_right.duration_frames = linked.duration_frames - linked_offset
+                linked.duration_frames = linked_offset
+                
+                # Re-link the newly created "right" segments
+                right.linked_to = linked_right
+                linked_right.linked_to = right
+                
+                self.model.add_clip(linked_right)
+        
         self.update()
         self.structure_changed.emit()
 
