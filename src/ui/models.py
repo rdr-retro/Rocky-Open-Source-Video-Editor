@@ -59,11 +59,51 @@ class TimelineClip:
         # Audio Analysis Cache (Vegas Style)
         self.waveform = []
         self.waveform_computing = False
-
-        # Physical Previews (Start, Mid, End)
-        self.thumbnails = [] # List of QImage or QPixmap
-        self.thumbnails_computing = False
         
+        # Video Analysis Cache
+        self.thumbnails = []
+        self.thumbnails_computing = False
+
+    def to_dict(self) -> dict:
+        """Serializes the clip state to a dictionary for JSON storage."""
+        return {
+            "name": self.name,
+            "start_frame": self.start_frame,
+            "duration_frames": self.duration_frames,
+            "track_index": self.track_index,
+            "source_offset_frames": self.source_offset_frames,
+            "file_path": self.file_path,
+            "start_opacity": self.start_opacity,
+            "end_opacity": self.end_opacity,
+            "fade_in_frames": self.fade_in_frames,
+            "fade_out_frames": self.fade_out_frames,
+            "fade_in_type": self.fade_in_type.value,
+            "fade_out_type": self.fade_out_type.value,
+            "opacity_nodes": self.opacity_nodes,
+            "use_proxy": self.use_proxy
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'TimelineClip':
+        """Creates a TimelineClip instance from a dictionary."""
+        clip = cls(
+            data["name"], 
+            data["start_frame"], 
+            data["duration_frames"], 
+            data["track_index"]
+        )
+        clip.source_offset_frames = data.get("source_offset_frames", 0)
+        clip.file_path = data.get("file_path")
+        clip.start_opacity = data.get("start_opacity", 1.0)
+        clip.end_opacity = data.get("end_opacity", 1.0)
+        clip.fade_in_frames = data.get("fade_in_frames", 0)
+        clip.fade_out_frames = data.get("fade_out_frames", 0)
+        clip.fade_in_type = FadeType(data.get("fade_in_type", 0))
+        clip.fade_out_type = FadeType(data.get("fade_out_type", 0))
+        clip.opacity_nodes = data.get("opacity_nodes", [])
+        clip.use_proxy = data.get("use_proxy", False)
+        return clip
+
     def copy(self) -> 'TimelineClip':
         """Deep copy of the clip for split or duplication operations."""
         new_clip = TimelineClip(self.name, self.start_frame, self.duration_frames, self.track_index)
@@ -151,6 +191,29 @@ class TimelineModel:
             self.clips.remove(clip)
             self.layout_revision += 1
 
+    def to_dict(self) -> dict:
+        """Serializes the entire project state."""
+        return {
+            "version": "1.0",
+            "track_types": [tt.value for tt in self.track_types],
+            "track_heights": self.track_heights,
+            "clips": [clip.to_dict() for clip in self.clips]
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'TimelineModel':
+        """Reconstructs the model from serialized data."""
+        model = cls()
+        model.track_types = [TrackType(v) for v in data.get("track_types", [])]
+        model.track_heights = data.get("track_heights", [])
+        
+        # Reconstruct clips
+        clips_data = data.get("clips", [])
+        for c_data in clips_data:
+            model.clips.append(TimelineClip.from_dict(c_data))
+            
+        model.layout_revision += 1
+        return model
 
     def get_max_frame(self) -> int:
         """Calculates the end boundary of the last clip in the project."""

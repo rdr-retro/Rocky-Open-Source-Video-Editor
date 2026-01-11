@@ -29,6 +29,7 @@ Frame ColorSource::getFrame(double /*localTime*/, int w, int h) {
 // ============================================================================
 
 VideoSource::VideoSource(std::string p) : path(p) {
+    std::cout << "[VideoSource] Constructor for " << path << std::endl;
     // Attempt to open input stream
     if (avformat_open_input(&fmt_ctx, path.c_str(), nullptr, nullptr) < 0) {
         std::cerr << "[VideoSource] Failed to open: " << path << std::endl;
@@ -117,12 +118,16 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
         return last_frame;
     }
 
+    if (!fmt_ctx || video_stream_idx == -1) return Frame(w, h);
+
     const AVRational timeBase = fmt_ctx->streams[video_stream_idx]->time_base;
     const int64_t targetPts = static_cast<int64_t>(localTime / av_q2d(timeBase) + 0.001);
     
     // Seeking logic: Only seek if we are going backwards or jumping too far ahead
     if (localTime < last_time || localTime > last_time + 1.0) {
-        avcodec_flush_buffers(codec_ctx);
+        if (avcodec_is_open(codec_ctx)) {
+            avcodec_flush_buffers(codec_ctx);
+        }
         av_seek_frame(fmt_ctx, video_stream_idx, targetPts, AVSEEK_FLAG_BACKWARD);
     }
 
@@ -189,6 +194,12 @@ std::vector<float> VideoSource::getAudioSamples(double startTime, double duratio
     std::lock_guard<std::mutex> lock(mtx);
     if (!audio_codec_ctx || audio_stream_idx == -1) return {};
 
+    double srcDur = getDuration();
+    if (srcDur > 0.001) { // Evitar fmod por cero o valores insignificantes
+        startTime = std::fmod(startTime, srcDur);
+        if (startTime < 0) startTime += srcDur;
+    }
+
     const int targetSampleRate = 44100;
     const int targetChannels = 2;
     const size_t targetSampleCount = static_cast<size_t>(duration * targetSampleRate) * targetChannels;
@@ -200,7 +211,9 @@ std::vector<float> VideoSource::getAudioSamples(double startTime, double duratio
 
     // Optimized sequential reading vs seeking
     if (startTime < last_audio_time - 0.1 || startTime > last_audio_time + 0.5) {
-        avcodec_flush_buffers(audio_codec_ctx);
+        if (avcodec_is_open(audio_codec_ctx)) {
+            avcodec_flush_buffers(audio_codec_ctx);
+        }
         // Seek slightly before to satisfy keyframe/codec dependencies
         int64_t seekPts = std::max((int64_t)0, startPts - static_cast<int64_t>(0.2 / timeBase));
         av_seek_frame(fmt_ctx, audio_stream_idx, seekPts, AVSEEK_FLAG_BACKWARD);
@@ -222,8 +235,18 @@ std::vector<float> VideoSource::getAudioSamples(double startTime, double duratio
     }
 
     // Decoding Loop
-    while (samples.size() < targetSampleCount) {
-        if (av_read_frame(fmt_ctx, pkt) < 0) break; // EOF
+    int loopSafety = 0;
+    while (samples.size() < targetSampleCount && loopSafety < 10) {
+        if (av_read_frame(fmt_ctx, pkt) < 0) {
+            // SOPORTE PARA BUCLE: Si llegamos al final pero necesitamos más muestras, volvemos a empezar
+            if (avcodec_is_open(audio_codec_ctx)) {
+                avcodec_flush_buffers(audio_codec_ctx);
+            }
+            av_seek_frame(fmt_ctx, audio_stream_idx, 0, AVSEEK_FLAG_BACKWARD);
+            last_audio_time = -1.0;
+            loopSafety++;
+            continue;
+        }
 
         if (pkt->stream_index == audio_stream_idx) {
             if (avcodec_send_packet(audio_codec_ctx, pkt) >= 0) {

@@ -196,14 +196,30 @@ GPUInfo PlatformDetector::detectGPU() {
     
     #ifdef __APPLE__
         // macOS: Always has Metal support on modern systems
-        gpu.vendor = "Apple/AMD";
-        gpu.model = "Integrated GPU";
         gpu.supports_metal = true;
         
-        // Estimate VRAM (macOS shares system RAM)
-        gpu.vram_mb = getTotalRAM() / 4; // Rough estimate
+        // Detect Apple Silicon or Intel brand string
+        char brand[256];
+        size_t brand_size = sizeof(brand);
+        if (sysctlbyname("machdep.cpu.brand_string", brand, &brand_size, NULL, 0) == 0) {
+            std::string model_name(brand);
+            gpu.model = model_name;
+            
+            if (model_name.find("Apple") != std::string::npos) {
+                gpu.vendor = "Apple";
+            } else if (model_name.find("Intel") != std::string::npos) {
+                gpu.vendor = "Intel";
+            } else {
+                gpu.vendor = "Apple"; // Fallback for M-series if string format changes
+            }
+        } else {
+            gpu.vendor = "Apple";
+            gpu.model = "Unified GPU";
+        }
         
-    #elif _WIN32
+        // VRAM Estimation (macOS shares system RAM on Silicon, usually ~75% max available to GPU)
+        gpu.vram_mb = (getTotalRAM() * 3) / 4;
+#elif _WIN32
         // Windows: Will implement DirectX detection in platform/windows/
         gpu.vendor = "Unknown";
         gpu.supports_dx11 = true; // Assume DX11 available on Windows

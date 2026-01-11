@@ -39,6 +39,14 @@ float Clip::getOpacityAt(long absoluteFrame) {
 Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
     // Usar absoluteFrame (entero) en lugar de time (double) para evitar jitter de redondeo
     double localTime = (double)(absoluteFrame - startFrame) / fps + sourceOffset;
+    
+    // SOPORTE PARA BUCLE (Vegas Style): Si el clip se alarga más que la fuente, volvemos al inicio.
+    double srcDur = source->getDuration();
+    if (srcDur > 0) {
+        localTime = std::fmod(localTime, srcDur);
+        if (localTime < 0) localTime += srcDur;
+    }
+
     Frame f = source->getFrame(localTime, w, h);
     
     float finalAlphaMult = getOpacityAt(absoluteFrame);

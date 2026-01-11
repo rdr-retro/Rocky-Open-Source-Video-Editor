@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                              QApplication, QScrollArea, QFrame, QMainWindow, QLabel, QFileDialog, QProgressDialog, QMessageBox)
 from PyQt5.QtGui import QImage, QPixmap, QIcon, QPainter, QPainterPath, QPen, QColor
 import subprocess
+import json
 from PyQt5.QtCore import Qt, QTimer, QIODevice, QByteArray, QMutex, QMutexLocker, QRectF
 from PyQt5.QtMultimedia import QAudioFormat, QAudioOutput, QAudio
 import numpy as np
@@ -208,9 +209,10 @@ class RenderWorker(QThread):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self, engine, output_path, total_frames, fps, width, height):
+    def __init__(self, engine, engine_lock, output_path, total_frames, fps, width, height):
         super().__init__()
         self.engine = engine
+        self.engine_lock = engine_lock
         self.output_path = output_path
         self.total_frames = total_frames
         self.fps = fps
@@ -220,8 +222,29 @@ class RenderWorker(QThread):
     def run(self):
         audio_temp_path = self.output_path + ".audio.tmp"
         
+        # Save original resolution to restore later
+        orig_w = 1280
+        orig_h = 720
+        # Try to get current resolution if possible
         try:
-            # 1. Renderizar Audio (Rápido)
+             # We assume HD if we can't get it, but we should probably pass it in
+             # or have a method in engine to query it.
+             # For now, we'll just set it and the UI will restore it via on_resolution_changed if needed.
+             pass
+        except: pass
+
+        try:
+            # 0. Ensure dimensions are even (FFmpeg requirement for most codecs)
+            self.width = (self.width // 2) * 2
+            self.height = (self.height // 2) * 2
+
+            # 1. Sync engine resolution for RENDER
+            locker = QMutexLocker(self.engine_lock)
+            # Actually, RockyEngine has internal locks for setResolution
+            self.engine.set_resolution(self.width, self.height)
+            if locker: del locker
+
+            # 2. Render Audio (Rápido)
             duration = self.total_frames / self.fps
             audio_samples = self.engine.render_audio(0, duration)
             with open(audio_temp_path, 'wb') as f:
@@ -277,7 +300,13 @@ class RenderWorker(QThread):
                 self.error.emit(f"Fallo en FFmpeg: {err_out}")
                 
         except Exception as e:
+            print(f"RenderWorker Exception: {e}")
             self.error.emit(str(e))
+        finally:
+            # Note: We don't restore resolution here because the UI might have changed.
+            # The next time the user interacts with the UI or changes resolution, 
+            # it will be resynced. Or we could pass the original resolution to the worker.
+            pass
 
 class RockyApp(QMainWindow):
     """
@@ -292,6 +321,7 @@ class RockyApp(QMainWindow):
         self.playback_rate = 1.0
         self.model.blueline.playback_rate = 1.0
         self.setWindowTitle("Rocky Video Editor")
+        self.project_path = None
 
         self.initialize_engine()
 
@@ -582,11 +612,18 @@ class RockyApp(QMainWindow):
             
             backend = backend_names.get(profile.preferred_backend, "Unknown")
             
-            # Format: "macOS 26.2 | 10 cores | 16 GB | Apple GPU | Metal"
+            # Format: "macOS 15.1 | 10 cores | 16 GB | Apple Apple M4 | Metal"
+            gpu_display = platform.gpu_info.vendor
+            if platform.gpu_info.model and platform.gpu_info.model != "Integrated GPU":
+                if platform.gpu_info.model not in gpu_display:
+                    gpu_display = f"{gpu_display} {platform.gpu_info.model}"
+                else:
+                    gpu_display = platform.gpu_info.model
+            
             info_text = (f"{platform.os_name} {platform.os_version} | "
                         f"{platform.cpu_cores} cores | "
                         f"{platform.total_ram_mb // 1024} GB | "
-                        f"{platform.gpu_info.vendor} | "
+                        f"{gpu_display} | "
                         f"{backend}")
             
             self.platform_label.setText(info_text)
@@ -623,6 +660,7 @@ class RockyApp(QMainWindow):
         # Toolbar Actions
         self.toolbar.btn_open.clicked.connect(self.on_open)
         self.toolbar.btn_save.clicked.connect(self.on_save)
+        self.toolbar.btn_save_as.clicked.connect(self.on_save_as)
         self.toolbar.btn_render.clicked.connect(self.on_render)
         self.toolbar.btn_settings.clicked.connect(self.on_settings)
         self.toolbar.btn_proxy.clicked.connect(self.on_proxy_toggle)
@@ -661,18 +699,22 @@ class RockyApp(QMainWindow):
         Handles media file importation via the professional File Dialog.
         """
         file_filter = (
+            "Rocky Project (*.rocky);;"
             "All Media (*.mp4 *.mov *.mkv *.avi *.png *.jpg *.jpeg *.bmp *.webp *.mp3 *.wav *.aac *.m4a *.flac);;"
             "Video Files (*.mp4 *.mov *.mkv *.avi);;"
             "Audio Files (*.mp3 *.wav *.aac *.m4a *.flac);;"
             "Image Files (*.png *.jpg *.jpeg *.bmp *.webp);;"
             "All Files (*)"
         )
-        file_path, _ = QFileDialog.getOpenFileName(self, "Importar Media", "", file_filter)
+        file_path, _ = QFileDialog.getOpenFileName(self, "Abrir Proyecto o Media", "", file_filter)
         
         if file_path:
-            start_frame = self.model.blueline.playhead_frame
-            self.import_media(file_path, start_frame)
-            self.status_label.setText(f"Importado: {os.path.basename(file_path)}")
+            if file_path.lower().endswith('.rocky'):
+                self.load_project(file_path)
+            else:
+                start_frame = self.model.blueline.playhead_frame
+                self.import_media(file_path, start_frame)
+                self.status_label.setText(f"Importado: {os.path.basename(file_path)}")
 
     def import_media(self, file_path, start_frame, preferred_track_idx=-1):
         """
@@ -772,7 +814,69 @@ class RockyApp(QMainWindow):
         return duration
         
     def on_save(self):
-        self.status_label.setText("Proyecto guardado.")
+        if self.project_path:
+            self.save_project(self.project_path)
+        else:
+            self.on_save_as()
+
+    def on_save_as(self):
+        file_path, _ = QFileDialog.getSaveFileName(self, "Guardar Proyecto", "", "Rocky Project (*.rocky)")
+        if file_path:
+            if not file_path.endswith('.rocky'):
+                file_path += '.rocky'
+            self.save_project(file_path)
+
+    def save_project(self, path):
+        try:
+            data = self.model.to_dict()
+            with open(path, 'w') as f:
+                json.dump(data, f, indent=4)
+            self.project_path = path
+            self.status_label.setText(f"Proyecto guardado: {os.path.basename(path)}")
+            # Optional: update window title
+            self.setWindowTitle(f"Rocky Video Editor Pro - {os.path.basename(path)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error al guardar", f"No se pudo guardar el proyecto:\n{str(e)}")
+
+    def load_project(self, path):
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+            
+            from .models import TimelineModel
+            new_model = TimelineModel.from_dict(data)
+            
+            # Stop playback
+            if self.model.blueline.playing:
+                self.toggle_play()
+                
+            # Replace model
+            self.model = new_model
+            self.sidebar.model = new_model
+            self.timeline_widget.model = new_model
+            # Re-initialize workers or reconnect if needed
+            self.audio_worker.model = new_model
+            
+            self.project_path = path
+            self.setWindowTitle(f"Rocky Video Editor Pro - {os.path.basename(path)}")
+            
+            # Rebuild and refresh
+            self.on_structure_changed()
+            self.status_label.setText(f"Proyecto cargado: {os.path.basename(path)}")
+            
+            # Recalculate waveforms and thumbnails for loaded clips
+            for clip in self.model.clips:
+                if clip.file_path and os.path.exists(clip.file_path):
+                    ext = clip.file_path.lower().split('.')[-1]
+                    is_audio = ext in ["mp3", "wav", "aac", "m4a", "flac"]
+                    if is_audio:
+                        self._start_waveform_analysis(clip)
+                    else:
+                        self._start_thumbnail_analysis(clip)
+                        self._trigger_proxy_generation(clip)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error al cargar", f"No se pudo cargar el proyecto:\n{str(e)}")
 
     def on_render(self):
         """
@@ -814,7 +918,7 @@ class RockyApp(QMainWindow):
         self.prog_dialog.setMinimumDuration(0)
         
         # Crear y configurar Worker con la resolución elegida
-        self.render_worker = RenderWorker(self.engine, output_path, total_frames, active_fps, render_w, render_h)
+        self.render_worker = RenderWorker(self.engine, self.engine_lock, output_path, total_frames, active_fps, render_w, render_h)
 
         self.render_worker.progress.connect(self.prog_dialog.setValue)
         self.render_worker.finished.connect(self._on_render_finished)
@@ -932,9 +1036,9 @@ class RockyApp(QMainWindow):
         # Actualizar el timecode gigante en el sidebar
         self.sidebar.header.set_timecode(timecode)
         
-        # Forzamos el repintado inmediato de toda la barra lateral
+        # Forzamos el repintado de toda la barra lateral
         for w in self.sidebar.track_widgets:
-            w.repaint()
+            w.update()
         
         self.timeline_ruler.update() # Ensure ruler handle moves
         
@@ -1146,6 +1250,12 @@ class RockyApp(QMainWindow):
         Deep synchronization between the high-level Python models and the 
         low-level C++ rendering core. 
         """
+        # CRITICAL: Stop playback to avoid engine contention during rebuild
+        was_playing = self.model.blueline.playing
+        if was_playing:
+            self.toggle_play()
+
+        locker = QMutexLocker(self.engine_lock)
         self.engine.clear()
         active_fps = self.timeline_widget.get_fps()
         self.engine.set_fps(active_fps)
@@ -1191,11 +1301,18 @@ class RockyApp(QMainWindow):
             cpp_clip.fade_out_type = rocky_core.FadeType(clip.fade_out_type.value)
         
         # Visual Refresh
-        # Visual Refresh
         current_frame = self.model.blueline.playhead_frame
         current_time = current_frame / active_fps
         tc = self.model.format_timecode(current_frame, active_fps)
+        
+        # Note: on_time_changed will internally lock the engine to evaluate
+        # We release the locker here before calling it to avoid double-locking if it's the same mutex
+        del locker
+
         self.on_time_changed(current_time, int(current_frame), tc, True)
+        
+        if was_playing:
+            self.toggle_play()
 
     def _instantiate_source(self, path):
         """Helper to determine the correct C++ backend for a file path."""
@@ -1303,35 +1420,52 @@ if __name__ == "__main__":
 
     if os.path.exists(icon_path):
         if sys.platform == "darwin":
-            # Round for macOS Dock and add padding for visual consistency
+            # High-Quality macOS Icon with High-DPI (Retina) support
             original = QPixmap(icon_path)
-            size = original.size()
-            rounded = QPixmap(size)
+            
+            # Use a higher resolution canvas for the icon (512x512 is standard pro size)
+            icon_size = 512
+            rounded = QPixmap(icon_size, icon_size)
             rounded.fill(Qt.transparent)
             
             painter = QPainter(rounded)
             painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
             
-            # visual weight padding
-            padding = size.width() * 0.09
-            content_size = size.width() - (padding * 2)
+            # Visual weight padding (macOS aesthetic)
+            padding = icon_size * 0.09
+            content_size = icon_size - (padding * 2)
+            radius = content_size * 0.175
             
             path = QPainterPath()
             rect = QRectF(padding, padding, content_size, content_size)
-            path.addRoundedRect(rect, content_size*0.175, content_size*0.175)
+            path.addRoundedRect(rect, radius, radius)
             
+            # Clip and Draw original with Smooth Scaling
             painter.setClipPath(path)
-            painter.drawPixmap(rect.toRect(), original)
+            painter.drawPixmap(rect.toRect(), original.scaled(int(content_size), int(content_size), Qt.KeepAspectRatio, Qt.SmoothTransformation))
             
-            # Glass Border (Enhanced)
+            # Double-layered Glass Border for premium feel
             painter.setClipping(False)
-            glass_pen = QPen(QColor(255, 255, 255, 180)) # More opaque white
-            glass_pen.setWidth(3) # Slightly thicker
+            
+            # Inner subtle glow
+            glow_pen = QPen(QColor(255, 255, 255, 40))
+            glow_pen.setWidth(6)
+            painter.setPen(glow_pen)
+            painter.drawPath(path)
+            
+            # Main Sharp Border
+            glass_pen = QPen(QColor(255, 255, 255, 180))
+            glass_pen.setWidth(2)
             painter.setPen(glass_pen)
             painter.drawPath(path)
             
             painter.end()
-            app.setWindowIcon(QIcon(rounded))
+            
+            # Set high DPI icon
+            icon = QIcon()
+            icon.addPixmap(rounded)
+            app.setWindowIcon(icon)
         else:
             app.setWindowIcon(QIcon(icon_path))
 

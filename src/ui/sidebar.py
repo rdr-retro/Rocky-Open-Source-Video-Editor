@@ -17,7 +17,7 @@ class TimecodeHeader(QFrame):
     def set_timecode(self, tc):
         if tc is None: return
         self._current_tc = tc
-        self.repaint() # Force immediate repaint to prevent "ghosting" or loss
+        self.update() 
 
     def paintEvent(self, event):
         p = QPainter(self)

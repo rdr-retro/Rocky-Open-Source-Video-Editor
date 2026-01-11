@@ -28,6 +28,7 @@ void RockyEngine::clear() {
  * @return py::array_t<uint8_t> A 4-channel (RGBA) NumPy array for Python consumption.
  */
 py::array_t<uint8_t> RockyEngine::evaluate(double time) {
+    // printf("DEBUG: RockyEngine::evaluate(%.3f)\n", time);
     std::vector<std::shared_ptr<Clip>> visibleVideoClips;
     int curW, curH;
     double curFps;
