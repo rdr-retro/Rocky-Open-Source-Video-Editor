@@ -16,88 +16,81 @@ class SettingsDialog(QDialog):
         
         self.setStyleSheet("""
             QDialog {
-                background-color: #0c0c0c;
-                color: #e0e0e0;
+                background-color: #0a0a0a;
+                color: #ffffff;
             }
             QTabWidget::pane {
-                border: 1px solid #222;
-                background: #111111;
-                border-radius: 4px;
-                top: -1px;
-            }
-            QTabWidget {
-                background: #0c0c0c;
+                border: none;
+                background: transparent;
+                margin-top: 10px;
             }
             QTabBar::tab {
-                background: #1a1a1a;
-                color: #777;
-                padding: 12px 30px;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                margin-right: 2px;
+                background: transparent;
+                color: #555;
+                padding: 10px 20px;
+                margin-right: 15px;
                 font-family: 'Inter', sans-serif;
                 font-size: 11px;
-                font-weight: 600;
-                border: 1px solid #222;
-                border-bottom: none;
+                font-weight: 500;
+                border-bottom: 2px solid transparent;
             }
             QTabBar::tab:selected {
-                background: #111111;
                 color: #00a3ff;
                 border-bottom: 2px solid #00a3ff;
             }
             QTabBar::tab:hover:!selected {
-                color: #bbb;
-                background: #222;
+                color: #888;
             }
             
             QFrame.SectionFrame {
-                background-color: #161616;
-                border: 1px solid #252525;
-                border-radius: 6px;
-                padding: 15px;
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                margin-bottom: 30px;
             }
             
             QLabel.SectionTitle {
-                color: #555;
-                font-size: 10px;
-                font-weight: bold;
-                letter-spacing: 1.5px;
+                color: #333;
+                font-size: 9px;
+                font-weight: 800;
+                letter-spacing: 2px;
                 text-transform: uppercase;
-                margin-bottom: 10px;
+                margin-bottom: 20px;
             }
             
             QLabel.ControlLabel {
-                color: #ccc;
+                color: #999;
                 font-size: 11px;
             }
             
             QComboBox, QSpinBox {
-                background-color: #1a1a1a;
-                border: 1px solid #333;
+                background-color: #111;
+                border: 1px solid #1a1a1a;
                 border-radius: 4px;
-                color: #fff;
-                padding: 6px 12px;
-                min-width: 180px;
+                color: #eee;
+                padding: 8px 12px;
+                min-width: 200px;
+                font-size: 11px;
             }
             QComboBox:hover, QSpinBox:hover {
-                border-color: #444;
+                border-color: #222;
+                background-color: #141414;
             }
             QComboBox::drop-down {
                 border: none;
             }
             
             QCheckBox {
-                color: #aaa;
+                color: #777;
                 font-size: 11px;
-                spacing: 10px;
+                spacing: 12px;
             }
             QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-                background-color: #1a1a1a;
-                border: 1px solid #444;
-                border-radius: 3px;
+                width: 14px;
+                height: 14px;
+                background-color: #0a0a0a;
+                border: 1px solid #222;
+                border-radius: 2px;
             }
             QCheckBox::indicator:checked {
                 background-color: #00a3ff;
@@ -105,28 +98,27 @@ class SettingsDialog(QDialog):
             }
             
             QPushButton#SaveBtn {
-                background-color: #00a3ff;
-                color: black;
+                background-color: #ffffff;
+                color: #000000;
                 border: none;
                 border-radius: 4px;
-                padding: 10px 30px;
-                font-weight: bold;
-                font-size: 12px;
+                padding: 10px 35px;
+                font-weight: 700;
+                font-size: 11px;
             }
             QPushButton#SaveBtn:hover {
-                background-color: #00c3ff;
+                background-color: #dddddd;
             }
             
             QPushButton#CancelBtn {
                 background-color: transparent;
-                color: #777;
-                border: 1px solid #333;
-                border-radius: 4px;
-                padding: 10px 25px;
+                color: #444;
+                border: none;
+                padding: 10px 20px;
+                font-size: 11px;
             }
             QPushButton#CancelBtn:hover {
-                color: white;
-                background-color: #222;
+                color: #888;
             }
         """)
 

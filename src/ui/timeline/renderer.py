@@ -28,7 +28,7 @@ class TimelineRenderer:
 
     def _draw_track_dividers(self, painter):
         current_y = 0
-        painter.setPen(QPen(Qt.black, 1))
+        painter.setPen(QPen(QColor(45, 45, 45, 80), 1))
         for height in self.model.track_heights:
             painter.drawLine(0, current_y + height - 1, self.width(), current_y + height - 1)
             current_y += height

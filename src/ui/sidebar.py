@@ -24,7 +24,8 @@ class TimecodeHeader(QFrame):
         p.setRenderHint(QPainter.Antialiasing)
         
         # Fondo oscuro Pro
-        p.fillRect(self.rect(), QColor("#222222"))
+        p.fillRect(self.rect(), QColor("#111111"))
+
         
         # TIMECODE GIGANTE (White and Right Aligned)
         p.setPen(QPen(Qt.white, 1))
@@ -43,9 +44,10 @@ class TimecodeHeader(QFrame):
         draw_rect = self.rect().adjusted(0, 0, -10, 0)
         p.drawText(draw_rect, Qt.AlignRight | Qt.AlignVCenter, self._current_tc)
         
-        # Línea inferior divisoria
-        p.setPen(QPen(QColor("#444444"), 1))
+        # Línea inferior divisoria (sutil)
+        p.setPen(QPen(QColor("#333333"), 1))
         p.drawLine(0, self.height()-1, self.width(), self.height()-1)
+
 
 class SidebarPanel(QWidget):
     def __init__(self, model, timeline=None):
@@ -75,14 +77,16 @@ class SidebarPanel(QWidget):
         self.scroll.setStyleSheet("""
             QScrollArea { 
                 border: 0px;
-                border-right: 1px solid #000;
                 margin: 0px;
                 padding: 0px;
                 background: #111111;
             }
+
             QWidget {
                 background: #111111;
             }
+
+
             QScrollBar:vertical { width: 0px; }
         """)
 
@@ -96,7 +100,9 @@ class SidebarPanel(QWidget):
         
         self.empty_area = QFrame()
         self.empty_area.setMinimumHeight(2000)
-        self.empty_area.setStyleSheet("background-color: #111111; border: none;") # Darkest contrast
+        self.empty_area.setStyleSheet("background-color: #111111; border: none;") # Seamless dark
+
+
         self.empty_area.setContentsMargins(0, 0, 0, 0)
         self.track_layout.addWidget(self.empty_area)
 
@@ -110,7 +116,9 @@ class SidebarPanel(QWidget):
         # FOOTER
         self.footer = QFrame()
         self.footer.setFixedHeight(35)
-        self.footer.setStyleSheet("background-color: #1e1e1e; border-top: 1px solid #333333;")
+        self.footer.setStyleSheet("background-color: #111111; border-top: 1px solid #333333;")
+
+
         self.footer.setContentsMargins(0, 0, 0, 0)
         f_layout = QHBoxLayout(self.footer)
         f_layout.setContentsMargins(10, 0, 10, 0)
@@ -259,7 +267,9 @@ class TrackControlWidget(QFrame):
         p.setRenderHint(QPainter.Antialiasing)
         is_selected = self.index in self.sidebar.model.selected_tracks
         # Use a slightly lighter gray for the track itself to pop against the #111 sidebar
-        p.fillRect(self.rect(), QColor('#748a91') if is_selected else QColor('#1e1e1e'))
+        p.fillRect(self.rect(), QColor('#748a91') if is_selected else QColor('#111111'))
+
+
 
         
         # Franja lateral (Refined Maroon for Video, Teal for Audio)
@@ -304,9 +314,10 @@ class TrackControlWidget(QFrame):
             # Numbers removed per user request (12 24 36 48)
             pass
         
-        # Borde inferior (Coincide con el del TimelinePanel)
-        p.setPen(QPen(Qt.black, 1))
+        # Borde inferior (Sutil, para que no parezca un recuadro feo)
+        p.setPen(QPen(QColor(45, 45, 45, 80), 1))
         p.drawLine(0, self.height()-1, self.width(), self.height()-1)
+
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

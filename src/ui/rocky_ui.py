@@ -50,8 +50,8 @@ class AudioPlayer(QIODevice):
         format.setSampleType(QAudioFormat.Float)
         
         self.output = QAudioOutput(format)
-        # Increase internal buffer to 200ms to handle OS scheduling jitters
-        self.output.setBufferSize(int(sample_rate * channels * 4 * 0.2)) 
+        # Reduced buffer to 100ms for lower latency response to rate changes
+        self.output.setBufferSize(int(sample_rate * channels * 4 * 0.1)) 
         self.open(QIODevice.ReadOnly)
         self.output.start(self)
 
@@ -109,6 +109,30 @@ class AudioWorker(QThread):
         self.last_audio_render_time = -1.0
         self.fps = 30.0
 
+    def _resample_stereo(self, data, target_len):
+        if data is None or data.size == 0:
+            return data
+        
+        current_len = data.size // 2
+        if current_len == target_len or target_len <= 0:
+            return data
+            
+        # Indices for interpolation
+        old_indices = np.linspace(0, current_len - 1, current_len)
+        new_indices = np.linspace(0, current_len - 1, target_len)
+        
+        # Split, Interp, and Re-interleave
+        l_chan = data[0::2]
+        r_chan = data[1::2]
+        
+        new_l = np.interp(new_indices, old_indices, l_chan).astype(np.float32)
+        new_r = np.interp(new_indices, old_indices, r_chan).astype(np.float32)
+        
+        resampled = np.empty(target_len * 2, dtype=np.float32)
+        resampled[0::2] = new_l
+        resampled[1::2] = new_r
+        return resampled
+
     def run(self):
         self.running = True
         while self.running:
@@ -117,35 +141,52 @@ class AudioWorker(QThread):
                 continue
 
             current_buffer_ms = self.player.get_buffer_duration_ms()
-            # Mantenemos un buffer mucho más agresivo (mínimo 1s, objetivo 2s)
-            if current_buffer_ms < 1000:
-                # Calculamos cuánto falta para llegar a 2000ms
-                missing_ms = 2000 - current_buffer_ms
-                missing_duration = missing_ms / 1000.0
-
+            
+            # Use shared playback rate
+            rate = getattr(self.model.blueline, 'playback_rate', 1.0)
+            
+            # Reducimos drásticamente el buffer para reaccionar rápido (Objetivo: 300ms)
+            if current_buffer_ms < 150:
+                missing_ms = 300 - current_buffer_ms
+                missing_duration = missing_ms / 1000.0 # Physical time to fill
                 
                 try:
-                    # Usamos el conteo de muestras para el tiempo exacto
                     if not hasattr(self.model, 'audio_samples_rendered'):
                         self.model.audio_samples_rendered = 0
                         
                     render_start_time = self.model.audio_samples_rendered / 44100.0
                     
-                    # Protect engine during render
-                    locker = QMutexLocker(self.player.app_engine_lock) 
-                    audio_extra = self.engine.render_audio(render_start_time, missing_duration)
-                    del locker # Release immediately
+                    # SCALE timeline duration by rate
+                    # If we need 0.5s of real audio but playing at 2x, we need 1.0s of content
+                    content_duration = missing_duration * rate
                     
-                    if audio_extra is not None and audio_extra.size > 0:
-                        self.player.write_samples(audio_extra)
-                        self.model.audio_samples_rendered += (audio_extra.size // 2)
+                    if content_duration > 0:
+                        locker = QMutexLocker(self.player.app_engine_lock) 
+                        audio_content = self.engine.render_audio(render_start_time, content_duration)
+                        del locker
+                        
+                        if audio_content is not None and audio_content.size > 0:
+                            # Resample timeline content to fit physical time
+                            target_sample_count = int(missing_duration * 44100)
+                            
+                            if rate != 1.0:
+                                audio_final = self._resample_stereo(audio_content, target_sample_count)
+                            else:
+                                audio_final = audio_content
+                            
+                            self.player.write_samples(audio_final)
+                            # Update tracking based on TIMELINE time consumed
+                            self.model.audio_samples_rendered += int(content_duration * 44100)
+                    else:
+                        # If rate is 0, we just wait
+                        pass
+                        
                 except Exception as e:
-
                     print(f"AudioWorker Error: {e}")
             
-            self.msleep(20) # Más agresivo para evitar underruns
+            self.msleep(20)
 
-    def start_playback(self, start_time, fps):
+    def start_playback(self, start_time, fps, rate=1.0):
         self.fps = fps
         self.player.clear_buffer()
         # Convertimos el tiempo inicial a muestras exactas
@@ -248,7 +289,10 @@ class RockyApp(QMainWindow):
         super().__init__()
         self.model = model
         self.engine_lock = QMutex() # Protection for concurrent C++/Python access
+        self.playback_rate = 1.0
+        self.model.blueline.playback_rate = 1.0
         self.setWindowTitle("Rocky Video Editor")
+
         self.initialize_engine()
 
         self.initialize_ui_components()
@@ -362,7 +406,7 @@ class RockyApp(QMainWindow):
         """Standardizes the interface construction following Vegas Pro aesthetics."""
         self.setWindowTitle("Rocky Video Editor Pro")
         self.resize(1200, 850)
-        self.setStyleSheet("background-color: #333333; color: #ffffff;") 
+        self.setStyleSheet("background-color: #111111; color: #ffffff;") 
         
         # Central widget and main layout
         central_widget = QWidget()
@@ -391,7 +435,8 @@ class RockyApp(QMainWindow):
         
         # Splitter styling (Universal)
         self.main_vertical_splitter.setHandleWidth(1)
-        self.main_vertical_splitter.setStyleSheet("QSplitter::handle { background-color: #1a1a1a; }")
+        self.main_vertical_splitter.setStyleSheet("QSplitter::handle { background-color: transparent; }")
+
 
         # Establecer tamaños iniciales (Upper: mayor protagonismo, Lower: más compacto)
         self.main_vertical_splitter.setSizes([650, 350])
@@ -434,10 +479,12 @@ class RockyApp(QMainWindow):
         self.top_splitter.addWidget(self.viewer)
         self.top_splitter.addWidget(self.master_meter)
         
-        self.top_splitter.setStretchFactor(0, 1) # Asset Tabs (General/Media)
-        self.top_splitter.setStretchFactor(1, 2) # Viewer
+        self.top_splitter.setStretchFactor(0, 2) # Asset Tabs (General/Media) - More prominent
+        self.top_splitter.setStretchFactor(1, 1) # Viewer
         self.top_splitter.setStretchFactor(2, 0) # Master Meter
 
+        # Set explicit initial hierarchy (Asset Tabs: 600px, Viewer: 500px, Meter: 100px)
+        self.top_splitter.setSizes([600, 500, 100])
         
         layout.addWidget(self.top_splitter)
         return container
@@ -588,6 +635,9 @@ class RockyApp(QMainWindow):
         self.viewer.btn_rewind.clicked.connect(lambda: self.timeline_widget.update_playhead_to_x(0))
         self.viewer.btn_play_pause.clicked.connect(self.toggle_play)
         self.viewer.btn_fullscreen.clicked.connect(self._toggle_fullscreen_viewer)
+        self.viewer.slider_rate.valueChanged.connect(self.on_playback_rate_changed)
+        self.viewer.slider_rate.sliderReleased.connect(self.on_playback_rate_released)
+
 
         # Asset Tabs
         self.asset_tabs.resolution_changed.connect(self.on_resolution_changed)
@@ -726,27 +776,32 @@ class RockyApp(QMainWindow):
 
     def on_render(self):
         """
-        Inicia el proceso de exportación final del video.
+        Inicia el proceso de exportación final del video con selección de parámetros pro.
         """
+        from .export_dialog import ExportDialog
+        dlg = ExportDialog(self)
+        if not dlg.exec_():
+            return
+            
+        config = dlg.get_selected_config()
+        
         output_path, _ = QFileDialog.getSaveFileName(self, "Exportar Video", "video_final.mp4", "MPEG-4 (*.mp4)")
         if not output_path:
             return
 
         # Ensure we render with High Quality (Originals)
         if self.toolbar.btn_proxy.isChecked():
-            print("Force-disabling Proxy Mode for Rendering...")
             self.toolbar.btn_proxy.setChecked(False)
-            self.on_proxy_toggle() # Manually trigger the rebuild/color update logic
+            self.on_proxy_toggle() 
 
-        # Parámetros del proyecto
         total_frames = self.model.get_max_frame()
         if total_frames <= 0:
             QMessageBox.warning(self, "Renderizar", "El timeline está vacío.")
             return
 
         active_fps = self.timeline_widget.get_fps()
-        # Nota: Usamos la resolución actual del engine
-        width, height = 1280, 720 # Default
+        render_w = config["width"]
+        render_h = config["height"]
 
         # Detener reproducción si está activa
         if self.model.blueline.playing:
@@ -758,8 +813,9 @@ class RockyApp(QMainWindow):
         self.prog_dialog.setWindowModality(Qt.WindowModal)
         self.prog_dialog.setMinimumDuration(0)
         
-        # Crear y configurar Worker
-        self.render_worker = RenderWorker(self.engine, output_path, total_frames, active_fps, width, height)
+        # Crear y configurar Worker con la resolución elegida
+        self.render_worker = RenderWorker(self.engine, output_path, total_frames, active_fps, render_w, render_h)
+
         self.render_worker.progress.connect(self.prog_dialog.setValue)
         self.render_worker.finished.connect(self._on_render_finished)
         self.render_worker.error.connect(self._on_render_error)
@@ -787,19 +843,56 @@ class RockyApp(QMainWindow):
     def toggle_play(self):
         """Toggles the playback state of the project blueline."""
         self.model.blueline.playing = not self.model.blueline.playing
-        if not self.model.blueline.playing:
-            self.audio_worker.stop_playback()
-        else:
+        # If it's very close to 1.0, snap it
+        if 0.95 < self.playback_rate < 1.05:
+            self.playback_rate = 1.0
+            
+        self.model.blueline.playback_rate = self.playback_rate
+        self.status_label.setText(f"Velocidad: {self.playback_rate:.1f}x")
+        
+        # Update playback timer interval if playing.
+        if self.model.blueline.playing:
+            self.playback_timer.setInterval(int(16 / max(0.1, self.playback_rate)))
+            
             active_fps = self.timeline_widget.get_fps()
             # Capturamos el estado inicial para el Reloj Maestro
             self.playback_start_frame = self.model.blueline.playhead_frame
             self.playback_start_wall_time = time.perf_counter()
             
             start_time = self.model.blueline.playhead_frame / active_fps
-            self.audio_worker.start_playback(start_time, active_fps)
+            self.audio_worker.start_playback(start_time, active_fps, self.playback_rate)
+        else:
+            self.audio_worker.stop_playback()
 
+
+    def on_playback_rate_changed(self, value):
+        """Dynamic playback speed control (Scrubbing/Shuttle)."""
+        new_rate = value / 100.0
+        self.viewer.lbl_rate.setText(f"{new_rate:.1f}x")
+        
+        if self.model.blueline.playing:
+            # Re-anclamos el reloj maestro para evitar saltos al cambiar la velocidad
+            active_fps = self.timeline_widget.get_fps()
+            elapsed_real_time = time.perf_counter() - self.playback_start_wall_time
+            current_frame = self.playback_start_frame + (elapsed_real_time * active_fps * self.playback_rate)
+            
+            self.playback_start_frame = current_frame
+            self.playback_start_wall_time = time.perf_counter()
+            
+            # IMMEDIATELY clear the audio buffer to apply the new rate without lag
+            self.audio_player.clear_buffer()
+            # Reset the rendered samples tracker to current timeline position so worker starts fresh
+            self.model.audio_samples_rendered = int((current_frame / active_fps) * 44100)
+        
+        self.playback_rate = new_rate
+        self.model.blueline.playback_rate = new_rate
+
+    def on_playback_rate_released(self):
+        """Spring-loaded reset: Returns to 1.0x speed."""
+        self.on_playback_rate_changed(100) # Force 1.0x
 
     def on_playback_tick(self):
+
         """
         Main execution pulse for project playback.
         Uses a Wall-Clock Master Sync to prevent A/V drift.
@@ -811,7 +904,8 @@ class RockyApp(QMainWindow):
         
         # RELOJ MAESTRO: Calculamos el tiempo transcurrido real desde el inicio
         elapsed_real_time = time.perf_counter() - self.playback_start_wall_time
-        current_frame = self.playback_start_frame + (elapsed_real_time * active_fps)
+        current_frame = self.playback_start_frame + (elapsed_real_time * active_fps * self.playback_rate)
+
 
         
         # 1. Synchronize UI (Playhead and Timeline)

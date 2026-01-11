@@ -1,4 +1,5 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton, QSlider
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QImage, QPixmap
 
@@ -17,10 +18,12 @@ class ViewerPanel(QWidget):
         self.setObjectName("ViewerPanel")
         self.setStyleSheet("""
             #ViewerPanel {
-                background-color: #1a1a1a;
-                border-left: 1px solid #000000;
+                background-color: #111111;
+                border: none;
             }
+
         """)
+
 
 
         
@@ -44,7 +47,8 @@ class ViewerPanel(QWidget):
 
     def _create_rendering_surface(self) -> QFrame:
         container = QFrame()
-        container.setStyleSheet("background-color: #000000; border: 1px solid #333333;")
+        container.setStyleSheet("background-color: #000000; border: none;")
+
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         
@@ -60,7 +64,9 @@ class ViewerPanel(QWidget):
     def _create_controls_bar(self) -> QFrame:
         bar = QFrame()
         bar.setFixedHeight(45)
-        bar.setStyleSheet("background-color: #1e1e1e; border-bottom: 1px solid #333333;")
+        bar.setStyleSheet("background-color: #111111; border: none;")
+
+
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(10, 0, 10, 0)
         layout.setAlignment(Qt.AlignCenter)
@@ -90,6 +96,44 @@ class ViewerPanel(QWidget):
         self.btn_play_pause = QPushButton("▶")
         self.btn_fullscreen = QPushButton("⛶")
         
+        # Rate Control (Shuttle)
+        self.rate_container = QWidget()
+        rate_layout = QHBoxLayout(self.rate_container)
+        rate_layout.setContentsMargins(15, 0, 15, 0)
+        rate_layout.setSpacing(8)
+        
+        self.lbl_rate = QLabel("1.0x")
+        self.lbl_rate.setStyleSheet("color: #888; font-family: 'Inter'; font-size: 10px; font-weight: bold; min-width: 30px;")
+        
+        self.slider_rate = QSlider(Qt.Horizontal)
+        self.slider_rate.setRange(20, 300) # 0.2x to 3.0x
+        self.slider_rate.setValue(100)      # 1.0x
+        self.slider_rate.setFixedWidth(100)
+        self.slider_rate.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #333;
+                height: 3px;
+                background: #111;
+                margin: 2px 0;
+                border-radius: 1px;
+            }
+            QSlider::handle:horizontal {
+                background: #00a3ff;
+                border: 1px solid #00a3ff;
+                width: 10px;
+                height: 10px;
+                margin: -4px 0;
+                border_radius: 5px;
+            }
+        """)
+        
+        # Spring-loaded behavior: Returns to 1.0x on release
+        self.slider_rate.sliderReleased.connect(lambda: self._reset_rate())
+        
+        rate_layout.addWidget(self.lbl_rate)
+        rate_layout.addWidget(self.slider_rate)
+
+        
         # Rewind Button (Go to Start)
         self.btn_rewind.setFixedSize(32, 32)
         self.btn_rewind.setToolTip("Ir al inicio")
@@ -108,10 +152,16 @@ class ViewerPanel(QWidget):
         layout.addStretch()
         layout.addWidget(self.btn_rewind)
         layout.addWidget(self.btn_play_pause)
+        layout.addWidget(self.rate_container) # Insert between play and fullscreen
         layout.addWidget(self.btn_fullscreen)
         layout.addStretch()
             
         return bar
+
+    def _reset_rate(self):
+        self.slider_rate.setValue(100)
+        self.lbl_rate.setText("1.0x")
+
 
     def _create_info_panel(self) -> QFrame:
         panel = QFrame()

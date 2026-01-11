@@ -18,7 +18,7 @@ CLIP_HEADER_HEIGHT = 20
 TAG_MARGIN = 15
 
 # Color Palette
-BG_COLOR = QColor("#242424")
+BG_COLOR = QColor("#111111")
 GRID_COLOR = QColor(255, 255, 255, 80) 
 HOVER_CURSOR_COLOR = QColor("#ffffff")
 
