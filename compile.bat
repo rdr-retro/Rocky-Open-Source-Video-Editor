@@ -24,7 +24,7 @@ pip install setuptools pybind11
 if exist "requirements.txt" (
     pip install -r requirements.txt
 ) else (
-    pip install PyQt5==5.15.10 numpy
+    pip install PySide6 numpy
 )
 
 REM Compile C++ core
