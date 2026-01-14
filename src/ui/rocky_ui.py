@@ -1093,6 +1093,14 @@ class RockyApp(QMainWindow):
             self.audio_worker.start_playback(start_time, active_fps, self.playback_rate)
         else:
             self.audio_worker.stop_playback()
+            
+            # Vegas Style: Return to start position on stop
+            if hasattr(self, 'playback_start_frame'):
+                self.model.blueline.set_playhead_frame(self.playback_start_frame)
+                fps = self.timeline_widget.get_fps()
+                tc = self.model.format_timecode(self.playback_start_frame, fps)
+                self.on_time_changed(self.playback_start_frame / fps, int(self.playback_start_frame), tc, True)
+                self.timeline_widget.update()
 
 
     def on_playback_rate_changed(self, value):
@@ -1139,7 +1147,7 @@ class RockyApp(QMainWindow):
 
         
         # 1. Synchronize UI (Playhead and Timeline)
-        playhead_screen_x = self.timeline_widget.update_playhead_position(current_frame)
+        playhead_screen_x = self.timeline_widget.update_playhead_position(current_frame, forced=False)
         self.auto_scroll_playhead(playhead_screen_x)
         
         # 2. Synchronize Engine (Atomic Evaluation)
@@ -1167,6 +1175,11 @@ class RockyApp(QMainWindow):
             w.update()
         
         self.timeline_ruler.update() # Ensure ruler handle moves
+        
+        # If seek is forced while playing (manual seek during playback), update start reference
+        if forced and self.model.blueline.playing:
+             self.playback_start_frame = frame_index
+             self.playback_start_wall_time = time.perf_counter()
         
         locker = QMutexLocker(self.engine_lock)
         rendered_frame = self.engine.evaluate(timestamp)

@@ -950,10 +950,8 @@ class SimpleTimeline(QWidget):
         frame = time_seconds * self.get_fps()  # Keep as float!
         self.model.blueline.set_playhead_frame(frame)
         
-        # Calculate proper timecode string including frames
-        tc = self.model.format_timecode(frame, self.get_fps())
-        self.time_updated.emit(time_seconds, int(frame), tc, True)
-        self.update()
+        # Reuse logic to update playhead position and emit signals
+        self.update_playhead_position(frame, forced=True)
     
     def _finish_proxy_sim(self, clip):
         """Simulate proxy generation completion provided clip still exists."""
@@ -961,11 +959,12 @@ class SimpleTimeline(QWidget):
             clip.proxy_status = 2 # Ready
             self.update()
     
-    def update_playhead_position(self, frame_index):
+    def update_playhead_position(self, frame_index, forced=True):
         """Update playhead to specific frame (can be float)."""
         self.model.blueline.set_playhead_frame(frame_index) # No casting to int
         time_seconds = frame_index / self.get_fps()
-        self.time_updated.emit(time_seconds, int(frame_index), "00:00:00", True)
+        tc = self.model.format_timecode(frame_index, self.get_fps())
+        self.time_updated.emit(time_seconds, int(frame_index), tc, forced)
         self.update()
         return frame_index * self.pixels_per_second / self.get_fps() # Return float screen x
     
