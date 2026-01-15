@@ -1,37 +1,64 @@
 #!/bin/bash
-# Rocky Video Editor - Compile Script for macOS/Linux
+# Rocky Video Editor - Robust Compile Script
+# Supports: macOS, Linux
 
 echo "========================================"
-echo "  Rocky Video Editor - Compilación"
+echo "  Rocky Video Editor - Build System"
 echo "========================================"
-echo ""
 
-# Check if venv exists
+# 1. System Dependency Check
+OS="$(uname)"
+echo "Detected OS: $OS"
+
+if [ "$OS" == "Darwin" ]; then
+    # macOS
+    if ! command -v brew &> /dev/null; then
+        echo "Tip: Homebrew is recommended for dependency management (https://brew.sh)"
+    fi
+    
+    if ! command -v clang++ &> /dev/null; then
+        echo "Installing Command Line Tools..."
+        xcode-select --install
+    fi
+    
+    # Check for FFmpeg via brew if possible
+    if command -v brew &> /dev/null; then
+        echo "Checking for FFmpeg libraries..."
+        brew install ffmpeg pkg-config
+    fi
+else
+    # Linux (assuming Debian/Ubuntu)
+    echo "Checking for Linux build tools..."
+    sudo apt-get update
+    sudo apt-get install -y build-essential python3-dev libavformat-dev libavcodec-dev libswscale-dev libavutil-dev libswresample-dev
+fi
+
+# 2. Python Environment
 if [ ! -d "venv" ]; then
-    echo "Creando entorno virtual..."
+    echo "Creating virtual environment..."
     python3 -m venv venv
 fi
-
-# Activate venv
 source venv/bin/activate
 
-# Upgrade pip
+echo "Upgrading pip and installing requirements..."
 python -m pip install --upgrade pip
+pip install -r requirements.txt
 
-# Install dependencies
-echo "Instalando dependencias..."
-pip install setuptools pybind11
-if [ -f "requirements.txt" ]; then
-    pip install -r requirements.txt
-else
-    pip install PySide6 numpy
-fi
-
-# Compile C++ core
-echo ""
-echo "Compilando motor C++..."
+# 3. Core Engine Compilation
+echo "Compiling Rocky Core C++..."
 python setup.py build_ext --inplace
 
+# 4. Plugin Compilation
+if [ -d "plugins" ]; then
+    echo "Compiling OFX Plugins..."
+    cd plugins
+    make clean
+    make
+    cd ..
+fi
+
 echo ""
-echo "Compilación completada!"
-echo "Ejecuta ./run.sh para iniciar el editor."
+echo "========================================"
+echo "  COMPILATION SUCCESSFUL"
+echo "========================================"
+echo "Run the application with: ./run.sh"

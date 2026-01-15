@@ -1307,6 +1307,9 @@ class SimpleTimeline(QWidget):
         # Fix: Use partial to robustly bind the clip to the slot (avoids lambda garbage collection issues)
         action_delete.triggered.connect(partial(self.delete_clip, clip))
 
+        action_split = menu.addAction("Dividir")
+        action_split.triggered.connect(partial(self.split_clip_at_pos, clip, pos))
+
         menu.exec(self.mapToGlobal(pos))
         
     def delete_clip(self, clip=None):
@@ -1361,6 +1364,61 @@ class SimpleTimeline(QWidget):
             self.structure_changed.emit()
             self.updateGeometry()
             self.repaint() # FORCE immediate repaint
+
+    def split_clip_at_pos(self, clip, pos):
+        """Calculate split frame and call split_clip."""
+        if not clip: return
+        split_frame = (pos.x() / self.pixels_per_second) * self.get_fps()
+        self.split_clip(clip, split_frame)
+
+    def split_clip(self, clip, split_frame):
+        """Logic to split a clip into two at the given frame index."""
+        if not clip: return
+        
+        # Ensure split point is within clip bounds
+        start = clip.start_frame
+        end = start + clip.duration_frames
+        
+        if split_frame <= start or split_frame >= end:
+            print(f"Split rejected: Frame {split_frame} is outside clip {start}-{end}")
+            return
+
+        # Calculate offset
+        offset_frames = int(split_frame - start)
+        if offset_frames < 2 or (clip.duration_frames - offset_frames) < 2:
+            # Avoid too tiny clips
+            print("Split rejected: Resulting clips would be too short.")
+            return
+
+        # Create copy for the second half
+        new_clip = clip.copy()
+        
+        # Update first half (original)
+        clip.duration_frames = offset_frames
+        # Clamp fades
+        if clip.fade_out_frames > clip.duration_frames:
+            clip.fade_out_frames = clip.duration_frames
+        
+        # Update second half (new)
+        new_clip.start_frame = start + offset_frames
+        new_clip.duration_frames -= offset_frames
+        new_clip.source_offset_frames += offset_frames
+        # Clamp fades
+        if new_clip.fade_in_frames > new_clip.duration_frames:
+            new_clip.fade_in_frames = new_clip.duration_frames
+            
+        # UI state: Select the new clip part
+        for c in self.model.clips:
+            c.selected = False
+        new_clip.selected = True
+        
+        # Add to model
+        self.model.add_clip(new_clip)
+        
+        # Notify
+        self.structure_changed.emit()
+        self.update()
+        print(f"Clip '{clip.name}' split at frame {split_frame}")
 
     def timeToScreen(self, time_in_seconds):
         """Convert time to screen x coordinate (float)."""

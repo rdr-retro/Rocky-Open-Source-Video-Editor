@@ -1,26 +1,23 @@
 @echo off
-REM Rocky Video Editor - Run Script for Windows
+REM Rocky Video Editor - Windows Run Script
 
-echo ========================================
-echo   Rocky Video Editor
-echo ========================================
-echo.
-
-REM Check if venv exists
 if not exist "venv" (
-    echo ERROR: Entorno virtual no encontrado.
-    echo Ejecuta compile.bat primero.
-    pause
-    exit /b 1
+    echo Engine not found. Running compilation...
+    call compile.bat
 )
 
-REM Activate venv
 call venv\Scripts\activate.bat
 
-REM Set environment
+REM Check for compiled module
+if not exist "rocky_core*.pyd" (
+    if not exist "rocky_core*.so" (
+        echo Compiled engine not found. Compiling now...
+        call compile.bat
+    )
+)
+
 set PYTHONPATH=%CD%;%PYTHONPATH%
 
-REM Launch application
+echo Starting Rocky Video Editor...
 python -m src.ui.rocky_ui
-
 pause

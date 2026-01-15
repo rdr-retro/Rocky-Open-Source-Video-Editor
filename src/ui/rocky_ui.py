@@ -437,70 +437,43 @@ class RockyApp(QMainWindow):
                 "You can edit videos, but 'Export' and 'Proxy Generation' features will be disabled or fail.\n"
                 "Please install FFmpeg to use these features.")
 
-    def on_waveform_finished(self, clip, peaks):
-        """Callback when the C++ engine finishes scanning the audio file."""
-        clip.waveform = peaks
-        clip.waveform_computing = False
-        self.timeline_widget.update()
-        
-        # Cleanup worker reference
-        sender = self.sender()
-        if hasattr(self, "_waveform_workers") and sender in self._waveform_workers:
-            self._waveform_workers.remove(sender)
-            sender.deleteLater()
-
-    def on_thumbnails_finished(self, clip, thumbnails):
-        """Callback when thumbnails are ready."""
-        clip.thumbnails = thumbnails
-        clip.thumbnails_computing = False
-        self.timeline_widget.update()
-        
-        # Cleanup worker reference
-        sender = self.sender()
-        if hasattr(self, "_thumb_workers") and sender in self._thumb_workers:
-            self._thumb_workers.remove(sender)
-            sender.deleteLater()
 
     def cleanup_resources(self):
         """Forceful but safe cleanup of threads before app exit."""
         print("DEBUG: Cleaning up resources...", flush=True)
         
-        # 1. Stop Audio Worker (CRITICAL - must be first)
+        # 1. Stop Audio Worker (CRITICAL)
         if hasattr(self, 'audio_worker') and self.audio_worker is not None:
             print("DEBUG: Stopping AudioWorker...", flush=True)
             self.audio_worker.running = False
             self.audio_worker.requestInterruption()
-            if not self.audio_worker.wait(2000):  # 2 seconds
-                print("WARNING: AudioWorker did not stop gracefully, terminating...", flush=True)
+            if not self.audio_worker.wait(2000):
                 self.audio_worker.terminate()
+        
         if hasattr(self, 'audio_player') and self.audio_player is not None:
-            try:
-                self.audio_player.sink.stop()
-            except:
-                pass
+            try: self.audio_player.sink.stop()
+            except: pass
         
-        # 3. Stop Waveform & Thumbnail Workers
-        if hasattr(self, '_waveform_workers'):
-            for worker in self._waveform_workers:
-                worker.requestInterruption()
-                if not worker.wait(500):
-                    worker.terminate()
-                    worker.wait(200)
-        
-        if hasattr(self, '_thumb_workers'):
-            for worker in self._thumb_workers:
-                worker.requestInterruption()
-                if not worker.wait(500):
-                    worker.terminate()
-                    worker.wait(200)
-        
-        # 4. Stop Render Worker if active
+        # 2. Stop ALL active background workers (Waveform, Thumbnails, Proxies, Import)
+        if hasattr(self, "_active_workers"):
+            print(f"DEBUG: Stopping {len(self._active_workers)} background workers...", flush=True)
+            for worker in self._active_workers[:]: # Use slice to avoid modification issues
+                try:
+                    worker.requestInterruption()
+                    if not worker.wait(2000): # Increased timeout
+                        print(f"WARNING: Worker {worker} timed out, terminating...", flush=True)
+                        worker.terminate()
+                        worker.wait(500)
+                except: pass
+            self._active_workers.clear()
+            
+        # 3. Stop Render Worker if active
         if hasattr(self, 'render_worker') and self.render_worker is not None:
             if self.render_worker.isRunning():
                 self.render_worker.requestInterruption()
-                if not self.render_worker.wait(1000):
+                self.render_worker.wait(1000)
+                if self.render_worker.isRunning():
                     self.render_worker.terminate()
-                    self.render_worker.wait(500)
             
         print("DEBUG: Cleanup finished.", flush=True)
 
@@ -1408,30 +1381,6 @@ class RockyApp(QMainWindow):
         self.update_proxy_button_state()
         self.rebuild_engine()
 
-    def closeEvent(self, event):
-        """Graceful shutdown sequence for threads and resources."""
-        print("Shutting down Rocky Video Editor...")
-        
-        # 1. Stop Audio Worker
-        if hasattr(self, 'audio_worker'):
-            self.audio_worker.running = False
-            self.audio_worker.wait(1000)
-            
-        # 2. Stop Waveform & Thumbnail Workers
-        if hasattr(self, '_waveform_workers'):
-            for worker in self._waveform_workers:
-                worker.terminate()
-                worker.wait(200)
-        
-        if hasattr(self, '_thumb_workers'):
-            for worker in self._thumb_workers:
-                worker.terminate()
-                worker.wait(200)
-        
-        # 3. Stop Render Worker if active
-        if hasattr(self, 'render_worker') and self.render_worker.isRunning():
-            self.render_worker.terminate()
-            self.render_worker.wait(500)
             
         event.accept()
 

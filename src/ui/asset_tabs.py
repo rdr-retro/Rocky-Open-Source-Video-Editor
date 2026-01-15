@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, QFrame, QPushButton, QInputDialog, QLayout, QSizePolicy, QScrollArea, QDialog, QSpinBox, QComboBox, QCheckBox, QApplication
-from PySide6.QtCore import Qt, Signal, QRect, QPoint, QSize, QMimeData, QByteArray, QDataStream, QIODevice
-from PySide6.QtGui import QFont, QIcon, QDrag
+from PySide6.QtCore import Qt, Signal, QRect, QPoint, QSize, QMimeData, QByteArray, QDataStream, QIODevice, QPropertyAnimation, Property, QEasingCurve
+from PySide6.QtGui import QFont, QIcon, QDrag, QPixmap, QImage, QPainter, QColor, QPen, QLinearGradient
 import os
 import rocky_core
 
@@ -68,22 +68,45 @@ class FlowLayout(QLayout):
         lineHeight = 0
         spacing = self.spacing()
         if spacing < 0:
-            spacing = 10  # Default fallback
+            spacing = 10
 
+        line_items = []
+        
         for item in self.itemList:
             nextX = x + item.sizeHint().width() + spacing
             if nextX - spacing > rect.right() and lineHeight > 0:
+                # Finish current line
+                if not testOnly:
+                    self._align_line(line_items, rect, y, lineHeight, spacing)
+                
                 x = rect.x()
                 y = y + lineHeight + spacing
                 nextX = x + item.sizeHint().width() + spacing
                 lineHeight = 0
+                line_items = []
             
-            if not testOnly:
-                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
-            
+            line_items.append(item)
             x = nextX
             lineHeight = max(lineHeight, item.sizeHint().height())
+        
+        # Finish last line
+        if not testOnly:
+            self._align_line(line_items, rect, y, lineHeight, spacing)
+            
         return y + lineHeight - rect.y()
+
+    def _align_line(self, items, rect, y, lineHeight, spacing):
+        """Centers items in the current row."""
+        if not items:
+            return
+            
+        total_w = sum(item.sizeHint().width() for item in items) + (len(items) - 1) * spacing
+        offset_x = (rect.width() - total_w) // 2
+        
+        curr_x = rect.x() + offset_x
+        for item in items:
+            item.setGeometry(QRect(QPoint(curr_x, y), item.sizeHint()))
+            curr_x += item.sizeHint().width() + spacing
 
 class DraggableEffectButton(QPushButton):
     def __init__(self, name, description, plugin_path=""):
@@ -92,34 +115,111 @@ class DraggableEffectButton(QPushButton):
         self.description = description
         self.plugin_path = plugin_path
         self._drag_start_pos = None
+        self._sweep_pos = 0.0
 
-        self.setFixedSize(120, 100)
-        self.setStyleSheet("""
-            QPushButton {
-                background-color: #1a1a1a;
-                border: 1px solid #333;
-                border-radius: 6px;
-                text-align: center;
-            }
-            QPushButton:hover {
-                background-color: #222;
-                border-color: #00a3ff;
-            }
-        """)
+        self.setFixedSize(140, 110)
         
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Load and prepare images
+        self.base_pixmap = QPixmap("src/img/fx.png")
+        if self.base_pixmap.isNull():
+            # Fallback if image not found
+            self.base_pixmap = QPixmap(140, 80)
+            self.base_pixmap.fill(QColor("#1a1a1a"))
+        else:
+            # PROFESSIONAL SCALING: Scale to fill then crop center to avoid stretching
+            self.base_pixmap = self.base_pixmap.scaled(140, 80, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+            # Center Crop
+            crop_x = (self.base_pixmap.width() - 140) // 2
+            crop_y = (self.base_pixmap.height() - 80) // 2
+            self.base_pixmap = self.base_pixmap.copy(crop_x, crop_y, 140, 80)
         
-        lbl_name = QLabel(name)
-        lbl_name.setStyleSheet("color: #eee; font-weight: bold; font-size: 11px; bg: transparent; border: none;")
-        lbl_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Create Inverted Version
+        img = self.base_pixmap.toImage()
+        img.invertPixels()
+        self.inverted_pixmap = QPixmap.fromImage(img)
+
+        self.anim = QPropertyAnimation(self, b"sweep_pos")
+        self.anim.setDuration(400)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self.setMouseTracking(True)
+
+    @Property(float)
+    def sweep_pos(self):
+        return self._sweep_pos
+
+    @sweep_pos.setter
+    def sweep_pos(self, value):
+        self._sweep_pos = value
+        self.update()
+
+    def enterEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self._sweep_pos)
+        self.anim.setEndValue(1.0)
+        self.anim.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self._sweep_pos)
+        self.anim.setEndValue(0.0)
+        self.anim.start()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        lbl_desc = QLabel(description)
-        lbl_desc.setStyleSheet("color: #666; font-size: 9px; bg: transparent; border: none;")
-        lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Draw Border/Background
+        is_hovered = self.underMouse()
+        bg_rect = self.rect().adjusted(1, 1, -1, -1)
         
-        layout.addWidget(lbl_name)
-        layout.addWidget(lbl_desc)
+        border_color = QColor("#00a3ff") if is_hovered else QColor("#333")
+        painter.setPen(QPen(border_color, 1.5 if is_hovered else 1))
+        painter.setBrush(QColor("#181818"))
+        painter.drawRoundedRect(bg_rect, 6, 6)
+
+        # Image Area
+        img_rect = QRect(2, 2, self.width()-4, 80)
+        
+        # Clip to rounded rect for image
+        painter.setClipPath(self._get_rounded_path(img_rect, 6))
+        
+        # 1. Base Image
+        painter.drawPixmap(img_rect, self.base_pixmap)
+
+        # 2. Inverted Reveal (Sweep)
+        if self._sweep_pos > 0:
+            reveal_w = int(img_rect.width() * self._sweep_pos)
+            source_rect = QRect(0, 0, reveal_w, 80)
+            target_rect = QRect(img_rect.x(), img_rect.y(), reveal_w, 80)
+            painter.drawPixmap(target_rect, self.inverted_pixmap, source_rect)
+            
+            # 3. Vegas Line (The Sweep Edge)
+            line_x = img_rect.x() + reveal_w
+            painter.setPen(QPen(QColor("#00a3ff"), 2))
+            painter.drawLine(line_x, img_rect.top(), line_x, img_rect.bottom())
+            
+            # Subglow for the line
+            grad = QLinearGradient(line_x - 15, 0, line_x, 0)
+            grad.setColorAt(0, QColor(0, 163, 255, 0))
+            grad.setColorAt(1, QColor(0, 163, 255, 80))
+            painter.fillRect(line_x - 15, img_rect.top(), 15, 80, grad)
+        
+        painter.setClipping(False)
+
+        # 4. Text Overlay (Bottom Area)
+        text_rect = QRect(0, 80, self.width(), 30)
+        painter.setPen(QColor("#fff" if is_hovered else "#bbb"))
+        painter.setFont(QFont("Inter", 10, QFont.Weight.Bold))
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.name)
+
+    def _get_rounded_path(self, rect, radius):
+        from PySide6.QtGui import QPainterPath
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        return path
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -141,7 +241,7 @@ class DraggableEffectButton(QPushButton):
         data_str = f"{self.name}|{self.plugin_path}"
         mime.setData("application/x-rocky-effect", QByteArray(data_str.encode('utf-8')))
         drag.setMimeData(mime)
-        pixmap = self.grab()
+        pixmap = self.grab(QRect(0, 0, self.width(), 80))
         drag.setPixmap(pixmap)
         drag.setHotSpot(event.pos())
         drag.exec(Qt.DropAction.CopyAction)
@@ -447,13 +547,18 @@ class AssetTabsPanel(QFrame):
         container.setStyleSheet("background-color: #111111;")
         main_layout = QVBoxLayout(container)
         main_layout.setContentsMargins(0, 5, 0, 0)
+        main_layout.setSpacing(0)
+
+        header = QLabel("BIBLIOTECA DE EFECTOS")
+        header.setProperty("class", "SectionHeader")
+        main_layout.addWidget(header)
         
         # Grid for Effects
         self.effects_grid = QWidget()
         self.effects_grid.setStyleSheet("background: transparent;")
         self.effects_layout = FlowLayout(self.effects_grid)
-        self.effects_layout.setContentsMargins(20, 10, 20, 10)
-        self.effects_layout.setSpacing(15)
+        self.effects_layout.setContentsMargins(20, 20, 20, 20)
+        self.effects_layout.setSpacing(25)
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

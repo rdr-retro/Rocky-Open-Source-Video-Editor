@@ -1,5 +1,6 @@
 from PySide6.QtCore import QThread, Signal
 import rocky_core
+import os
 
 class WaveformWorker(QThread):
     """Background worker to analyze audio peaks without blocking the EDT."""
@@ -14,7 +15,12 @@ class WaveformWorker(QThread):
         try:
             # SAFETY DELAY: Wait a bit to ensure main thread has finished primary probing
             self.msleep(200)
-            
+
+            if not os.path.exists(self.file_path):
+                print(f"WaveformWorker: File not found {self.file_path}")
+                self.finished.emit(self.clip, [])
+                return
+
             # Dedicated source for analysis to avoid mutex contention with playback
             src = rocky_core.VideoSource(self.file_path)
             
