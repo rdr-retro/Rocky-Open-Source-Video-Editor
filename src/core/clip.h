@@ -1,5 +1,7 @@
 #pragma once
 #include "media_source.h"
+#include <string>
+#include <vector>
 
 enum class FadeType {
     LINEAR = 0,
@@ -7,6 +9,14 @@ enum class FadeType {
     SLOW = 2,
     SMOOTH = 3,
     SHARP = 4
+};
+
+struct Effect {
+    std::string name;
+    std::string pluginPath;
+    bool enabled = true;
+    
+    Effect(std::string n, std::string p) : name(n), pluginPath(p) {}
 };
 
 struct ClipTransform {
@@ -33,6 +43,8 @@ struct Clip {
     FadeType fadeInType = FadeType::LINEAR;
     FadeType fadeOutType = FadeType::LINEAR;
     ClipTransform transform;
+    
+    std::vector<Effect> effects;
 
     Clip(std::string n, long s, long d, double o, std::shared_ptr<MediaSource> src, int ti);
 

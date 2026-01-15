@@ -1,6 +1,8 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, QFrame, QPushButton, QInputDialog, QLayout, QSizePolicy, QScrollArea, QDialog, QSpinBox, QComboBox, QCheckBox
-from PySide6.QtCore import Qt, Signal, QRect, QPoint, QSize
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, QFrame, QPushButton, QInputDialog, QLayout, QSizePolicy, QScrollArea, QDialog, QSpinBox, QComboBox, QCheckBox, QApplication
+from PySide6.QtCore import Qt, Signal, QRect, QPoint, QSize, QMimeData, QByteArray, QDataStream, QIODevice
+from PySide6.QtGui import QFont, QIcon, QDrag
+import os
+import rocky_core
 
 class FlowLayout(QLayout):
     """
@@ -82,6 +84,67 @@ class FlowLayout(QLayout):
             x = nextX
             lineHeight = max(lineHeight, item.sizeHint().height())
         return y + lineHeight - rect.y()
+
+class DraggableEffectButton(QPushButton):
+    def __init__(self, name, description, plugin_path=""):
+        super().__init__()
+        self.name = name
+        self.description = description
+        self.plugin_path = plugin_path
+        self._drag_start_pos = None
+
+        self.setFixedSize(120, 100)
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: #1a1a1a;
+                border: 1px solid #333;
+                border-radius: 6px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #222;
+                border-color: #00a3ff;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        lbl_name = QLabel(name)
+        lbl_name.setStyleSheet("color: #eee; font-weight: bold; font-size: 11px; bg: transparent; border: none;")
+        lbl_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        lbl_desc = QLabel(description)
+        lbl_desc.setStyleSheet("color: #666; font-size: 9px; bg: transparent; border: none;")
+        lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        layout.addWidget(lbl_name)
+        layout.addWidget(lbl_desc)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+        if not self._drag_start_pos:
+            return
+            
+        dist = (event.pos() - self._drag_start_pos).manhattanLength()
+        if dist < 10:
+            return
+            
+        drag = QDrag(self)
+        mime = QMimeData()
+        data_str = f"{self.name}|{self.plugin_path}"
+        mime.setData("application/x-rocky-effect", QByteArray(data_str.encode('utf-8')))
+        drag.setMimeData(mime)
+        pixmap = self.grab()
+        drag.setPixmap(pixmap)
+        drag.setHotSpot(event.pos())
+        drag.exec(Qt.DropAction.CopyAction)
 
 class CustomResolutionDialog(QDialog):
     """
@@ -359,7 +422,7 @@ class AssetTabsPanel(QFrame):
         self.tabs.addTab(self.tab_transitions, "Transiciones")
 
         # 3. Efectos
-        self.tab_effects = self._create_empty_view()
+        self.tab_effects = self._create_effects_view()
         self.tabs.addTab(self.tab_effects, "Efectos")
 
         # 4. Generadores de medios
@@ -367,6 +430,43 @@ class AssetTabsPanel(QFrame):
         self.tabs.addTab(self.tab_generators, "Generadores de medios")
 
         layout.addWidget(self.tabs)
+
+        # Load Invert Plugin
+        plugin_path = os.path.abspath("plugins/invert.ofx")
+        if os.path.exists(plugin_path):
+            print(f"Loading Invert OFX: {plugin_path}")
+            success = rocky_core.load_ofx_plugin(plugin_path)
+            if success:
+                print("Invert Plugin Loaded Successfully!")
+                self._add_effect_button("Invertir Color", "Negativo / Invertir", plugin_path=plugin_path)
+        else:
+            print(f"Invert OFX Not Found at: {plugin_path}")
+
+    def _create_effects_view(self):
+        container = QFrame()
+        container.setStyleSheet("background-color: #111111;")
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(0, 5, 0, 0)
+        
+        # Grid for Effects
+        self.effects_grid = QWidget()
+        self.effects_grid.setStyleSheet("background: transparent;")
+        self.effects_layout = FlowLayout(self.effects_grid)
+        self.effects_layout.setContentsMargins(20, 10, 20, 10)
+        self.effects_layout.setSpacing(15)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+        scroll.setWidget(self.effects_grid)
+        
+        main_layout.addWidget(scroll)
+        return container
+
+    def _add_effect_button(self, name, description, plugin_path=""):
+        btn = DraggableEffectButton(name, description, plugin_path)
+        self.effects_layout.addWidget(btn)
 
     def _create_general_view(self):
         container = QFrame()

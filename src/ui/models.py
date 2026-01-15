@@ -41,6 +41,40 @@ class TimelineMarker:
     color: str = "#FF9900" # Orange default
 
 @dataclass
+class Transform:
+    """Spatial properties for a clip."""
+    x: float = 0.0
+    y: float = 0.0
+    scale_x: float = 1.0
+    scale_y: float = 1.0
+    rotation: float = 0.0
+    anchor_x: float = 0.5
+    anchor_y: float = 0.5
+
+    def to_dict(self) -> dict:
+        return {
+            "x": self.x,
+            "y": self.y,
+            "scale_x": self.scale_x,
+            "scale_y": self.scale_y,
+            "rotation": self.rotation,
+            "anchor_x": self.anchor_x,
+            "anchor_y": self.anchor_y
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'Transform':
+        return cls(
+            data.get("x", 0.0),
+            data.get("y", 0.0),
+            data.get("scale_x", 1.0),
+            data.get("scale_y", 1.0),
+            data.get("rotation", 0.0),
+            data.get("anchor_x", 0.5),
+            data.get("anchor_y", 0.5)
+        )
+
+@dataclass
 class TimelineRegion:
     """
     A named time range.
@@ -101,6 +135,12 @@ class TimelineClip:
         
         # Trimming Limits
         self.source_duration_frames = -1 # -1 for images, >0 for video/audio
+        
+        # Effects (OFX Plugins)
+        self.effects = [] # List of dicts: {'name': str, 'path': str, 'enabled': bool}
+        
+        # Transform (Spatial properties for C++ engine)
+        self.transform = Transform()
 
     def to_dict(self) -> dict:
         """Serializes the clip state to a dictionary for JSON storage."""
@@ -119,7 +159,9 @@ class TimelineClip:
             "fade_out_type": self.fade_out_type.value,
             "opacity_nodes": self.opacity_nodes,
             "opacity_level": self.opacity_level,
-            "use_proxy": self.use_proxy
+            "use_proxy": self.use_proxy,
+            "effects": self.effects,
+            "transform": self.transform.to_dict()
         }
 
     @classmethod
@@ -142,6 +184,9 @@ class TimelineClip:
         clip.opacity_nodes = data.get("opacity_nodes", [])
         clip.opacity_level = data.get("opacity_level", 1.0)
         clip.use_proxy = data.get("use_proxy", False)
+        clip.effects = data.get("effects", [])
+        if "transform" in data:
+            clip.transform = Transform.from_dict(data["transform"])
         return clip
 
     def copy(self) -> 'TimelineClip':
@@ -167,6 +212,13 @@ class TimelineClip:
         new_clip.waveform_computing = self.waveform_computing
         new_clip.thumbnails = self.thumbnails[:]
         new_clip.thumbnails_computing = self.thumbnails_computing
+        new_clip.effects = [e.copy() for e in self.effects]
+        new_clip.transform = Transform(
+            self.transform.x, self.transform.y,
+            self.transform.scale_x, self.transform.scale_y,
+            self.transform.rotation,
+            self.transform.anchor_x, self.transform.anchor_y
+        )
         return new_clip
 
     # --- Blue Line / Keyframe Logic ---

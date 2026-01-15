@@ -30,6 +30,7 @@ from .asset_tabs import AssetTabsPanel
 from ..infrastructure.workers.proxy_gen import ProxyWorker
 from ..infrastructure.workers.waveform import WaveformWorker
 from ..infrastructure.workers.thumbnail import ThumbnailWorker
+from ..infrastructure.workers.import_worker import MediaImportWorker
 
 
 class AudioPlayer(QIODevice):
@@ -162,9 +163,11 @@ class AudioWorker(QThread):
                     content_duration = missing_duration * rate
                     
                     if content_duration > 0:
-                        locker = QMutexLocker(self.player.app_engine_lock) 
+                        # CRITICAL FIX: We do NOT use the Python locker here.
+                        # The C++ RockyEngine HAS its own internal std::mutex for render_audio.
+                        # Using the Python engine_lock here causes deadlocks with the GIL 
+                        # because render_audio releases the GIL internally.
                         audio_content = self.engine.render_audio(render_start_time, content_duration)
-                        del locker
                         
                         if audio_content is not None and audio_content.size > 0:
                             # Resample timeline content to fit physical time
@@ -324,6 +327,7 @@ class RockyApp(QMainWindow):
         self.model.blueline.playback_rate = 1.0
         self.setWindowTitle("Rocky Video Editor")
         self.project_path = None
+        self.media_source_cache = {} # Cache to avoid re-opening heavy 4K files
 
         if not self.initialize_engine():
             # Fatal error handled inside initialize_engine
@@ -433,6 +437,30 @@ class RockyApp(QMainWindow):
                 "You can edit videos, but 'Export' and 'Proxy Generation' features will be disabled or fail.\n"
                 "Please install FFmpeg to use these features.")
 
+    def on_waveform_finished(self, clip, peaks):
+        """Callback when the C++ engine finishes scanning the audio file."""
+        clip.waveform = peaks
+        clip.waveform_computing = False
+        self.timeline_widget.update()
+        
+        # Cleanup worker reference
+        sender = self.sender()
+        if hasattr(self, "_waveform_workers") and sender in self._waveform_workers:
+            self._waveform_workers.remove(sender)
+            sender.deleteLater()
+
+    def on_thumbnails_finished(self, clip, thumbnails):
+        """Callback when thumbnails are ready."""
+        clip.thumbnails = thumbnails
+        clip.thumbnails_computing = False
+        self.timeline_widget.update()
+        
+        # Cleanup worker reference
+        sender = self.sender()
+        if hasattr(self, "_thumb_workers") and sender in self._thumb_workers:
+            self._thumb_workers.remove(sender)
+            sender.deleteLater()
+
     def cleanup_resources(self):
         """Forceful but safe cleanup of threads before app exit."""
         print("DEBUG: Cleaning up resources...", flush=True)
@@ -441,19 +469,10 @@ class RockyApp(QMainWindow):
         if hasattr(self, 'audio_worker') and self.audio_worker is not None:
             print("DEBUG: Stopping AudioWorker...", flush=True)
             self.audio_worker.running = False
-            
-            # Request thread interruption
             self.audio_worker.requestInterruption()
-            
-            # Give it time to finish gracefully
             if not self.audio_worker.wait(2000):  # 2 seconds
                 print("WARNING: AudioWorker did not stop gracefully, terminating...", flush=True)
                 self.audio_worker.terminate()
-                self.audio_worker.wait(1000)
-            
-            print("DEBUG: AudioWorker stopped.", flush=True)
-            
-        # 2. Stop Audio Sink
         if hasattr(self, 'audio_player') and self.audio_player is not None:
             try:
                 self.audio_player.sink.stop()
@@ -834,14 +853,46 @@ class RockyApp(QMainWindow):
 
     def import_media(self, file_path, start_frame, preferred_track_idx=-1):
         """
-        Smart media importer that automates track creation and clip linking.
-        Following Sony Vegas Pro workflow: Video creates paired tracks.
+        Starts the asynchronous media import process.
         """
+        self.status_label.setText(f"Probing media: {os.path.basename(file_path)}...")
+        
+        worker = MediaImportWorker(file_path, self.timeline_widget.get_fps())
+        
+        # We need to pass the state (start_frame, preferred_track_idx) to the finish method
+        # We can use a lambda or partial to "bind" these values
+        worker.finished.connect(lambda path, dur, src: self._finish_import_logic(path, dur, src, start_frame, preferred_track_idx))
+        worker.error.connect(self._on_import_error)
+        
+        if not hasattr(self, "_active_workers"): self._active_workers = []
+        self._active_workers.append(worker)
+        worker.start()
+
+    def _on_import_error(self, path, message):
+        self.status_label.setText(f"Error importando {os.path.basename(path)}")
+        QMessageBox.warning(self, "Error de Importación", f"No se pudo cargar {path}:\n{message}")
+
+    def _finish_import_logic(self, file_path, duration, source, start_frame, preferred_track_idx):
+        """
+        Completes the import process once metadata is available from the background thread.
+        """
+        # Cleanup import worker (the sender)
+        sender = self.sender()
+        if hasattr(self, "_active_workers") and sender in self._active_workers:
+            self._active_workers.remove(sender)
+            sender.deleteLater()
+            
         from .models import TimelineClip, TrackType
         
         file_name = os.path.basename(file_path)
         ext = file_name.lower().split('.')[-1]
         
+        # Instantiate and Update Cache on the MAIN thread for stability
+        if file_path not in self.media_source_cache:
+            self.media_source_cache[file_path] = self._instantiate_source(file_path)
+        
+        source = self.media_source_cache[file_path]
+
         # Check if project was empty before this import to trigger auto-zoom
         was_empty = (len(self.model.clips) == 0)
         
@@ -849,28 +900,17 @@ class RockyApp(QMainWindow):
         is_image = ext in ["jpg", "jpeg", "png", "gif", "bmp", "webp"]
         is_video = not is_audio and not is_image
         
-        # Determine real duration for Video/Audio
         fps = self.timeline_widget.get_fps()
-        default_image_duration = int(30 * fps) # 30 Seconds as requested
-        duration = default_image_duration 
-        source_duration = 0
+        # duration and source_duration are passed from worker (in frames)
+        source_duration = duration if not is_image else -1
         
-        if not is_image:
-            temp_src = self._instantiate_source(file_path)
-            real_dur_sec = temp_src.get_duration()
-            if real_dur_sec > 0:
-                duration = int(real_dur_sec * fps)
-                source_duration = duration
-            elif real_dur_sec == 0: # Could be an error or empty file
-                duration = 300 # Fallback 10s
-                source_duration = duration
-        else:
-            # For images, source duration is "infinite" conceptually, 
-            # but we track the initial requested duration.
-            source_duration = -1 # Special value for infinite/static media
-        
+        if is_image:
+           # Default 30s for images if type is image
+           duration = int(30 * fps)
+           source_duration = -1
+
         if is_video:
-            # 1. Video Track - STRICT: Must be VIDEO type
+            # 1. Video Track
             v_track = -1
             if preferred_track_idx != -1 and preferred_track_idx < len(self.model.track_types):
                 if self.model.track_types[preferred_track_idx] == TrackType.VIDEO:
@@ -884,7 +924,7 @@ class RockyApp(QMainWindow):
             v_clip.file_path = file_path
             v_clip.source_duration_frames = source_duration
             
-            # 2. Audio Track (Vegas Pro style: usually BELOW the video track)
+            # 2. Audio Track
             a_track = -1
             self.sidebar.add_track(TrackType.AUDIO)
             a_track = len(self.model.track_types) - 1
@@ -899,24 +939,18 @@ class RockyApp(QMainWindow):
             self.model.add_clip(v_clip)
             self.model.add_clip(a_clip)
             
-            # Start asynchronous analysis
             self._start_waveform_analysis(a_clip)
             self._start_thumbnail_analysis(v_clip)
-            
-            # Start Proxy Generation
             self._trigger_proxy_generation(v_clip)
             
         else:
-            # IMAGE or AUDIO
             required_type = TrackType.AUDIO if is_audio else TrackType.VIDEO
-            
             t_idx = -1
             if preferred_track_idx != -1 and preferred_track_idx < len(self.model.track_types):
                 if self.model.track_types[preferred_track_idx] == required_type:
                     t_idx = preferred_track_idx
             
             if t_idx == -1:
-                # Create NEW track for this specific media type
                 self.sidebar.add_track(required_type)
                 t_idx = len(self.model.track_types) - 1
             
@@ -937,7 +971,13 @@ class RockyApp(QMainWindow):
              # Trigger cinematic "Zoom to Fit" animation
              QTimer.singleShot(100, self.timeline_widget.zoom_to_fit)
              
-        return duration
+        self.status_label.setText(f"Importado: {file_name}")
+        
+        # Cleanup worker
+        sender = self.sender()
+        if hasattr(self, "_import_workers") and sender in self._import_workers:
+            self._import_workers.remove(sender)
+            sender.deleteLater()
         
     def on_save(self):
         if self.project_path:
@@ -1238,9 +1278,9 @@ class RockyApp(QMainWindow):
         clip.waveform_computing = True
         worker = WaveformWorker(clip, clip.file_path)
         worker.finished.connect(self.on_waveform_finished)
-        # We keep a reference to prevent GC
-        if not hasattr(self, "_waveform_workers"): self._waveform_workers = []
-        self._waveform_workers.append(worker)
+        # Unified tracking
+        if not hasattr(self, "_active_workers"): self._active_workers = []
+        self._active_workers.append(worker)
         worker.start()
 
     def _start_thumbnail_analysis(self, clip):
@@ -1248,8 +1288,8 @@ class RockyApp(QMainWindow):
         clip.thumbnails_computing = True
         worker = ThumbnailWorker(clip, clip.file_path)
         worker.finished.connect(self.on_thumbnails_finished)
-        if not hasattr(self, "_thumb_workers"): self._thumb_workers = []
-        self._thumb_workers.append(worker)
+        if not hasattr(self, "_active_workers"): self._active_workers = []
+        self._active_workers.append(worker)
         worker.start()
 
     def on_waveform_finished(self, clip, peaks):
@@ -1259,12 +1299,10 @@ class RockyApp(QMainWindow):
         self.timeline_widget.update()
         
         # Cleanup worker safely
-        if hasattr(self, "_waveform_workers"):
-            # Find the sender worker
-            sender = self.sender()
-            if sender in self._waveform_workers:
-                self._waveform_workers.remove(sender)
-                sender.deleteLater()
+        sender = self.sender()
+        if hasattr(self, "_active_workers") and sender in self._active_workers:
+            self._active_workers.remove(sender)
+            sender.deleteLater()
 
 
 
@@ -1274,8 +1312,11 @@ class RockyApp(QMainWindow):
         clip.thumbnails = thumbs
         clip.thumbnails_computing = False
         self.timeline_widget.update()
-        if hasattr(self, "_thumb_workers"):
-            self._thumb_workers = [w for w in self._thumb_workers if w.clip != clip]
+        
+        sender = self.sender()
+        if hasattr(self, "_active_workers") and sender in self._active_workers:
+             self._active_workers.remove(sender)
+             sender.deleteLater()
 
     def _trigger_proxy_generation(self, clip):
         """Starts the proxy generation process for a clip."""
@@ -1286,8 +1327,8 @@ class RockyApp(QMainWindow):
         worker = ProxyWorker(clip, clip.file_path)
         worker.finished.connect(self._on_proxy_finished)
         
-        if not hasattr(self, "_proxy_workers"): self._proxy_workers = []
-        self._proxy_workers.append(worker)
+        if not hasattr(self, "_active_workers"): self._active_workers = []
+        self._active_workers.append(worker)
         worker.start()
 
     def _on_proxy_finished(self, clip, proxy_path, success):
@@ -1309,8 +1350,10 @@ class RockyApp(QMainWindow):
             self.rebuild_engine()
             
         # Cleanup
-        if hasattr(self, "_proxy_workers"):
-             self._proxy_workers = [w for w in self._proxy_workers if w is not self.sender()]
+        sender = self.sender()
+        if hasattr(self, "_active_workers") and sender in self._active_workers:
+             self._active_workers.remove(sender)
+             sender.deleteLater()
 
     def update_proxy_button_state(self):
         """Determines the color of the global proxy button based on all clips."""
@@ -1442,6 +1485,25 @@ class RockyApp(QMainWindow):
             
             # 3. Surface extended properties
             cpp_clip.opacity = clip.start_opacity
+            cpp_clip.transform.rotation = clip.transform.rotation
+            cpp_clip.transform.anchor_x = clip.transform.anchor_x
+            cpp_clip.transform.anchor_y = clip.transform.anchor_y
+
+            # 4. Sync Effects
+            if hasattr(clip, 'effects') and clip.effects:
+                cpp_effects_list = []
+                for eff in clip.effects:
+                    # Robust key check for plugin path
+                    path = eff.get('path') or eff.get('plugin_path') or ''
+                    name = eff.get('name', 'Unknown')
+                    enabled = eff.get('enabled', True)
+                    
+                    if path:
+                        c_eff = rocky_core.Effect(name, path)
+                        c_eff.enabled = enabled
+                        cpp_effects_list.append(c_eff)
+                
+                cpp_clip.effects = cpp_effects_list
             cpp_clip.fade_in_frames = clip.fade_in_frames
             cpp_clip.fade_out_frames = clip.fade_out_frames
             cpp_clip.fade_in_type = rocky_core.FadeType(clip.fade_in_type.value)
@@ -1462,17 +1524,25 @@ class RockyApp(QMainWindow):
             self.toggle_play()
 
     def _instantiate_source(self, path):
-        """Helper to determine the correct C++ backend for a file path."""
+        """Helper to determine the correct C++ backend for a file path, using a cache."""
         if not path or not os.path.exists(path):
             return rocky_core.ColorSource(random.randint(50,200), 50, 100, 255)
             
+        # Return from cache if we already opened this heavyweight file
+        if path in self.media_source_cache:
+            return self.media_source_cache[path]
+
         lower_path = path.lower()
         image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp')
         
+        source = None
         if lower_path.endswith(image_extensions):
-            return rocky_core.ImageSource(path)
+            source = rocky_core.ImageSource(path)
+        else:
+            source = rocky_core.VideoSource(path)
             
-        return rocky_core.VideoSource(path)
+        self.media_source_cache[path] = source
+        return source
 
     def auto_scroll_playhead(self, abs_x):
         """

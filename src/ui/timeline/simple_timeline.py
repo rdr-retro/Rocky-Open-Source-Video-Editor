@@ -734,6 +734,7 @@ class SimpleTimeline(QWidget):
                         is_near_left = abs(event.x() - clip_x) <= edge_margin
                         is_near_right = abs(event.x() - (clip_x + clip_w)) <= edge_margin
                         
+                        track_h = self.model.track_heights[clip.track_index]
                         if (is_near_left or is_near_right) and (hover_track_y <= event.y() <= hover_track_y + track_h):
                             self.setCursor(Qt.CursorShape.SizeHorCursor)
                             cursor_set = True
@@ -741,7 +742,6 @@ class SimpleTimeline(QWidget):
 
                         # Check Opacity/Gain Handle (Top Edge or Line)
                         opacity_level = getattr(clip, 'opacity_level', 1.0)
-                        track_h = self.model.track_heights[clip.track_index]
                         clip_h = track_h - 2
                         body_start_y = hover_track_y + 13
                         body_end_y = hover_track_y + 1 + clip_h
@@ -1062,9 +1062,41 @@ class SimpleTimeline(QWidget):
         """Accept drag events."""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
+        elif event.mimeData().hasFormat("application/x-rocky-effect"):
+            event.acceptProposedAction()
     
     def dropEvent(self, event):
-        """Handle file drops."""
+        """Handle file drops and EFFECT drops."""
+        # 1. Handle Effect Drops
+        if event.mimeData().hasFormat("application/x-rocky-effect"):
+            data = event.mimeData().data("application/x-rocky-effect")
+            data_str = data.data().decode('utf-8')
+            if "|" in data_str:
+                name, path = data_str.split("|", 1)
+                
+                # Find clip under mouse
+                clip = self.find_clip_at(event.pos().x(), event.pos().y())
+                if clip:
+                     print(f"Applying Effect '{name}' to Clip '{clip.name}'")
+                     
+                     # Add to clip model
+                     new_effect = {
+                         "name": name,
+                         "path": path,
+                         "enabled": True
+                     }
+                     clip.effects.append(new_effect)
+                     print(f"Current Effects on {clip.name}: {len(clip.effects)}")
+                     
+                     self.structure_changed.emit() # Trigger update/save
+                     self.update()
+                else:
+                    print("Drop ignored: No clip under mouse.")
+            
+            event.accept()
+            return
+
+        # 2. Handle File Drops (Media Import)
         urls = event.mimeData().urls()
         if not urls:
             return

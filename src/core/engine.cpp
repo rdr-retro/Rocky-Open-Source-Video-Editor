@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "ofx/host.h"
 
 void RockyEngine::setResolution(int w, int h) { std::lock_guard<std::mutex> lock(mtx); width = w; height = h; }
 void RockyEngine::setFPS(double f) { std::lock_guard<std::mutex> lock(mtx); fps = f; }
@@ -28,7 +29,6 @@ void RockyEngine::clear() {
  * @return py::array_t<uint8_t> A 4-channel (RGBA) NumPy array for Python consumption.
  */
 py::array_t<uint8_t> RockyEngine::evaluate(double time) {
-    // printf("DEBUG: RockyEngine::evaluate(%.3f)\n", time);
     std::vector<std::shared_ptr<Clip>> visibleVideoClips;
     int curW, curH;
     double curFps;
@@ -49,7 +49,7 @@ py::array_t<uint8_t> RockyEngine::evaluate(double time) {
         curFps = fps;
     }
     
-    // Sort by track index descending
+    // Sort by track index descending (Background first, Foreground last)
     std::sort(visibleVideoClips.begin(), visibleVideoClips.end(), 
         [](const auto& first, const auto& second) {
             return first->trackIndex > second->trackIndex;
@@ -57,38 +57,95 @@ py::array_t<uint8_t> RockyEngine::evaluate(double time) {
     );
 
     const size_t totalPixelBytes = static_cast<size_t>(curW * curH * 4);
-    std::vector<uint8_t> canvas(totalPixelBytes, 0);
-    // Professional Gray Background for the project canvas (RGB 45, 45, 45)
-    for (size_t i = 0; i < totalPixelBytes; i += 4) {
-        canvas[i]     = 45;  // R
-        canvas[i + 1] = 45;  // G
-        canvas[i + 2] = 45;  // B
-        canvas[i + 3] = 255; // A
+    
+    // 1. REUSE BUFFER (Memory Optimization)
+    if (internalCanvas.size() != totalPixelBytes) {
+        internalCanvas.resize(totalPixelBytes);
     }
+    
+    // Fast Clear (Gray Background)
+    // Optimization: Use memset for faster clearing if strict color isn't required, 
+    // but here we manually fill to match the "Professional Gray" (45, 45, 45)
+    uint32_t* pixelPtr = reinterpret_cast<uint32_t*>(internalCanvas.data());
+    size_t pixelCount = totalPixelBytes / 4;
+    
+    // 0xFF2D2D2D in Little Endian (AABBGGRR) -> A=255, R=45, G=45, B=45
+    // Note: Verify endianness if porting to non-x86/ARM64
+    const uint32_t bgColor = 0xFF2D2D2D; 
+    std::fill_n(pixelPtr, pixelCount, bgColor);
 
+    // 2. PARALLEL RENDERING (Latency Optimization)
+    // Fetch and decode frames in parallel threads
+    std::vector<std::future<Frame>> futureFrames;
+    futureFrames.reserve(visibleVideoClips.size());
+    
     {
         // HEAVY WORK: Release GIL
         py::gil_scoped_release release;
         const long targetFrameIndex = static_cast<long>(time * curFps + 0.001);
-        
+
         for (auto& clip : visibleVideoClips) {
-            Frame currentLayer = clip->render(time, curW, curH, curFps, targetFrameIndex);
+             futureFrames.push_back(std::async(std::launch::async, 
+                [clip, time, curW, curH, curFps, targetFrameIndex]() {
+                    return clip->render(time, curW, curH, curFps, targetFrameIndex);
+                }
+             ));
+        }
+        
+        // 3. COMPOSITING LOOP (Wait and Blend)
+        for (size_t i = 0; i < visibleVideoClips.size(); ++i) {
+            Frame currentLayer = futureFrames[i].get(); // Block until this frame is ready
             
-            for (size_t i = 0; i < totalPixelBytes; i += 4) {
-                const float sourceAlpha = currentLayer.data[i + 3] / 255.0f;
-                if (sourceAlpha > 0.0f) {
-                    const float invAlpha = 1.0f - sourceAlpha;
-                    canvas[i]     = static_cast<uint8_t>(currentLayer.data[i]     * sourceAlpha + canvas[i]     * invAlpha);
-                    canvas[i + 1] = static_cast<uint8_t>(currentLayer.data[i + 1] * sourceAlpha + canvas[i + 1] * invAlpha);
-                    canvas[i + 2] = static_cast<uint8_t>(currentLayer.data[i + 2] * sourceAlpha + canvas[i + 2] * invAlpha);
+            if (currentLayer.data.empty()) continue;
+
+            // --- APPLY EFFECTS ---
+            auto clip = visibleVideoClips[i];
+            for (const auto& effect : clip->effects) {
+                if (effect.enabled) {
+                    RockyOfxHost::getInstance().executePluginRender(
+                        effect.pluginPath, 
+                        currentLayer.data.data(), // Src (In-place)
+                        currentLayer.data.data(), // Dst
+                        currentLayer.width, 
+                        currentLayer.height
+                    );
+                }
+            }
+            // ---------------------
+
+            const uint8_t* src = currentLayer.data.data();
+            uint8_t* dst = internalCanvas.data();
+            
+            // Optimization: Pointer arithmetic is faster than vector indexing
+            // TODO: SIMD Intrinsics (NEON) could be added here for 4x speedup
+            for (size_t k = 0; k < totalPixelBytes; k += 4) {
+                const uint8_t alpha = src[k + 3];
+                if (alpha == 0) continue; // Skip transparent pixels
+
+                if (alpha == 255) {
+                    // Opaque: Fast Copy
+                    // Use a 32-bit copy for the whole pixel
+                    *reinterpret_cast<uint32_t*>(dst + k) = *reinterpret_cast<const uint32_t*>(src + k);
+                } else {
+                    // Blending
+                    // Formula: out = src * alpha + dst * (1 - alpha)
+                    // Approximation using integer math: (src * alpha + dst * (255 - alpha)) >> 8
+                    // This is much faster than float division
+                    const uint32_t invAlpha = 255 - alpha;
+                    
+                    dst[k]     = (src[k]     * alpha + dst[k]     * invAlpha) >> 8;
+                    dst[k + 1] = (src[k + 1] * alpha + dst[k + 1] * invAlpha) >> 8;
+                    dst[k + 2] = (src[k + 2] * alpha + dst[k + 2] * invAlpha) >> 8;
+                    dst[k + 3] = 255; // Keep canvas valid
                 }
             }
         }
     }
 
-    // CREATE NUMPY ARRAY: Requires GIL (which we re-acquired when 'release' went out of scope)
+    // CREATE NUMPY ARRAY: Requires GIL
     py::array_t<uint8_t> frameBuffer({curH, curW, 4});
-    std::copy(canvas.begin(), canvas.end(), frameBuffer.mutable_data());
+    // We still copy to Python buffer for safety, but we saved the intermediate allocation
+    std::memcpy(frameBuffer.mutable_data(), internalCanvas.data(), totalPixelBytes);
     return frameBuffer;
 }
 #ifdef ENABLE_ACCELERATE

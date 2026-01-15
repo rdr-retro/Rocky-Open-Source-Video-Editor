@@ -12,6 +12,9 @@ class WaveformWorker(QThread):
 
     def run(self):
         try:
+            # SAFETY DELAY: Wait a bit to ensure main thread has finished primary probing
+            self.msleep(200)
+            
             # Dedicated source for analysis to avoid mutex contention with playback
             src = rocky_core.VideoSource(self.file_path)
             

@@ -3,6 +3,8 @@
 #include "../hardware/optimizer.h"
 #include "../infrastructure/config/runtime_config.h"
 #include "../infrastructure/logging/logger.h"
+#include "../core/ofx/host.h"
+#include <pybind11/stl.h>
 
 PYBIND11_MODULE(rocky_core, m) {
     // Exception Handler
@@ -15,6 +17,13 @@ PYBIND11_MODULE(rocky_core, m) {
             py::set_error(PyExc_RuntimeError, "Unknown Internal C++ Error");
         }
     });
+
+    // Effect Binding
+    py::class_<Effect>(m, "Effect")
+        .def(py::init<std::string, std::string>())
+        .def_readwrite("name", &Effect::name)
+        .def_readwrite("plugin_path", &Effect::pluginPath)
+        .def_readwrite("enabled", &Effect::enabled);
 
     // Platform Detection
     py::enum_<rocky::OS>(m, "OS")
@@ -121,7 +130,8 @@ PYBIND11_MODULE(rocky_core, m) {
         .def_readwrite("fade_out_frames", &Clip::fadeOutFrames)
         .def_readwrite("fade_in_type", &Clip::fadeInType)
         .def_readwrite("fade_out_type", &Clip::fadeOutType)
-        .def_readwrite("transform", &Clip::transform);
+        .def_readwrite("transform", &Clip::transform)
+        .def_readwrite("effects", &Clip::effects);
 
     py::class_<RockyEngine>(m, "RockyEngine")
         .def(py::init<>())
@@ -133,6 +143,11 @@ PYBIND11_MODULE(rocky_core, m) {
         .def("evaluate", &RockyEngine::evaluate)
         .def("render_audio", &RockyEngine::render_audio)
         .def("clear", &RockyEngine::clear);
+    
+    // OpenFX Bindings
+    m.def("load_ofx_plugin", [](std::string path) {
+        return RockyOfxHost::getInstance().loadPlugin(path);
+    });
 
     m.attr("VIDEO") = 1;
     m.attr("AUDIO") = 2;

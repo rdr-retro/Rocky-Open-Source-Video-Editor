@@ -1,5 +1,7 @@
 #include "media_source.h"
 
+static std::mutex g_ff_mtx;
+
 // ============================================================================
 // COLOR SOURCE IMPLEMENTATION
 // ============================================================================
@@ -30,14 +32,15 @@ Frame ColorSource::getFrame(double /*localTime*/, int w, int h) {
 
 VideoSource::VideoSource(std::string p) : path(p) {
     std::cout << "[VideoSource] Constructor for " << path << std::endl;
-    // Attempt to open input stream
-    if (avformat_open_input(&fmt_ctx, path.c_str(), nullptr, nullptr) < 0) {
-        std::cerr << "[VideoSource] Failed to open: " << path << std::endl;
-        return;
-    }
-
-    if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
-        return;
+    {
+        std::lock_guard<std::mutex> lock(g_ff_mtx);
+        if (avformat_open_input(&fmt_ctx, path.c_str(), nullptr, nullptr) < 0) {
+            std::cerr << "[VideoSource] Failed to open: " << path << std::endl;
+            return;
+        }
+        if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
+            return;
+        }
     }
 
     // Find the primary streams
@@ -64,10 +67,13 @@ VideoSource::VideoSource(std::string p) : path(p) {
             avcodec_parameters_to_context(codec_ctx, fmt_ctx->streams[video_stream_idx]->codecpar);
             
             // Limit threads to avoid overloading
-            codec_ctx->thread_count = 1; 
+            codec_ctx->thread_count = 0; // 0 = Auto-detect based on CPU cores
 
-            if (avcodec_open2(codec_ctx, v_codec, nullptr) < 0) {
-                std::cerr << "[VideoSource] Failed to open codec." << std::endl;
+            {
+                std::lock_guard<std::mutex> lock(g_ff_mtx);
+                if (avcodec_open2(codec_ctx, v_codec, nullptr) < 0) {
+                    std::cerr << "[VideoSource] Failed to open codec." << std::endl;
+                }
             }
         } else {
              std::cerr << "[VideoSource] No codec found for ID " << codec_id << std::endl;
@@ -85,7 +91,10 @@ VideoSource::VideoSource(std::string p) : path(p) {
             audio_codec_ctx->thread_count = 0; 
             audio_codec_ctx->thread_type = FF_THREAD_FRAME;
             
-            avcodec_open2(audio_codec_ctx, a_codec, nullptr);
+            {
+                std::lock_guard<std::mutex> lock(g_ff_mtx);
+                avcodec_open2(audio_codec_ctx, a_codec, nullptr);
+            }
             audio_frame = av_frame_alloc();
         }
     }
@@ -95,6 +104,7 @@ VideoSource::VideoSource(std::string p) : path(p) {
 }
 
 VideoSource::~VideoSource() {
+    std::lock_guard<std::mutex> lock(g_ff_mtx);
     if (sws_ctx)    sws_freeContext(sws_ctx);
     if (av_frame)   av_frame_free(&av_frame);
     if (audio_frame) av_frame_free(&audio_frame);
@@ -167,6 +177,7 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
                         sws_scale(sws_ctx, av_frame->data, av_frame->linesize, 0, 
                                   av_frame->height, destPointers, destStrides);
                         
+                        av_frame_unref(av_frame);
                         av_packet_unref(pkt);
                         
                         // Update cache
@@ -176,6 +187,7 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
                         
                         return outputFrame;
                     }
+                    av_frame_unref(av_frame);
                 }
             }
 
@@ -200,11 +212,11 @@ std::vector<float> VideoSource::getAudioSamples(double startTime, double duratio
         if (startTime < 0) startTime += srcDur;
     }
 
-    const int targetSampleRate = 44100;
-    const int targetChannels = 2;
-    const size_t targetSampleCount = static_cast<size_t>(duration * targetSampleRate) * targetChannels;
+    const int target_sample_rate = 44100;
+    const int target_channels = 2;
+    const size_t target_sample_count = static_cast<size_t>(duration * target_sample_rate) * target_channels;
     std::vector<float> samples;
-    samples.reserve(targetSampleCount);
+    samples.reserve(target_sample_count);
 
     const double timeBase = av_q2d(fmt_ctx->streams[audio_stream_idx]->time_base);
     const int64_t startPts = static_cast<int64_t>(startTime / timeBase);
@@ -227,16 +239,16 @@ std::vector<float> VideoSource::getAudioSamples(double startTime, double duratio
         av_opt_set_sample_fmt(cached_swr, "in_sample_fmt", audio_codec_ctx->sample_fmt, 0);
         
         AVChannelLayout outLayout;
-        av_channel_layout_default(&outLayout, targetChannels);
+        av_channel_layout_default(&outLayout, target_channels);
         av_opt_set_chlayout(cached_swr, "out_chlayout", &outLayout, 0);
-        av_opt_set_int(cached_swr, "out_sample_rate", targetSampleRate, 0);
+        av_opt_set_int(cached_swr, "out_sample_rate", target_sample_rate, 0);
         av_opt_set_sample_fmt(cached_swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
         swr_init(cached_swr);
     }
 
     // Decoding Loop
     int loopSafety = 0;
-    while (samples.size() < targetSampleCount && loopSafety < 10) {
+    while (samples.size() < target_sample_count && loopSafety < 10) {
         if (av_read_frame(fmt_ctx, pkt) < 0) {
             // SOPORTE PARA BUCLE: Si llegamos al final pero necesitamos más muestras, volvemos a empezar
             if (avcodec_is_open(audio_codec_ctx)) {
@@ -257,25 +269,25 @@ std::vector<float> VideoSource::getAudioSamples(double startTime, double duratio
 
                     if (frameEnd > startTime) {
                         // Max possible output samples based on input + delay
-                        int outCapacity = av_rescale_rnd(swr_get_delay(cached_swr, audio_codec_ctx->sample_rate) + audio_frame->nb_samples, targetSampleRate, audio_codec_ctx->sample_rate, AV_ROUND_UP);
-                        std::vector<float> resampledBuffer(outCapacity * targetChannels);
+                        int outCapacity = av_rescale_rnd(swr_get_delay(cached_swr, audio_codec_ctx->sample_rate) + audio_frame->nb_samples, target_sample_rate, audio_codec_ctx->sample_rate, AV_ROUND_UP);
+                        std::vector<float> resampledBuffer(outCapacity * target_channels);
                         uint8_t* outPtr[1] = { reinterpret_cast<uint8_t*>(resampledBuffer.data()) };
                         
                         int outSamples = swr_convert(cached_swr, outPtr, outCapacity, (const uint8_t**)audio_frame->data, audio_frame->nb_samples);
                         if (outSamples > 0) {
-                            size_t frameSampleCount = outSamples * targetChannels;
+                            size_t frameSampleCount = outSamples * target_channels;
                             size_t copyOffset = 0;
                             
                             // Handle if this frame starts BEFORE our desired start time
                             if (frameTime < startTime) {
                                 double diff = startTime - frameTime;
-                                copyOffset = static_cast<size_t>(diff * targetSampleRate) * targetChannels;
-                                copyOffset = (copyOffset / targetChannels) * targetChannels; // Align
+                                copyOffset = static_cast<size_t>(diff * target_sample_rate) * target_channels;
+                                copyOffset = (copyOffset / target_channels) * target_channels; // Align
                             }
                             
                             if (copyOffset < frameSampleCount) {
                                 size_t availToCopy = frameSampleCount - copyOffset;
-                                size_t needToCopy = targetSampleCount - samples.size();
+                                size_t needToCopy = target_sample_count - samples.size();
                                 size_t actualCopy = std::min(availToCopy, needToCopy);
                                 
                                 samples.insert(samples.end(), resampledBuffer.begin() + copyOffset, resampledBuffer.begin() + copyOffset + actualCopy);
@@ -283,17 +295,18 @@ std::vector<float> VideoSource::getAudioSamples(double startTime, double duratio
                         }
                     }
                     last_audio_time = frameEnd;
-                    if (samples.size() >= targetSampleCount) break;
+                    av_frame_unref(audio_frame);
+                    if (samples.size() >= target_sample_count) break;
                 }
             }
         }
         av_packet_unref(pkt);
-        if (samples.size() >= targetSampleCount) break;
+        if (samples.size() >= target_sample_count) break;
     }
 
     // Gap Fill: If we didn't get enough samples (EOF or skip), fill with silence
-    if (samples.size() < targetSampleCount) {
-        samples.resize(targetSampleCount, 0.0f);
+    if (samples.size() < target_sample_count) {
+        samples.resize(target_sample_count, 0.0f);
     }
 
     return samples;
@@ -305,35 +318,67 @@ double VideoSource::getDuration() {
 }
 
 std::vector<float> VideoSource::getWaveform(int points) {
-    if (audio_stream_idx == -1 || points <= 0) return {};
+    if (points <= 0) return {};
     
     std::vector<float> peaks(points, 0.0f);
     double duration = getDuration();
     if (duration <= 0) return {};
 
     AVFormatContext* temp_fmt_ctx = nullptr;
-    if (avformat_open_input(&temp_fmt_ctx, path.c_str(), nullptr, nullptr) < 0) return {};
-    if (avformat_find_stream_info(temp_fmt_ctx, nullptr) < 0) {
+    {
+        std::lock_guard<std::mutex> lock(g_ff_mtx);
+        if (avformat_open_input(&temp_fmt_ctx, path.c_str(), nullptr, nullptr) < 0) return {};
+        if (avformat_find_stream_info(temp_fmt_ctx, nullptr) < 0) {
+            avformat_close_input(&temp_fmt_ctx);
+            return {};
+        }
+    }
+
+    // LOCAL discovery of audio stream inside temp_fmt_ctx
+    int temp_audio_idx = -1;
+    for (unsigned int i = 0; i < temp_fmt_ctx->nb_streams; i++) {
+        if (temp_fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            temp_audio_idx = i;
+            break;
+        }
+    }
+
+    if (temp_audio_idx == -1) {
         avformat_close_input(&temp_fmt_ctx);
         return {};
     }
 
-    const AVCodec* a_codec = avcodec_find_decoder(temp_fmt_ctx->streams[audio_stream_idx]->codecpar->codec_id);
+    const AVCodec* a_codec = avcodec_find_decoder(temp_fmt_ctx->streams[temp_audio_idx]->codecpar->codec_id);
     if (!a_codec) {
         avformat_close_input(&temp_fmt_ctx);
         return {};
     }
 
     AVCodecContext* a_ctx = avcodec_alloc_context3(a_codec);
-    avcodec_parameters_to_context(a_ctx, temp_fmt_ctx->streams[audio_stream_idx]->codecpar);
-    if (avcodec_open2(a_ctx, a_codec, nullptr) < 0) {
-        avcodec_free_context(&a_ctx);
+    if (!a_ctx) {
         avformat_close_input(&temp_fmt_ctx);
         return {};
     }
 
+    avcodec_parameters_to_context(a_ctx, temp_fmt_ctx->streams[temp_audio_idx]->codecpar);
+    {
+        std::lock_guard<std::mutex> lock(g_ff_mtx);
+        if (avcodec_open2(a_ctx, a_codec, nullptr) < 0) {
+            avcodec_free_context(&a_ctx);
+            avformat_close_input(&temp_fmt_ctx);
+            return {};
+        }
+    }
+
     AVFrame* a_frame = av_frame_alloc();
     AVPacket* a_pkt = av_packet_alloc();
+    if (!a_frame || !a_pkt) {
+        if (a_frame) av_frame_free(&a_frame);
+        if (a_pkt) av_packet_free(&a_pkt);
+        avcodec_free_context(&a_ctx);
+        avformat_close_input(&temp_fmt_ctx);
+        return {};
+    }
     
     int64_t total_samples = (int64_t)(duration * a_ctx->sample_rate);
     int64_t samples_per_point = total_samples / points;
@@ -344,7 +389,7 @@ std::vector<float> VideoSource::getWaveform(int points) {
     float current_max = 0;
 
     while (av_read_frame(temp_fmt_ctx, a_pkt) >= 0) {
-        if (a_pkt->stream_index == audio_stream_idx) {
+        if (a_pkt->stream_index == temp_audio_idx) {
             if (avcodec_send_packet(a_ctx, a_pkt) >= 0) {
                 while (avcodec_receive_frame(a_ctx, a_frame) >= 0) {
                     int data_size = av_get_bytes_per_sample(a_ctx->sample_fmt);
@@ -380,6 +425,7 @@ std::vector<float> VideoSource::getWaveform(int points) {
                             current_samples = 0;
                         }
                     }
+                    av_frame_unref(a_frame);
                 }
             }
         }
