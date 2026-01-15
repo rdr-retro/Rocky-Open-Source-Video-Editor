@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel,
 from PySide6.QtCore import Qt, QPoint, QRect, QTimer, QMimeData
 from PySide6.QtGui import QColor, QPainter, QPen, QLinearGradient, QFont, QDrag
 from .models import TrackType
-from .styles import SLIDER_STYLE
+from .styles import SLIDER_STYLE, MENU_STYLE
 
 class TimecodeHeader(QFrame):
     """Header que coincide exactamente con el Timeline Ruler (35px)"""
@@ -138,6 +138,7 @@ class SidebarPanel(QWidget):
     def contextMenuEvent(self, event):
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
+        menu.setStyleSheet(MENU_STYLE)
         menu.addAction("Añadir pista de vídeo").triggered.connect(lambda: self.add_track(TrackType.VIDEO))
         menu.addAction("Añadir pista de audio").triggered.connect(lambda: self.add_track(TrackType.AUDIO))
         menu.exec(event.globalPos())
@@ -340,6 +341,7 @@ class TrackControlWidget(QFrame):
     def contextMenuEvent(self, event):
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
+        menu.setStyleSheet(MENU_STYLE)
         menu.addAction("Eliminar pista").triggered.connect(self.delete_track)
         menu.exec(event.globalPos())
 

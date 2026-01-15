@@ -3,11 +3,12 @@ Simple Timeline Widget - Minimal implementation that WILL render visibly.
 This is a complete rewrite focusing on guaranteed visibility.
 """
 
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QMenu
 from PySide6.QtCore import Qt, QTimer, Signal, QSize, QRectF, QPointF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QImage
 from functools import partial
 import numpy as np
+from ..styles import MENU_STYLE
 
 class SimpleTimeline(QWidget):
     """Ultra-simple timeline that is guaranteed to be visible."""
@@ -1186,7 +1187,7 @@ class SimpleTimeline(QWidget):
         """Show context menu for clips (Right Click)."""
         from PySide6.QtWidgets import QMenu
         from PySide6.QtGui import QActionGroup
-        from ..models import FadeType
+        from ..models import FadeType, TrackType
         
         # Ensure pos is a QPoint (handling both Point and event types if mixed)
         if hasattr(pos, 'toPoint'): pos = pos.toPoint()
@@ -1194,9 +1195,16 @@ class SimpleTimeline(QWidget):
         clip = self.find_clip_at(pos.x(), pos.y())
         
         menu = QMenu(self)
+        menu.setStyleSheet(MENU_STYLE)
         
         if not clip:
             # Show Generic Timeline Menu if no clip clicked (Feedback for user)
+            action_add_video = menu.addAction("Añadir pista de vídeo")
+            action_add_video.triggered.connect(lambda: self.track_addition_requested.emit(TrackType.VIDEO))
+
+            action_add_audio = menu.addAction("Añadir pista de audio")
+            action_add_audio.triggered.connect(lambda: self.track_addition_requested.emit(TrackType.AUDIO))
+            
             action_zoom = menu.addAction("Zoom to Fit")
             action_zoom.triggered.connect(self.zoom_to_fit)
             menu.exec(self.mapToGlobal(pos))
@@ -1263,7 +1271,7 @@ class SimpleTimeline(QWidget):
             menu.addSeparator()
 
         # Standard Clip Actions
-        action_delete = menu.addAction("Eliminar (Delete)")
+        action_delete = menu.addAction("Eliminar")
         # Fix: Use partial to robustly bind the clip to the slot (avoids lambda garbage collection issues)
         action_delete.triggered.connect(partial(self.delete_clip, clip))
 

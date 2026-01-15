@@ -81,3 +81,30 @@ color: #ffffff;
 font-family: {UI_FONT};
 font-size: 11px;
 """
+
+MENU_STYLE = f"""
+QMenu {{
+    background-color: #333333; /* Dark background */
+    border: 1px solid #000000;
+    color: #ffffff;
+    font-family: {UI_FONT};
+    font-size: 11px;
+    border-radius: 6px; /* Rounded corners */
+    padding: 4px; /* Padding for the rounding */
+}}
+QMenu::item {{
+    padding: 4px 24px 4px 12px;
+    background-color: transparent;
+    border-radius: 4px; /* Rounded selection matches menu */
+    margin: 1px; /* Spacing between items */
+}}
+QMenu::item:selected {{
+    background-color: {ACCENT_BLUE}; /* High contrast blue */
+    color: #000000; /* Dark text for contrast against bright blue */
+}}
+QMenu::separator {{
+    height: 1px;
+    background: #555555;
+    margin: 4px 8px; /* Indented separator */
+}}
+"""
