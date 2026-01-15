@@ -98,6 +98,9 @@ class TimelineClip:
         # Video Analysis Cache
         self.thumbnails = []
         self.thumbnails_computing = False
+        
+        # Trimming Limits
+        self.source_duration_frames = -1 # -1 for images, >0 for video/audio
 
     def to_dict(self) -> dict:
         """Serializes the clip state to a dictionary for JSON storage."""

@@ -5,8 +5,9 @@ This is a complete rewrite focusing on guaranteed visibility.
 
 from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, QTimer, Signal, QSize, QRectF, QPointF
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QImage
 from functools import partial
+import numpy as np
 
 class SimpleTimeline(QWidget):
     """Ultra-simple timeline that is guaranteed to be visible."""
@@ -45,6 +46,8 @@ class SimpleTimeline(QWidget):
         self.dragging_fade_in = False
         self.dragging_fade_out = False
         self.dragging_opacity = False  # NEW: For opacity/gain level handle
+        self.dragging_left_edge = False
+        self.dragging_right_edge = False
         
         # Configure widget for visibility
         self.setMinimumSize(800, 400)
@@ -92,30 +95,31 @@ class SimpleTimeline(QWidget):
         painter = QPainter(self)
         
         if not painter.isActive():
-            print("ERROR: Painter not active!", flush=True)
             return
         
-        # Enable antialiasing
+        # Visible region for culling
+        visible_rect = event.rect()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # 1. BACKGROUND - Dark (Matches Ruler)
-        painter.fillRect(self.rect(), QColor(30, 30, 30))
-        
-        # 2. GRID - White dotted lines
-        self._draw_grid(painter, event.rect())
-        
-        # 3. TRACK DIVIDERS - Horizontal lines
-        self._draw_tracks(painter)
-        
-        # 4. CLIPS - Bright colored rectangles
-        # Optimization: Pass rect to clip drawer too? For now, clipping handles it, 
-        # but iterating logic is safer. Let's fix grid first.
-        self._draw_clips(painter)
-        
-        # 5. PLAYHEAD - Bright cyan vertical line
-        self._draw_playhead(painter)
-        
-        painter.end()
+        try:
+            # 1. BACKGROUND
+            painter.fillRect(visible_rect, QColor(30, 30, 30))
+            
+            # 2. GRID
+            self._draw_grid(painter, visible_rect)
+            
+            # 3. TRACK DIVIDERS
+            self._draw_tracks(painter)
+            
+            # 4. CLIPS (Culling enabled)
+            self._draw_clips(painter, visible_rect)
+            
+            # 5. PLAYHEAD
+            self._draw_playhead(painter)
+        except Exception as e:
+            print(f"Paint Error: {e}")
+        finally:
+            painter.end()
     
     
     def _draw_grid(self, painter, rect):
@@ -154,9 +158,9 @@ class SimpleTimeline(QWidget):
             if current_y < self.height():
                 painter.drawLine(0, current_y, self.width(), current_y)
     
-    def _draw_clips(self, painter):
-        """Draw clips with Vegas-style headers and icons."""
-        from PySide6.QtGui import QFontMetrics, QPainterPath
+    def _draw_clips(self, painter, visible_rect):
+        """Draw clips with Vegas-style headers and icons + Viewport Culling."""
+        from PySide6.QtGui import QFontMetrics
         
         # Colors from screenshot
         COLOR_VIDEO_BODY = QColor("#763436") # Burgundy body
@@ -179,12 +183,17 @@ class SimpleTimeline(QWidget):
             if clip.track_index >= len(track_y_positions):
                 continue
             
-            # Clip geometry
-            track_y = track_y_positions[clip.track_index]
-            track_h = self.model.track_heights[clip.track_index]
+            # 1. Clip geometry calculation
             clip_x = int((clip.start_frame / fps) * self.pixels_per_second)
             clip_w = int((clip.duration_frames / fps) * self.pixels_per_second)
-            clip_h = track_h - 2  # Small gap
+            
+            # --- CULLING CHECK ---
+            if clip_x + clip_w < visible_rect.left() or clip_x > visible_rect.right():
+                continue # Clip is off-screen
+            
+            track_y = track_y_positions[clip.track_index]
+            track_h = self.model.track_heights[clip.track_index]
+            clip_h = track_h - 2
             
             # Determine Track Type Color
             from ..models import TrackType
@@ -211,6 +220,22 @@ class SimpleTimeline(QWidget):
             header_h = 12
             rect_header = QRectF(clip_x, track_y + 1, clip_w, header_h)
             painter.fillRect(rect_header, header_col)
+            
+            # --- WAVEFORM / THUMBNAILS ---
+            is_video = (clip.track_index < len(self.model.track_types) and self.model.track_types[clip.track_index] == TrackType.VIDEO)
+            
+            if is_video:
+                # Draw thumbnails if available
+                if hasattr(clip, 'thumbnails') and clip.thumbnails:
+                    self._draw_thumbnail(painter, clip, clip_x, track_y + 13, clip_w, clip_h - 12, visible_rect)
+            else:
+                # Draw Waveform for Audio
+                if hasattr(clip, 'waveform') and clip.waveform:
+                    self._draw_waveform(painter, clip.waveform, clip_x, track_y + 13, clip_w, clip_h - 12, visible_rect)
+                elif getattr(clip, 'waveform_computing', False):
+                    painter.setPen(QColor(255, 255, 255, 100))
+                    painter.drawText(int(clip_x) + 5, int(track_y) + 30, "Computing peaks...")
+            
             
             # 3. Text
             painter.setPen(COLOR_TEXT)
@@ -366,27 +391,34 @@ class SimpleTimeline(QWidget):
             px_x = clip_x + clip_w - button_w - 4
             px_y = track_y + 2
             
-            # Determine Color for PX
-            # Status: 0=Inactive(Gray), 1=Generating(Orange), 2=Active(Green), 3=Error(Red)
-            p_status = getattr(clip, 'proxy_status', 0) 
-            if p_status == 1:
-                px_col = QColor("#ff8800") # Orange
-            elif p_status == 2:
-                px_col = QColor("#00ff00") # Green
-            elif p_status == 3:
-                px_col = QColor("#ff0000") # Red
+            # Determine Color for PX (Vegas Style)
+            # ProxyStatus: NONE=0, GENERATING=1, READY=2, ERROR=3
+            from ..models import ProxyStatus
+            p_status = getattr(clip, 'proxy_status', ProxyStatus.NONE)
+            # Check global proxy toggle state
+            global_proxy_on = False
+            try:
+                main_window = self.window()
+                if hasattr(main_window, 'toolbar'):
+                    global_proxy_on = main_window.toolbar.btn_proxy.isChecked()
+            except: pass
+
+            if p_status == ProxyStatus.GENERATING:
+                px_col = QColor("#FF8800") # Orange (Generating)
+            elif p_status == ProxyStatus.READY and getattr(clip, 'use_proxy', False) and global_proxy_on:
+                px_col = QColor("#00FF00") # Green (Active)
             else:
-                px_col = QColor("#505050") # Dark Gray (visible on dark background)
+                px_col = QColor("#000000") # Black (Deactivated / Not Ready)
                 
             rect_px = QRectF(px_x, px_y, button_w, button_h)
             painter.setBrush(px_col)
-            painter.setPen(Qt.NoPen)
-            painter.drawRoundedRect(rect_px, 2, 2)
+            painter.setPen(QPen(QColor(255, 255, 255, 60), 0.5)) # Subtle border
+            painter.drawRoundedRect(rect_px, 1.5, 1.5)
             
             # Text "PX"
-            painter.setPen(QColor("#ffffff") if p_status == 0 or p_status == 3 else QColor("#000000"))
+            painter.setPen(QColor("#000000") if px_col == QColor("#00FF00") else QColor("#FFFFFF"))
             font_btn = painter.font()
-            font_btn.setPointSize(7)
+            font_btn.setPointSize(6.5)
             font_btn.setBold(True)
             painter.setFont(font_btn)
             painter.drawText(rect_px, Qt.AlignmentFlag.AlignCenter, "PX")
@@ -395,24 +427,80 @@ class SimpleTimeline(QWidget):
             fx_x = px_x - button_w - spacing
             fx_y = px_y
             
-            # FX always black for now unless we track active effects? 
-            # User said "dos botones negros", implying default state.
+            # FX always black
             fx_col = QColor("#000000")
             
             rect_fx = QRectF(fx_x, fx_y, button_w, button_h)
             painter.setBrush(fx_col)
-            painter.setPen(Qt.NoPen)
-            painter.drawRoundedRect(rect_fx, 2, 2)
+            painter.setPen(QPen(QColor(255, 255, 255, 60), 0.5))
+            painter.drawRoundedRect(rect_fx, 1.5, 1.5)
             
             # Text "FX"
-            painter.setPen(QColor("#ffffff"))
+            painter.setPen(QColor("#FFFFFF"))
             painter.drawText(rect_fx, Qt.AlignmentFlag.AlignCenter, "FX")
-
+            
             # 7. Clip Selection Border
             if clip.selected:
                 painter.setPen(QPen(QColor("#FFFF00"), 1)) # Bright yellow border
                 painter.setBrush(Qt.NoBrush)
                 painter.drawRect(clip_x, track_y + 1, clip_w, clip_h)
+
+    def _draw_waveform(self, painter, peaks, x, y, w, h, visible_rect):
+        """Ultra-fast restricted waveform drawing."""
+        if not peaks or w < 1:
+            return
+            
+        mid_y = y + (h / 2)
+        num_peaks = len(peaks)
+        
+        # Determine strict drawing boundary: Intersect clip with viewport
+        draw_start_x = max(x, visible_rect.left())
+        draw_end_x = min(x + w, visible_rect.right())
+        
+        if draw_start_x >= draw_end_x:
+            return
+
+        painter.setPen(QPen(QColor(255, 255, 255, 140), 1))
+        ppp = num_peaks / float(w)
+        
+        # Loop only over the visible pixels of this specific clip
+        for px in range(int(draw_start_x), int(draw_end_x)):
+            # Relative pixel index inside clip
+            i = px - x
+            peak_idx = int(i * ppp)
+            if peak_idx >= num_peaks: break
+            
+            val = peaks[peak_idx]
+            if val < 0.01: continue
+            
+            line_h = int(val * (h / 2) * 0.9)
+            painter.drawLine(px, int(mid_y - line_h), px, int(mid_y + line_h))
+
+    def _draw_thumbnail(self, painter, clip, x, y, w, h, visible_rect):
+        """Draws thumbnails with viewport culling."""
+        if not clip.thumbnails: return
+        
+        thumb_h = h
+        thumb_w = int(thumb_h * 1.77)
+        
+        # Only draw if the thumbnail position overlaps with viewport
+        # Start thumb
+        if x + thumb_w > visible_rect.left() and x < visible_rect.right():
+             self._paint_thumb(painter, clip.thumbnails[0], x, y, thumb_w, thumb_h)
+        
+        # End thumb
+        end_x = x + w - thumb_w
+        if end_x + thumb_w > visible_rect.left() and end_x < visible_rect.right() and w > thumb_w * 2:
+             self._paint_thumb(painter, clip.thumbnails[2], end_x, y, thumb_w, thumb_h)
+
+    def _paint_thumb(self, painter, thumb_data, x, y, w, h):
+        """Internal helper for pixel data painting."""
+        try:
+            height, width, channel = thumb_data.shape
+            bytes_per_line = 3 * width
+            q_img = QImage(thumb_data.data, width, height, bytes_per_line, QImage.Format_RGB888)
+            painter.drawImage(QRectF(x, y, w, h), q_img)
+        except: pass
 
     def _draw_playhead(self, painter):
         """Draw playhead as thin vertical line with sub-pixel precision."""
@@ -490,6 +578,24 @@ class SimpleTimeline(QWidget):
                             self.dragging_clip = clip
                             self.dragging_fade_out = True
                             self.structure_changed.emit()
+                            return
+
+                        # --- NEW: TRIM EDGE Hits (Full height priority) ---
+                        # Use a small margin (8px) for edge detection
+                        edge_margin = 8
+                        
+                        # Left Edge Trim
+                        if (abs(event.x() - clip_x) <= edge_margin and 
+                            click_track_y <= event.y() <= click_track_y + track_h):
+                            self.dragging_clip = clip
+                            self.dragging_left_edge = True
+                            return
+
+                        # Right Edge Trim
+                        if (abs(event.x() - (clip_x + clip_w)) <= edge_margin and 
+                            click_track_y <= event.y() <= click_track_y + track_h):
+                            self.dragging_clip = clip
+                            self.dragging_right_edge = True
                             return
                         
                         # Opacity/Gain Level Line (Center Handle)
@@ -622,6 +728,16 @@ class SimpleTimeline(QWidget):
                             cursor_set = True
                             break
             
+                        # Check edges for Trim (SizeHorCursor)
+                        edge_margin = 8
+                        is_near_left = abs(event.x() - clip_x) <= edge_margin
+                        is_near_right = abs(event.x() - (clip_x + clip_w)) <= edge_margin
+                        
+                        if (is_near_left or is_near_right) and (hover_track_y <= event.y() <= hover_track_y + track_h):
+                            self.setCursor(Qt.CursorShape.SizeHorCursor)
+                            cursor_set = True
+                            break
+
                         # Check Opacity/Gain Handle (Top Edge or Line)
                         opacity_level = getattr(clip, 'opacity_level', 1.0)
                         track_h = self.model.track_heights[clip.track_index]
@@ -646,6 +762,50 @@ class SimpleTimeline(QWidget):
         
         if event.buttons() & Qt.MouseButton.LeftButton:
             
+            # --- 0. Handle Trim Edges ---
+            if self.dragging_right_edge and self.dragging_clip:
+                clip = self.dragging_clip
+                target_frame = int((event.x() / self.pixels_per_second) * self.get_fps())
+                new_duration = target_frame - clip.start_frame
+                new_duration = max(5, new_duration)
+                
+                # Constraint for video/audio (not -1)
+                if clip.source_duration_frames > 0:
+                    max_d = clip.source_duration_frames - getattr(clip, 'source_offset_frames', 0)
+                    new_duration = min(new_duration, max_d)
+                
+                clip.duration_frames = new_duration
+                self.update()
+                self.structure_changed.emit()
+                return
+
+            if self.dragging_left_edge and self.dragging_clip:
+                clip = self.dragging_clip
+                orig_end = clip.start_frame + clip.duration_frames
+                target_start = int((event.x() / self.pixels_per_second) * self.get_fps())
+                
+                # Constraint: cannot shrink below 5 frames
+                target_start = min(target_start, orig_end - 5)
+                # Global timeline start
+                target_start = max(0, target_start)
+                
+                delta = target_start - clip.start_frame
+                
+                # Check source limit (cannot offset before 0)
+                if clip.source_duration_frames > 0:
+                    current_offset = getattr(clip, 'source_offset_frames', 0)
+                    if current_offset + delta < 0:
+                        delta = -current_offset
+                        target_start = clip.start_frame + delta
+                
+                clip.start_frame = target_start
+                clip.duration_frames -= delta
+                clip.source_offset_frames = getattr(clip, 'source_offset_frames', 0) + delta
+                
+                self.update()
+                self.structure_changed.emit()
+                return
+
             # --- CHECK DRAG THRESHOLD (New Logic) ---
             if self.potential_drag_clip and self.potential_drag_start_pos:
                 dist = (event.position() - self.potential_drag_start_pos).manhattanLength()
@@ -766,6 +926,8 @@ class SimpleTimeline(QWidget):
         self.dragging_fade_in = False   # NEW
         self.dragging_fade_out = False  # NEW
         self.dragging_opacity = False   # NEW
+        self.dragging_left_edge = False
+        self.dragging_right_edge = False
         
         # CLEAR potential drag state
         self.potential_drag_clip = None
@@ -851,19 +1013,49 @@ class SimpleTimeline(QWidget):
         self.update()
     
     def wheelEvent(self, event):
-        """Handle mouse wheel - zoom."""
+        """Handle mouse wheel - ultra-precise zoom focused on mouse cursor (Vegas Style)."""
         if event.modifiers() & Qt.ControlModifier:
+            scroll_area = self.get_scroll_area_context()
+            if not scroll_area: return
+            
+            h_scroll = scroll_area.horizontalScrollBar()
+            
+            # 1. Capture Anchor Point (Exact point in time under the mouse)
+            # mouse_abs_x: Absolute coordinate in the (likely very wide) widget
+            mouse_abs_x = event.position().x()
+            # anchor_time: Exact time in seconds under the mouse
+            anchor_time = mouse_abs_x / self.pixels_per_second
+            # viewport_offset: How many pixels the mouse is from the left of the visible screen
+            viewport_offset = mouse_abs_x - h_scroll.value()
+            
+            # 2. Update Scale
             delta = event.angleDelta().y()
-            if delta > 0:
-                self.pixels_per_second = min(500, self.pixels_per_second * 1.1)
-            else:
-                self.pixels_per_second = max(10, self.pixels_per_second / 1.1)
-            self.view_updated.emit()
+            zoom_factor = 1.15 if delta > 0 else (1.0 / 1.15)
+            self.pixels_per_second = max(2, min(8000, self.pixels_per_second * zoom_factor))
+            new_pps = self.pixels_per_second
+            
+            # 3. SYNCHRONOUS GEOMETRY UPDATE
+            # CRITICAL: We use setFixedSize to force the scroll area to acknowledge the new range
+            # immediately, otherwise setValue() will clamp to the old, smaller range.
             self.updateGeometry()
+            new_size = self.sizeHint()
+            self.setFixedSize(new_size)
+            
+            # 4. Calculate New Scroll Position to keep anchor_time at the same viewport_offset
+            # target_widget_x = anchor_time * new_pps
+            # new_scroll = target_widget_x - viewport_offset
+            new_scroll_val = int((anchor_time * new_pps) - viewport_offset)
+            
+            # 5. Apply Scroll and Sync State
+            h_scroll.setValue(max(0, new_scroll_val))
+            # Sync our float-based visible_start_time for culling and ruler precision
+            self.visible_start_time = h_scroll.value() / new_pps
+            
+            self.view_updated.emit()
             self.update()
             event.accept()
         else:
-            event.ignore()
+            super().wheelEvent(event)
     
     def dragEnterEvent(self, event):
         """Accept drag events."""

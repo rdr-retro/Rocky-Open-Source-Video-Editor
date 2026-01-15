@@ -335,13 +335,13 @@ class RockyApp(QMainWindow):
         self.setup_event_connections()
         
         # Set Window Icon
-        icon_path = os.path.join(os.getcwd(), "logo.png")
+        icon_path = os.path.join(os.getcwd(), "src", "img", "logo.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(self._get_rounded_icon(icon_path))
         else:
             # Try to find it relative to the script if CWD is different
             script_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            icon_path_alt = os.path.join(script_dir, "logo.png")
+            icon_path_alt = os.path.join(script_dir, "src", "img", "logo.png")
             if os.path.exists(icon_path_alt):
                 self.setWindowIcon(self._get_rounded_icon(icon_path_alt))
         
@@ -747,12 +747,12 @@ class RockyApp(QMainWindow):
         self.timeline_widget.clip_proxy_toggled.connect(self.on_clip_proxy_clicked)
         self.timeline_widget.clip_fx_toggled.connect(self.on_clip_fx_clicked)
 
-        # Toolbar Actions
-        self.toolbar.btn_open.clicked.connect(self.on_open)
-        self.toolbar.btn_save.clicked.connect(self.on_save)
-        self.toolbar.btn_save_as.clicked.connect(self.on_save_as)
-        self.toolbar.btn_render.clicked.connect(self.on_render)
-        self.toolbar.btn_settings.clicked.connect(self.on_settings)
+        # Toolbar Actions (Menus)
+        self.toolbar.action_open.triggered.connect(self.on_open)
+        self.toolbar.action_save.triggered.connect(self.on_save)
+        self.toolbar.action_save_as.triggered.connect(self.on_save_as)
+        self.toolbar.action_render.triggered.connect(self.on_render)
+        self.toolbar.action_settings.triggered.connect(self.on_settings)
         self.toolbar.btn_proxy.clicked.connect(self.on_proxy_toggle)
         
         # Audio Master
@@ -786,16 +786,16 @@ class RockyApp(QMainWindow):
             self._trigger_proxy_generation(clip)
             
         elif clip.proxy_status == ProxyStatus.READY:
-            # Toggle Off? Or just ignore? 
-            # If ready, user might want to DISABLE proxy for this clip explicitly?
-            # For now, let's just cycle to NONE, effectively disabling it.
-            clip.proxy_status = ProxyStatus.NONE
-            clip.use_proxy = False
+            # Toggle proxy usage for this specific clip
+            clip.use_proxy = not getattr(clip, 'use_proxy', False)
+            print(f"Proxy for {clip.name} toggled to: {clip.use_proxy}")
             self.timeline_widget.update()
             
+            # If the global toggle is ON, we need to rebuild the engine to swap the source
+            if self.toolbar.btn_proxy.isChecked():
+                self.rebuild_engine()
+            
         self.update_proxy_button_state()
-        # If we changed active use_proxy state, we might need to rebuild
-        self.rebuild_engine()
 
     def _toggle_fullscreen_viewer(self):
         if self.viewer.isFullScreen():
@@ -851,15 +851,23 @@ class RockyApp(QMainWindow):
         
         # Determine real duration for Video/Audio
         fps = self.timeline_widget.get_fps()
-        duration = 150 # Default 5s for images
+        default_image_duration = int(30 * fps) # 30 Seconds as requested
+        duration = default_image_duration 
+        source_duration = 0
         
         if not is_image:
             temp_src = self._instantiate_source(file_path)
             real_dur_sec = temp_src.get_duration()
             if real_dur_sec > 0:
                 duration = int(real_dur_sec * fps)
+                source_duration = duration
             elif real_dur_sec == 0: # Could be an error or empty file
                 duration = 300 # Fallback 10s
+                source_duration = duration
+        else:
+            # For images, source duration is "infinite" conceptually, 
+            # but we track the initial requested duration.
+            source_duration = -1 # Special value for infinite/static media
         
         if is_video:
             # 1. Video Track - STRICT: Must be VIDEO type
@@ -869,30 +877,21 @@ class RockyApp(QMainWindow):
                     v_track = preferred_track_idx
             
             if v_track == -1:
-                # Find first video track if we didn't drop on one? OR just create new one as requested?
-                # User said: "se crea su pista". Implies creation if not explicitly dropped ON a valid one.
-                # But typical workflow is reuse if available. Let's try reuse first, create if full/not found?
-                # For "Smart" behavior:
-                # If dropped on empty space (preferred == -1), create NEW tracks.
-                # If dropped on valid track, reuse.
                 self.sidebar.add_track(TrackType.VIDEO)
                 v_track = len(self.model.track_types) - 1
             
             v_clip = TimelineClip(file_name, start_frame, duration, v_track)
             v_clip.file_path = file_path
+            v_clip.source_duration_frames = source_duration
             
             # 2. Audio Track (Vegas Pro style: usually BELOW the video track)
-            # User wants it created automatically.
-            # If we created a new V track, we should strongly consider creating a new A track too.
-            
             a_track = -1
-            # Check if the track IMMEDIATELY below is Audio and empty at this time? 
-            # Simplified: Create new Audio track to ensure "se crea su pista".
             self.sidebar.add_track(TrackType.AUDIO)
             a_track = len(self.model.track_types) - 1
             
             a_clip = TimelineClip(f"[Audio] {file_name}", start_frame, duration, a_track)
             a_clip.file_path = file_path
+            a_clip.source_duration_frames = source_duration
             
             v_clip.linked_to = a_clip
             a_clip.linked_to = v_clip
@@ -923,6 +922,7 @@ class RockyApp(QMainWindow):
             
             clip = TimelineClip(file_name, start_frame, duration, t_idx)
             clip.file_path = file_path
+            clip.source_duration_frames = source_duration
             self.model.add_clip(clip)
             
             if is_audio:
@@ -1344,13 +1344,10 @@ class RockyApp(QMainWindow):
         
         if any_generating:
             self.toolbar.set_proxy_status_color('orange')
-            self.toolbar.btn_proxy.setChecked(True)
         elif any_error:
             self.toolbar.set_proxy_status_color('red')
-            self.toolbar.btn_proxy.setChecked(True)
         elif all_ready:
             self.toolbar.set_proxy_status_color('green')
-            self.toolbar.btn_proxy.setChecked(True)
         else:
             # Mixed state or none
             self.toolbar.set_proxy_status_color('black')
@@ -1562,11 +1559,11 @@ if __name__ == "__main__":
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     
     # Set Taskbar Icon (Windows/Linux)
-    icon_path = os.path.join(os.getcwd(), "logo.png")
+    icon_path = os.path.join(os.getcwd(), "src", "img", "logo.png")
     if not os.path.exists(icon_path):
         # Fallback to relative path
         script_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        icon_path = os.path.join(script_dir, "logo.png")
+        icon_path = os.path.join(script_dir, "src", "img", "logo.png")
 
     if os.path.exists(icon_path):
         if sys.platform == "darwin":

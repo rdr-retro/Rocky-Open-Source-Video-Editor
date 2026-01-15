@@ -14,8 +14,19 @@ class WaveformWorker(QThread):
         try:
             # Dedicated source for analysis to avoid mutex contention with playback
             src = rocky_core.VideoSource(self.file_path)
-            # 1200 points provides high-res detail for standard timeline zooms
-            peaks = src.get_waveform(1200)
+            
+            # DYNAMIC RESOLUTION:
+            # Request 200 points per second of audio for high-res zooming
+            duration = src.get_duration()
+            if duration <= 0:
+                duration = 60 # Fallback
+                
+            points = int(duration * 200)
+            # Clamping: at least 1200 for short clips, max 200k for performance
+            points = max(1200, min(points, 200000))
+            
+            print(f"Analyzing waveform for {self.file_path} ({points} points)...")
+            peaks = src.get_waveform(points)
             if peaks:
                 self.finished.emit(self.clip, list(peaks))
         except Exception as e:
