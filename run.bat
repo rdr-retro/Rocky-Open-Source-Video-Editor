@@ -8,6 +8,13 @@ if not exist "venv" (
 
 call venv\Scripts\activate.bat
 
+REM Check for critical dependencies (PySide6)
+python -c "import PySide6" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Missing PySide6. Installing requirements...
+    pip install -r requirements.txt
+)
+
 REM Check for compiled module
 if not exist "rocky_core*.pyd" (
     if not exist "rocky_core*.so" (
@@ -17,6 +24,12 @@ if not exist "rocky_core*.pyd" (
 )
 
 set PYTHONPATH=%CD%;%PYTHONPATH%
+
+REM Add FFmpeg DLLs to PATH for runtime
+if exist "external\ffmpeg\bin" (
+    set "PATH=%CD%\external\ffmpeg\bin;%PATH%"
+)
+
 
 echo Starting Rocky Video Editor...
 python -m src.ui.rocky_ui
