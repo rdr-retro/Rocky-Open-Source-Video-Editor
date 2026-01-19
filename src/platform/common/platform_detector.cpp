@@ -6,7 +6,6 @@
 #ifdef _WIN32
     #include <windows.h>
     #include <sysinfoapi.h>
-    #include <intrin.h> // For __cpuid
 #elif __APPLE__
     #include <sys/types.h>
     #include <sys/sysctl.h>
@@ -19,7 +18,7 @@
 #endif
 
 // CPU feature detection
-#if (defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)) && !defined(_WIN32)
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
     #include <cpuid.h>
 #endif
 
@@ -69,16 +68,10 @@ std::string PlatformDetector::getOSVersion() {
         ZeroMemory(&osvi, sizeof(OSVERSIONINFOEX));
         osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
         
-        // GetVersionEx is deprecated but sufficient without manifest for basic info
-        // Using suppress warning or just pragmas might be needed if strictly enforcing checks
-        #pragma warning(push)
-        #pragma warning(disable: 4996)
         if (GetVersionEx((OSVERSIONINFO*)&osvi)) {
-             #pragma warning(pop)
             return std::to_string(osvi.dwMajorVersion) + "." + 
                    std::to_string(osvi.dwMinorVersion);
         }
-        #pragma warning(pop)
         return "Unknown";
         
     #elif __APPLE__
@@ -118,36 +111,20 @@ CPUFeatures PlatformDetector::detectCPUFeatures() {
     CPUFeatures features;
     
     #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-        int regs[4]; // eax, ebx, ecx, edx
+        unsigned int eax, ebx, ecx, edx;
         
-        #ifdef _WIN32
-            // Windows implementation using __cpuid
-            __cpuid(regs, 1);
-            features.has_sse2 = (regs[3] & (1 << 26)) != 0;
-            features.has_sse4 = (regs[2] & (1 << 19)) != 0;
-            features.has_avx = (regs[2] & (1 << 28)) != 0;
-            
-            // Extended features
-            __cpuidex(regs, 7, 0); // Leaf 7, Subleaf 0
-            features.has_avx2 = (regs[1] & (1 << 5)) != 0;
-            features.has_avx512 = (regs[1] & (1 << 16)) != 0;
-            
-        #else
-            // GCC/Clang implementation using cpuid.h
-            unsigned int eax, ebx, ecx, edx;
-            
-            if (__get_cpuid(1, &eax, &ebx, &ecx, &edx)) {
-                features.has_sse2 = (edx & (1 << 26)) != 0;
-                features.has_sse4 = (ecx & (1 << 19)) != 0;
-                features.has_avx = (ecx & (1 << 28)) != 0;
-            }
-            
-            if (__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) {
-                features.has_avx2 = (ebx & (1 << 5)) != 0;
-                features.has_avx512 = (ebx & (1 << 16)) != 0;
-            }
-        #endif
-
+        // Check CPUID support
+        if (__get_cpuid(1, &eax, &ebx, &ecx, &edx)) {
+            features.has_sse2 = (edx & (1 << 26)) != 0;
+            features.has_sse4 = (ecx & (1 << 19)) != 0;
+            features.has_avx = (ecx & (1 << 28)) != 0;
+        }
+        
+        // Extended features
+        if (__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) {
+            features.has_avx2 = (ebx & (1 << 5)) != 0;
+            features.has_avx512 = (ebx & (1 << 16)) != 0;
+        }
     #elif defined(__aarch64__) || defined(_M_ARM64)
         // ARM64 (Apple Silicon, etc.) - all modern ARM64 has NEON
         features.has_sse2 = true; // Equivalent capability via NEON

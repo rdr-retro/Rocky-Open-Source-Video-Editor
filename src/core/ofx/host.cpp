@@ -1,13 +1,7 @@
 #include "host.h"
 #include "include/ofxProperty.h"
 #include <iostream>
-
-#ifdef _WIN32
-    #include <windows.h>
-#else
-    #include <dlfcn.h>
-#endif
-
+#include <dlfcn.h>
 #include <cstring>
 #include <map>
 #include <string>
@@ -178,40 +172,18 @@ void* RockyOfxHost::fetchSuite(OfxPropertySetHandle host, const char* suiteName,
 bool RockyOfxHost::loadPlugin(const std::string& path) {
     std::cout << "[OFX] Loading plugin: " << path << std::endl;
     
-    void* handle = nullptr;
-    OfxGetNumberOfPluginsFunc getNumPlugs = nullptr;
-    OfxGetPluginFunc getPlug = nullptr;
-
-#ifdef _WIN32
-    // Windows dynamic loading
-    HMODULE hModule = LoadLibraryA(path.c_str());
-    if (!hModule) {
-        std::cerr << "[OFX] Failed to LoadLibrary: Error code " << GetLastError() << std::endl;
-        return false;
-    }
-    handle = (void*)hModule;
-    
-    getNumPlugs = (OfxGetNumberOfPluginsFunc)GetProcAddress(hModule, "OfxGetNumberOfPlugins");
-    getPlug = (OfxGetPluginFunc)GetProcAddress(hModule, "OfxGetPlugin");
-#else
-    // POSIX dynamic loading (macOS/Linux)
-    handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    void* handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
     if (!handle) {
         std::cerr << "[OFX] Failed to dlopen: " << dlerror() << std::endl;
         return false;
     }
 
-    getNumPlugs = (OfxGetNumberOfPluginsFunc)dlsym(handle, "OfxGetNumberOfPlugins");
-    getPlug = (OfxGetPluginFunc)dlsym(handle, "OfxGetPlugin");
-#endif
+    OfxGetNumberOfPluginsFunc getNumPlugs = (OfxGetNumberOfPluginsFunc)dlsym(handle, "OfxGetNumberOfPlugins");
+    OfxGetPluginFunc getPlug = (OfxGetPluginFunc)dlsym(handle, "OfxGetPlugin");
 
     if (!getNumPlugs || !getPlug) {
         std::cerr << "[OFX] Symbols 'OfxGetNumberOfPlugins' or 'OfxGetPlugin' not found." << std::endl;
-#ifdef _WIN32
-        FreeLibrary((HMODULE)handle);
-#else
         dlclose(handle);
-#endif
         return false;
     }
 
@@ -271,11 +243,7 @@ void RockyOfxHost::executePluginRender(const std::string& pluginPath, void* srcB
 void RockyOfxHost::shutdown() {
     for (auto& lib : loadedLibraries) {
         if (lib.libraryHandle) {
-#ifdef _WIN32
-            FreeLibrary((HMODULE)lib.libraryHandle);
-#else
             dlclose(lib.libraryHandle);
-#endif
         }
     }
     loadedLibraries.clear();

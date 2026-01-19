@@ -34,8 +34,18 @@ class ProxyWorker(QThread):
                  return
 
             # Generate Proxy using FFmpeg
-            from ..ffmpeg_utils import FFmpegUtils
-            command = FFmpegUtils.get_proxy_command(self.source_path, proxy_path)
+            # Scale to 540p height, ultrafast preset for speed, crf 28 for low size/quality
+            command = [
+                'ffmpeg', '-y',
+                '-i', self.source_path,
+                '-vf', 'scale=-2:540',
+                '-c:v', 'libx264',
+                '-preset', 'ultrafast',
+                '-crf', '28',
+                '-c:a', 'aac',
+                '-ac', '2',
+                proxy_path
+            ]
             
             process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             _, stderr = process.communicate()
