@@ -2,7 +2,17 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLa
 from PySide6.QtCore import Qt, Signal, QRect, QPoint, QSize, QMimeData, QByteArray, QDataStream, QIODevice, QPropertyAnimation, Property, QEasingCurve
 from PySide6.QtGui import QFont, QIcon, QDrag, QPixmap, QImage, QPainter, QColor, QPen, QLinearGradient
 import os
+import sys
 import rocky_core
+
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+    else:
+        # src/ui/asset_tabs.py -> ../.. -> root
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.join(base_path, relative_path)
 
 class FlowLayout(QLayout):
     """
@@ -120,7 +130,8 @@ class DraggableEffectButton(QPushButton):
         self.setFixedSize(140, 110)
         
         # Load and prepare images
-        self.base_pixmap = QPixmap("src/img/fx.png")
+        fx_path = get_resource_path(os.path.join("src", "img", "fx.png"))
+        self.base_pixmap = QPixmap(fx_path)
         if self.base_pixmap.isNull():
             # Fallback if image not found
             self.base_pixmap = QPixmap(140, 80)

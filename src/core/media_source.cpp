@@ -320,7 +320,7 @@ double VideoSource::getDuration() {
 std::vector<float> VideoSource::getWaveform(int points) {
     if (points <= 0) return {};
     
-    std::vector<float> peaks(points, 0.0f);
+    std::vector<float> peaks(points * 2, 0.0f);
     double duration = getDuration();
     if (duration <= 0) return {};
 
@@ -386,7 +386,8 @@ std::vector<float> VideoSource::getWaveform(int points) {
 
     int64_t current_samples = 0;
     int points_computed = 0;
-    float current_max = 0;
+    float current_max_l = 0;
+    float current_max_r = 0;
 
     while (av_read_frame(temp_fmt_ctx, a_pkt) >= 0) {
         if (a_pkt->stream_index == temp_audio_idx) {
@@ -397,31 +398,48 @@ std::vector<float> VideoSource::getWaveform(int points) {
                     bool is_planar = av_sample_fmt_is_planar(a_ctx->sample_fmt);
 
                     for (int s = 0; s < a_frame->nb_samples; ++s) {
-                        for (int ch = 0; ch < std::min(chans, 8); ++ch) {
-                            float val = 0;
-                            uint8_t* ptr = nullptr;
-                            
-                            if (is_planar && ch < AV_NUM_DATA_POINTERS && a_frame->data[ch]) {
-                                ptr = a_frame->data[ch] + s * data_size;
-                            } else if (!is_planar && a_frame->data[0]) {
-                                ptr = a_frame->data[0] + (s * chans + ch) * data_size;
-                            }
-                            
-                            if (ptr) {
-                                if (a_ctx->sample_fmt == AV_SAMPLE_FMT_FLTP || a_ctx->sample_fmt == AV_SAMPLE_FMT_FLT) 
-                                    val = std::abs(*(float*)ptr);
-                                else if (a_ctx->sample_fmt == AV_SAMPLE_FMT_S16P || a_ctx->sample_fmt == AV_SAMPLE_FMT_S16) 
-                                    val = std::abs(*(int16_t*)ptr) / 32768.0f;
-                            }
-                            
-                            if (val > current_max) current_max = val;
+                        // Sample Left (Channel 0)
+                        float val_l = 0;
+                        uint8_t* ptr_l = nullptr;
+                        if (is_planar && 0 < AV_NUM_DATA_POINTERS && a_frame->data[0]) {
+                            ptr_l = a_frame->data[0] + s * data_size;
+                        } else if (!is_planar && a_frame->data[0]) {
+                            ptr_l = a_frame->data[0] + (s * chans + 0) * data_size;
                         }
+                        if (ptr_l) {
+                            if (a_ctx->sample_fmt == AV_SAMPLE_FMT_FLTP || a_ctx->sample_fmt == AV_SAMPLE_FMT_FLT) 
+                                val_l = std::abs(*(float*)ptr_l);
+                            else if (a_ctx->sample_fmt == AV_SAMPLE_FMT_S16P || a_ctx->sample_fmt == AV_SAMPLE_FMT_S16) 
+                                val_l = std::abs(*(int16_t*)ptr_l) / 32768.0f;
+                        }
+                        if (val_l > current_max_l) current_max_l = val_l;
+
+                        // Sample Right (Channel 1 or fallback to 0)
+                        float val_r = 0;
+                        uint8_t* ptr_r = nullptr;
+                        int r_ch = (chans > 1) ? 1 : 0;
+                        if (is_planar && r_ch < AV_NUM_DATA_POINTERS && a_frame->data[r_ch]) {
+                            ptr_r = a_frame->data[r_ch] + s * data_size;
+                        } else if (!is_planar && a_frame->data[0]) {
+                            ptr_r = a_frame->data[0] + (s * chans + r_ch) * data_size;
+                        }
+                        if (ptr_r) {
+                            if (a_ctx->sample_fmt == AV_SAMPLE_FMT_FLTP || a_ctx->sample_fmt == AV_SAMPLE_FMT_FLT) 
+                                val_r = std::abs(*(float*)ptr_r);
+                            else if (a_ctx->sample_fmt == AV_SAMPLE_FMT_S16P || a_ctx->sample_fmt == AV_SAMPLE_FMT_S16) 
+                                val_r = std::abs(*(int16_t*)ptr_r) / 32768.0f;
+                        }
+                        if (val_r > current_max_r) current_max_r = val_r;
+
                         current_samples++;
                         if (current_samples >= samples_per_point) {
                             if (points_computed < points) {
-                                peaks[points_computed++] = std::min(1.0f, current_max);
+                                peaks[points_computed * 2] = std::min(1.0f, current_max_l);
+                                peaks[points_computed * 2 + 1] = std::min(1.0f, current_max_r);
+                                points_computed++;
                             }
-                            current_max = 0;
+                            current_max_l = 0;
+                            current_max_r = 0;
                             current_samples = 0;
                         }
                     }

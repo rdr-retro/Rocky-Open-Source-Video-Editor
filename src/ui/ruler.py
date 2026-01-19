@@ -1,6 +1,7 @@
+import numpy as np
 import math
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QPoint, QRect
+from PySide6.QtCore import Qt, QPoint, QRect, QPointF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygon
 
 class TimelineRuler(QWidget):
@@ -92,18 +93,6 @@ class TimelineRuler(QWidget):
             painter.setPen(QColor(0, 0, 0))
             painter.drawText(int(mx) - 3, 8, marker.name[:1]) # Just first char/number
 
-    def _calculate_adaptive_step(self, px_per_sec, fps):
-        candidates = [
-            1.0/fps, 5.0/fps, 10.0/fps, 15.0/fps, 
-            1.0, 5.0, 10.0, 30.0,           
-            60.0, 120.0, 300.0, 600.0
-        ]
-        chosen_step = candidates[-1]
-        for s in candidates:
-            if s * px_per_sec >= 80: # Slightly denser
-                chosen_step = s
-                break
-        return chosen_step
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -124,8 +113,8 @@ class TimelineRuler(QWidget):
         visible_start_time = scroll_x / float(pixels_per_second if pixels_per_second > 0 else 1)
         fps = self.timeline.get_fps()
         
-        # 2. Adaptive Step Calculation
-        step = self._calculate_adaptive_step(pixels_per_second, fps)
+        # 2. Adaptive Step Calculation (Shared with Timeline)
+        step, divs = self.timeline.calculate_adaptive_step(pixels_per_second, fps)
         
         # 3. Tick Rendering
         painter.setPen(QPen(self.COLOR_TICK, 1))
@@ -133,11 +122,11 @@ class TimelineRuler(QWidget):
         
         time_cursor = math.floor(visible_start_time / step) * step
         while time_cursor < (scroll_x + self.width()) / float(pixels_per_second) + step:
-            screen_x = self.timeline.timeToScreen(time_cursor) - scroll_x
+            screen_x = self.timeline.timeToProjectedX(time_cursor) - scroll_x
             
             if -100 <= screen_x <= self.width() + 100:
                 self._draw_tick_label(painter, screen_x, time_cursor, fps)
-                self._draw_sub_ticks(painter, screen_x, pixels_per_second, time_cursor, step)
+                self._draw_sub_ticks(painter, screen_x, pixels_per_second, time_cursor, step, divs)
             
             time_cursor += step
             
@@ -188,21 +177,20 @@ class TimelineRuler(QWidget):
             super().keyPressEvent(event)
 
 
-    def _draw_sub_ticks(self, painter, x, px_per_sec, time, step):
-        scroll_x = self.timeline.get_scroll_area_context().horizontalScrollBar().value() if self.timeline.get_scroll_area_context() else 0
+    def _draw_sub_ticks(self, painter, x, px_per_sec, time, step, divisions):
+        scroll_area = self.timeline.get_scroll_area_context()
+        scroll_x = scroll_area.horizontalScrollBar().value() if scroll_area else 0
         
-        painter.setPen(QPen(QColor("#555555"), 1))
+        painter.setPen(QPen(QColor(85, 85, 85, 180), 2)) # Slightly thicker dots
         
-        # Try to draw 4 sub-ticks (dividing into 5 segments) or 9 (10 segments)
-        divisions = 10 if step * px_per_sec > 150 else 5
         sub_step = step / float(divisions)
         
         for i in range(1, divisions):
-            st_time = time + sub_step * i
-            st_x = self.timeline.timeToScreen(st_time) - scroll_x
+            st_time = time + (sub_step * i)
+            st_x = self.timeline.timeToProjectedX(st_time) - scroll_x
             
-            height = 30 if (divisions == 10 and i == 5) else 34
-            painter.drawLine(int(st_x), int(height), int(st_x), 38)
+            # Draw a dot at the middle of the lower half of the ruler
+            painter.drawPoint(QPointF(st_x, 35))
 
     def _draw_hover_indicator(self, painter):
         pass

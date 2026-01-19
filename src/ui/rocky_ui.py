@@ -2,6 +2,32 @@ import sys
 import os
 import random
 import time
+
+# Ensure we can load DLLs for version 3.8+ on Windows AND find FFmpeg in PATH
+if os.name == 'nt':
+    try:
+        if getattr(sys, 'frozen', False):
+            # PyInstaller mode: Root is _MEIPASS
+            project_root = sys._MEIPASS
+        else:
+            # Dev mode: Root is two levels up from this file relative to src/ui/rocky_ui.py
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+        ffmpeg_bin = os.path.join(project_root, "external", "ffmpeg", "bin")
+        
+        if os.path.isdir(ffmpeg_bin):
+            # 1. Allow Python to load DLLs (for rocky_core extension)
+            if hasattr(os, 'add_dll_directory'):
+                os.add_dll_directory(ffmpeg_bin)
+                print(f"Added DLL directory: {ffmpeg_bin}", flush=True)
+            
+            # 2. Allow subprocess calls (like ffmpeg -version) to find the binary
+            os.environ["PATH"] = ffmpeg_bin + os.pathsep + os.environ["PATH"]
+            print(f"Added FFmpeg to PATH: {ffmpeg_bin}", flush=True)
+            
+    except Exception as e:
+        print(f"Failed to setup FFmpeg paths: {e}", flush=True)
+
 import rocky_core
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter, 
@@ -100,6 +126,10 @@ class AudioPlayer(QIODevice):
     def bytesAvailable(self):
         locker = QMutexLocker(self.mutex)
         return len(self.buffer) + super().bytesAvailable()
+
+    def get_processed_us(self):
+        """Returns the hardware audio clock time in microseconds."""
+        return self.sink.processedUSecs()
 
 class AudioWorker(QThread):
     def __init__(self, engine, player, model):
@@ -214,7 +244,7 @@ class RenderWorker(QThread):
     finished = Signal(str)
     error = Signal(str)
 
-    def __init__(self, engine, engine_lock, output_path, total_frames, fps, width, height):
+    def __init__(self, engine, engine_lock, output_path, total_frames, fps, width, height, high_quality=False):
         super().__init__()
         self.engine = engine
         self.engine_lock = engine_lock
@@ -223,86 +253,154 @@ class RenderWorker(QThread):
         self.fps = fps
         self.width = width
         self.height = height
+        self.high_quality = high_quality
 
     def run(self):
+        # 0. Robust FFmpeg Detection
+        from ..infrastructure.ffmpeg_utils import FFmpegUtils
+        ffmpeg_exe = FFmpegUtils.get_ffmpeg_path()
+        print(f"DEBUG: Using FFmpeg binary: {ffmpeg_exe}", flush=True)
+
         audio_temp_path = self.output_path + ".audio.tmp"
         
-        # Save original resolution to restore later
-        orig_w = 1280
-        orig_h = 720
-        # Try to get current resolution if possible
         try:
-             # We assume HD if we can't get it, but we should probably pass it in
-             # or have a method in engine to query it.
-             # For now, we'll just set it and the UI will restore it via on_resolution_changed if needed.
-             pass
-        except: pass
+            # 1. Ensure dimensions are aligned to 32 (Ultra-Safe HW Alignment)
+            # Some media engines (AMD/Intel) prefer 32 or 64 alignment for strides.
+            # 32 is a safe bet for 99% of hardware.
+            self.width = (self.width // 32) * 32
+            self.height = (self.height // 32) * 32
+            
+            # Prevent 0 dimensions
+            if self.width <= 0: self.width = 1280
+            if self.height <= 0: self.height = 720
 
-        try:
-            # 0. Ensure dimensions are even (FFmpeg requirement for most codecs)
-            self.width = (self.width // 2) * 2
-            self.height = (self.height // 2) * 2
-
-            # 1. Sync engine resolution for RENDER
+            # Sync engine resolution for RENDER
             locker = QMutexLocker(self.engine_lock)
-            # Actually, RockyEngine has internal locks for setResolution
             self.engine.set_resolution(self.width, self.height)
             if locker: del locker
-
+            
             # 2. Render Audio (Rápido)
             duration = self.total_frames / self.fps
             audio_samples = self.engine.render_audio(0, duration)
             with open(audio_temp_path, 'wb') as f:
                 f.write(audio_samples.tobytes())
                 
-            # 2. Configurar FFmpeg para recibir Video por el pipe
+            # 3. Configurar FFmpeg
+            # Hardware Acceleration Logic
+            enc_config = FFmpegUtils.get_export_config(self.high_quality)
+            print(f"DEBUG: Selected Encoder: {enc_config.codec} (HW: {FFmpegUtils.detect_hardware()})", flush=True)
+            
+            # Explicitly force pixel format conversion via filter to prevent HW encoder 
+            # from receiving raw RGBA if it expects NV12/YUV.
+            # We map input (rgba) -> Filter (format=pix_fmt) -> Encoder
+            
             command = [
-                'ffmpeg', '-y',
+                ffmpeg_exe, '-y',
                 '-f', 'rawvideo',
                 '-vcodec', 'rawvideo',
                 '-s', f'{self.width}x{self.height}',
-                '-pix_fmt', 'rgba',
+                '-pix_fmt', 'rgba', # Input from Engine is ALWAYS RGBA
                 '-r', str(self.fps),
-                '-i', '-', # Stdin para video
+                '-i', '-', # Stdin 0
                 '-f', 'f32le',
                 '-ar', '44100',
                 '-ac', '2',
-                '-i', audio_temp_path, # Temp para audio
-                '-c:v', 'libx264',
-                '-pix_fmt', 'yuv420p',
-                '-preset', 'medium',
-                '-crf', '23',
+                '-i', audio_temp_path, # Input 1
+                '-vf', f'format={enc_config.pix_fmt}', # Force SW conversion before encoder
+                '-c:v', enc_config.codec
+            ]
+            
+            # Add Preset/Quality flags
+            command.extend(enc_config.preset_flag)
+            command.extend(enc_config.quality_flag)
+            
+            # Add Extra flags
+            command.extend(enc_config.extra_flags)
+            
+            # Common flags
+            command.extend([
+                '-pix_fmt', enc_config.pix_fmt,
                 '-c:a', 'aac',
                 '-b:a', '192k',
                 self.output_path
-            ]
+            ])
             
-            process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+            # Windows-specific: Hide console window
+            startupinfo = None
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0 # SW_HIDE
+
+            # IMPORTANT: We avoid stderr=subprocess.PIPE to prevent deadlocks on Windows
+            # when the pipe buffer fills up. Instead, we'll redirect to a log file if needed,
+            # or just let it go to the parent console. For now, we'll use a temporary file
+            # to capture errors without blocking.
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".log", delete=False) as err_log:
+                err_log_path = err_log.name
+
+            with open(err_log_path, 'wb') as err_f:
+                process = subprocess.Popen(
+                    command, 
+                    stdin=subprocess.PIPE, 
+                    stdout=subprocess.DEVNULL, # We don't need stdout 
+                    stderr=err_f,
+                    startupinfo=startupinfo
+                )
             
-            # 3. Renderizar Video Frame a Frame
-            for i in range(self.total_frames):
-                if self.isInterruptionRequested():
-                    process.terminate()
-                    break
+                # 4. Renderizar Video Frame a Frame
+                for i in range(self.total_frames):
+                    if self.isInterruptionRequested():
+                        process.terminate()
+                        break
+                        
+                    timestamp = i / self.fps
+                    frame_data = self.engine.evaluate(timestamp)
                     
-                timestamp = i / self.fps
-                frame_data = self.engine.evaluate(timestamp)
-                process.stdin.write(frame_data.tobytes())
-                
-                if i % 5 == 0:
-                    self.progress.emit(int((i / self.total_frames) * 100))
-                    
-            process.stdin.close()
-            process.wait()
+                    try:
+                        raw_bytes = frame_data.tobytes()
+                        # DEBUG: Verify exact byte alignment
+                        if i == 0:
+                            expected_bytes = self.width * self.height * 4
+                            actual_bytes = len(raw_bytes)
+                            print(f"DEBUG: Frame 0 Bytes. Expected: {expected_bytes} ({self.width}x{self.height}x4). Actual: {actual_bytes}", flush=True)
+                            if expected_bytes != actual_bytes:
+                                print("CRITICAL ERROR: Buffer Size Mismatch! This causes render artifacts/glitches.", flush=True)
+
+                        process.stdin.write(raw_bytes)
+                        
+                        # CRITICAL: Flush immediately after the first frame to ensure 
+                        # FFmpeg locks onto the stream start without buffer shift.
+                        if i == 0:
+                            process.stdin.flush()
+                            
+                        # Periodic flush to avoid large memory buildup 
+                        if i % 30 == 0:
+                            process.stdin.flush()
+                    except BrokenPipeError:
+                        break
+                        
+                    if i % 5 == 0:
+                        self.progress.emit(int((i / self.total_frames) * 100))
+                        
+                process.stdin.close()
+                process.wait()
             
+            # Check for errors
+            if process.returncode != 0:
+                with open(err_log_path, 'r', errors='replace') as f:
+                    err_out = f.read()
+                self.error.emit(f"Fallo en FFmpeg (Code {process.returncode}):\n{err_out}")
+            else:
+                self.finished.emit(self.output_path)
+
+            # Cleanup
             if os.path.exists(audio_temp_path):
                 os.remove(audio_temp_path)
-                
-            if process.returncode == 0:
-                self.finished.emit(self.output_path)
-            else:
-                err_out = process.stderr.read().decode()
-                self.error.emit(f"Fallo en FFmpeg: {err_out}")
+            if os.path.exists(err_log_path):
+                os.remove(err_log_path)
+
                 
         except Exception as e:
             print(f"RenderWorker Exception: {e}")
@@ -318,6 +416,59 @@ class RockyApp(QMainWindow):
     Main application window for the Rocky Video Editor.
     Integrates the Python-based UI with the C++ high-performance rendering engine.
     """
+
+    @staticmethod
+    def get_resource_path(relative_path):
+        """Get absolute path to resource, works for dev and for PyInstaller"""
+        if getattr(sys, 'frozen', False):
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        else:
+            # Dev mode: src/ui/rocky_ui.py -> ../.. -> root
+            base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+        return os.path.join(base_path, relative_path)
+
+    def _get_rounded_icon(self, path):
+        """On macOS, applies a squircle-style rounding to the icon for better integration."""
+        if not os.path.exists(path):
+            return QIcon()
+            
+        original = QPixmap(path)
+        if sys.platform != "darwin":
+            return QIcon(original)
+            
+        # Create a rounded version for macOS with internal padding (Visual Weight fix)
+        size = original.size()
+        rounded = QPixmap(size)
+        rounded.fill(Qt.transparent)
+        
+        painter = QPainter(rounded)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # macOS standard icons occupy ~82% of the canvas for correct visual weight
+        padding = size.width() * 0.09 # 9% padding on each side
+        content_size = size.width() - (padding * 2)
+        radius = content_size * 0.175
+        
+        path_qt = QPainterPath() # Renamed to avoid shadowing path arg
+        rect = QRectF(padding, padding, content_size, content_size)
+        path_qt.addRoundedRect(rect, radius, radius)
+        
+        painter.setClipPath(path_qt)
+        # Draw the original scaled to fit the content area
+        painter.drawPixmap(rect.toRect(), original)
+        
+        # Glass Border (Enhanced)
+        painter.setClipping(False)
+        glass_pen = QPen(QColor(255, 255, 255, 180)) # More opaque white (180/255)
+        glass_pen.setWidth(3) # Slightly thicker
+        painter.setPen(glass_pen)
+        painter.drawPath(path_qt)
+        
+        painter.end()
+        
+        return QIcon(rounded)
 
     def __init__(self, model):
         super().__init__()
@@ -339,53 +490,17 @@ class RockyApp(QMainWindow):
         self.setup_event_connections()
         
         # Set Window Icon
-        icon_path = os.path.join(os.getcwd(), "src", "img", "logo.png")
+        # Use proper resource path resolution for Frozen/Dev modes
+        icon_path = self.get_resource_path(os.path.join("src", "img", "icon.png"))
+        
         if os.path.exists(icon_path):
             self.setWindowIcon(self._get_rounded_icon(icon_path))
         else:
-            # Try to find it relative to the script if CWD is different
-            script_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            icon_path_alt = os.path.join(script_dir, "src", "img", "logo.png")
-            if os.path.exists(icon_path_alt):
-                self.setWindowIcon(self._get_rounded_icon(icon_path_alt))
-        
-    def _get_rounded_icon(self, path):
-        """On macOS, applies a squircle-style rounding to the icon for better integration."""
-        original = QPixmap(path)
-        if sys.platform != "darwin":
-            return QIcon(original)
-            
-        # Create a rounded version for macOS with internal padding (Visual Weight fix)
-        size = original.size()
-        rounded = QPixmap(size)
-        rounded.fill(Qt.transparent)
-        
-        painter = QPainter(rounded)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # macOS standard icons occupy ~82% of the canvas for correct visual weight
-        padding = size.width() * 0.09 # 9% padding on each side
-        content_size = size.width() - (padding * 2)
-        radius = content_size * 0.175
-        
-        path = QPainterPath()
-        rect = QRectF(padding, padding, content_size, content_size)
-        path.addRoundedRect(rect, radius, radius)
-        
-        painter.setClipPath(path)
-        # Draw the original scaled to fit the content area
-        painter.drawPixmap(rect.toRect(), original)
-        
-        # Glass Border (Enhanced)
-        painter.setClipping(False)
-        glass_pen = QPen(QColor(255, 255, 255, 180)) # More opaque white (180/255)
-        glass_pen.setWidth(3) # Slightly thicker
-        painter.setPen(glass_pen)
-        painter.drawPath(path)
-        
-        painter.end()
-        
-        return QIcon(rounded)
+            print(f"WARNING: Icon not found at {icon_path}. Trying logo.png...", flush=True)
+            # Fallback to logo.png if icon.png is missing for some reason
+            logo_path = self.get_resource_path(os.path.join("src", "img", "logo.png"))
+            if os.path.exists(logo_path):
+                self.setWindowIcon(self._get_rounded_icon(logo_path))
         
         # Start the heavy engine thread only after UI is ready (moved to showEvent)
         # self.audio_worker.start() <--- MOVED
@@ -410,7 +525,8 @@ class RockyApp(QMainWindow):
         try:
             print("DEBUG: initializing rocky_core...", flush=True)
             self.engine = rocky_core.RockyEngine()
-            self.engine.set_resolution(1280, 720) # Default HD
+            # Default Template: 1920x1080 (Matches user request standard)
+            self.engine.set_resolution(1920, 1080) 
             print("DEBUG: initializing AudioPlayer...", flush=True)
             self.audio_player = AudioPlayer()
             print("DEBUG: initializing AudioWorker...", flush=True)
@@ -834,7 +950,8 @@ class RockyApp(QMainWindow):
         
         # We need to pass the state (start_frame, preferred_track_idx) to the finish method
         # We can use a lambda or partial to "bind" these values
-        worker.finished.connect(lambda path, dur, src: self._finish_import_logic(path, dur, src, start_frame, preferred_track_idx))
+        # Worker emits: path, duration, source, width, height
+        worker.finished.connect(lambda path, dur, src, w, h: self._finish_import_logic(path, dur, src, w, h, start_frame, preferred_track_idx))
         worker.error.connect(self._on_import_error)
         
         if not hasattr(self, "_active_workers"): self._active_workers = []
@@ -845,7 +962,7 @@ class RockyApp(QMainWindow):
         self.status_label.setText(f"Error importando {os.path.basename(path)}")
         QMessageBox.warning(self, "Error de Importación", f"No se pudo cargar {path}:\n{message}")
 
-    def _finish_import_logic(self, file_path, duration, source, start_frame, preferred_track_idx):
+    def _finish_import_logic(self, file_path, duration, source, width, height, start_frame, preferred_track_idx):
         """
         Completes the import process once metadata is available from the background thread.
         """
@@ -866,8 +983,60 @@ class RockyApp(QMainWindow):
         
         source = self.media_source_cache[file_path]
 
-        # Check if project was empty before this import to trigger auto-zoom
+        # Check if project was empty before this import to trigger auto-zoom/resolution-match
         was_empty = (len(self.model.clips) == 0)
+        
+        # SMART PROVISIONING: Ask to match resolution on first import
+        if was_empty and width > 0 and height > 0:
+            msg = QMessageBox()
+            msg.setWindowTitle("Configuración de Proyecto")
+            msg.setText(f"El primer medio añadido tiene una resolución de {width}x{height}.")
+            msg.setInformativeText("¿Deseas ajustar la configuración del proyecto para que coincida con este medio?")
+            msg.addButton("Sí (Ajustar)", QMessageBox.YesRole)
+            no_btn = msg.addButton("No (Usar 1080p por defecto)", QMessageBox.NoRole)
+            msg.setDefaultButton(no_btn) # Default to No (Safe Template)
+            
+            msg.setWindowIcon(self.windowIcon()) # Use Application Icon (Rocket/Custom) first
+            
+            # Try to load custom logo.png for the body icon
+            logo_path = self.get_resource_path(os.path.join("src", "img", "logo.png"))
+            if os.path.exists(logo_path):
+                # Load and Scale to 64x64
+                src_pix = QPixmap(logo_path).scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                
+                # Apply Rounded Mask
+                rounded = QPixmap(src_pix.size())
+                rounded.fill(Qt.transparent)
+                
+                painter = QPainter(rounded)
+                painter.setRenderHint(QPainter.Antialiasing)
+                painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                
+                path = QPainterPath()
+                # 12px radius matches modern "Squircle" style for 64px icon
+                path.addRoundedRect(QRectF(src_pix.rect()), 12, 12)
+                
+                painter.setClipPath(path)
+                painter.drawPixmap(0, 0, src_pix)
+                painter.end()
+
+                msg.setIconPixmap(rounded)
+                msg.setWindowIcon(QIcon(logo_path)) # Override window icon with logo if preferred
+            else:
+                msg.setIcon(QMessageBox.Question)
+
+            msg.exec() 
+                
+            # PySide6 exec returns the standard button enum if used StandardButtons. 
+            # With addButton it returns an opaque ID. Let's trace it.
+            # Simplified:
+            
+            if msg.clickedButton() == no_btn:
+                # Force Default Template 1920x1080
+                self.on_resolution_changed(1920, 1080)
+            else:
+                # Adapt to Media
+                self.on_resolution_changed(width, height)
         
         is_audio = ext in ["mp3", "wav", "aac", "m4a", "flac"]
         is_image = ext in ["jpg", "jpeg", "png", "gif", "bmp", "webp"]
@@ -940,9 +1109,8 @@ class RockyApp(QMainWindow):
         self.timeline_widget.update()
         self.on_structure_changed()
         
-        if was_empty:
-             # Trigger cinematic "Zoom to Fit" animation
-             QTimer.singleShot(100, self.timeline_widget.zoom_to_fit)
+        # Trigger cinematic "Zoom to Fit" animation on every import
+        QTimer.singleShot(100, lambda: self.timeline_widget.zoom_to_fit(animate=True))
              
         self.status_label.setText(f"Importado: {file_name}")
         
@@ -1056,8 +1224,10 @@ class RockyApp(QMainWindow):
         self.prog_dialog.setWindowModality(Qt.WindowModal)
         self.prog_dialog.setMinimumDuration(0)
         
+        high_quality = config.get("high_quality", False)
+        
         # Crear y configurar Worker con la resolución elegida
-        self.render_worker = RenderWorker(self.engine, self.engine_lock, output_path, total_frames, active_fps, render_w, render_h)
+        self.render_worker = RenderWorker(self.engine, self.engine_lock, output_path, total_frames, active_fps, render_w, render_h, high_quality)
 
         self.render_worker.progress.connect(self.prog_dialog.setValue)
         self.render_worker.finished.connect(self._on_render_finished)
@@ -1066,7 +1236,7 @@ class RockyApp(QMainWindow):
         self.prog_dialog.canceled.connect(self.render_worker.requestInterruption)
         
         self.render_worker.start()
-        self.status_label.setText("Renderizando...")
+        self.status_label.setText(f"Renderizando... ({'Alta Fidelidad' if high_quality else 'Normal'})")
 
     def _on_render_finished(self, path):
         self.prog_dialog.close()
@@ -1100,7 +1270,7 @@ class RockyApp(QMainWindow):
             active_fps = self.timeline_widget.get_fps()
             # Capturamos el estado inicial para el Reloj Maestro
             self.playback_start_frame = self.model.blueline.playhead_frame
-            self.playback_start_wall_time = time.perf_counter()
+            self.playback_start_audio_time = self.audio_player.get_processed_us()
             
             start_time = self.model.blueline.playhead_frame / active_fps
             self.audio_worker.start_playback(start_time, active_fps, self.playback_rate)
@@ -1124,11 +1294,17 @@ class RockyApp(QMainWindow):
         if self.model.blueline.playing:
             # Re-anclamos el reloj maestro para evitar saltos al cambiar la velocidad
             active_fps = self.timeline_widget.get_fps()
-            elapsed_real_time = time.perf_counter() - self.playback_start_wall_time
+            
+            # Use Audio Clock for accurate elapsed time
+            current_audio = self.audio_player.get_processed_us()
+            elapsed_us = current_audio - self.playback_start_audio_time
+            if elapsed_us < 0: elapsed_us = 0
+            elapsed_real_time = elapsed_us / 1_000_000.0
+            
             current_frame = self.playback_start_frame + (elapsed_real_time * active_fps * self.playback_rate)
             
             self.playback_start_frame = current_frame
-            self.playback_start_wall_time = time.perf_counter()
+            self.playback_start_audio_time = self.audio_player.get_processed_us()
             
             # IMMEDIATELY clear the audio buffer to apply the new rate without lag
             self.audio_player.clear_buffer()
@@ -1153,8 +1329,17 @@ class RockyApp(QMainWindow):
 
         active_fps = self.timeline_widget.get_fps()
         
-        # RELOJ MAESTRO: Calculamos el tiempo transcurrido real desde el inicio
-        elapsed_real_time = time.perf_counter() - self.playback_start_wall_time
+        # RELOJ MAESTRO: Calculamos el tiempo transcurrido REAL basado en el AUDIO
+        # Esto previene el desincronismo (Drift). Si el audio se adelanta/atrasa, el video lo sigue.
+        try:
+            current_audio_time = self.audio_player.get_processed_us()
+            elapsed_us = current_audio_time - self.playback_start_audio_time
+            if elapsed_us < 0: elapsed_us = 0 # Prevención de relojes negativos
+            elapsed_real_time = elapsed_us / 1_000_000.0
+        except:
+             # Fallback si el audio falla
+             elapsed_real_time = 0
+             
         current_frame = self.playback_start_frame + (elapsed_real_time * active_fps * self.playback_rate)
 
 
@@ -1192,7 +1377,7 @@ class RockyApp(QMainWindow):
         # If seek is forced while playing (manual seek during playback), update start reference
         if forced and self.model.blueline.playing:
              self.playback_start_frame = frame_index
-             self.playback_start_wall_time = time.perf_counter()
+             self.playback_start_audio_time = self.audio_player.get_processed_us()
         
         locker = QMutexLocker(self.engine_lock)
         rendered_frame = self.engine.evaluate(timestamp)
@@ -1382,7 +1567,7 @@ class RockyApp(QMainWindow):
         self.rebuild_engine()
 
             
-        event.accept()
+
 
     def rebuild_engine(self):
         """
@@ -1539,14 +1724,26 @@ class RockyApp(QMainWindow):
     def sync_view_to_scroll(self, scroll_value):
         """Aligns the internal timeline view state with the scrollbar position."""
         if self.timeline_widget.pixels_per_second > 0:
-            self.timeline_widget.visible_start_time = scroll_value / float(self.timeline_widget.pixels_per_second)
             self.timeline_widget.update()
             self.timeline_ruler.update()
 
-if __name__ == "__main__":
+def main():
     import signal
     import faulthandler
-    faulthandler.enable() # Dump stack trace on crash
+    
+    # 1. Setup Standard Streams for Windowed Mode (No Console)
+    # PyInstaller --noconsole/--windowed sets stdout/stderr to None
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, 'w')
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, 'w')
+        
+    # 2. Enable faulthandler only if we have a valid stderr
+    # (Though we just ensured we do, checking file validation is safer)
+    try:
+        faulthandler.enable() # Dump stack trace on crash
+    except Exception:
+        pass # Skip if still failing
 
     print("DEBUG: Initializing QApplication...", flush=True)
     
@@ -1578,11 +1775,17 @@ if __name__ == "__main__":
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     
     # Set Taskbar Icon (Windows/Linux)
-    icon_path = os.path.join(os.getcwd(), "src", "img", "logo.png")
+    # Handle PyInstaller frozen state
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))) # root
+        
+    icon_path = os.path.join(base_path, "src", "img", "logo.png")
+    
+    # Fallback search if not found (e.g. running from different CWD)
     if not os.path.exists(icon_path):
-        # Fallback to relative path
-        script_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        icon_path = os.path.join(script_dir, "src", "img", "logo.png")
+        icon_path = os.path.join(os.getcwd(), "src", "img", "logo.png")
 
     if os.path.exists(icon_path):
         if sys.platform == "darwin":
@@ -1656,4 +1859,7 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+if __name__ == "__main__":
+    main()
 

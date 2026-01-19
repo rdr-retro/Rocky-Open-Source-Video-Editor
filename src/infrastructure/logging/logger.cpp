@@ -123,7 +123,21 @@ std::string Logger::getCurrentTimestamp() {
         now.time_since_epoch()) % 1000;
     
     std::ostringstream oss;
-    oss << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S");
+    
+    #ifdef _WIN32
+        struct tm tm_info;
+        if (localtime_s(&tm_info, &time) == 0) {
+            oss << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S");
+        } else {
+            oss << "0000-00-00 00:00:00"; // Fallback
+        }
+    #else
+        // POSIX thread-safe localtime
+        struct tm tm_info;
+        localtime_r(&time, &tm_info);
+        oss << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S");
+    #endif
+
     oss << '.' << std::setfill('0') << std::setw(3) << ms.count();
     
     return oss.str();
