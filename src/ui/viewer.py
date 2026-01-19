@@ -121,7 +121,7 @@ class ViewerPanel(QWidget):
                 width: 10px;
                 height: 10px;
                 margin: -4px 0;
-                border_radius: 5px;
+                border-radius: 5px;
             }
         """)
         

@@ -2,6 +2,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 import rocky_core
 import numpy as np
+import os
 
 class ThumbnailWorker(QThread):
     """Background worker to extract start/mid/end thumbnails for video clips."""
@@ -13,6 +14,7 @@ class ThumbnailWorker(QThread):
         self.file_path = file_path
 
     def run(self):
+        print(f"DEBUG: ThumbnailWorker starting for {self.file_path}")
         try:
             # We use a dedicated source to avoid locking the main rendering engine
             src = None
@@ -47,6 +49,9 @@ class ThumbnailWorker(QThread):
                     thumbs.append(img)
             
             if thumbs:
+                print(f"DEBUG: ThumbnailWorker finished for {self.file_path}. Generated {len(thumbs)} thumbs.")
                 self.finished.emit(self.clip, thumbs)
+            else:
+                print(f"DEBUG: ThumbnailWorker failed to generate any thumbs for {self.file_path}")
         except Exception as e:
-            print(f"Thumbnail Extraction Failed: {e}")
+            print(f"Thumbnail Extraction Failed for {self.file_path}: {e}")

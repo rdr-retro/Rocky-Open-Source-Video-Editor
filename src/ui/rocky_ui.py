@@ -473,12 +473,15 @@ class RockyApp(QMainWindow):
     def __init__(self, model):
         super().__init__()
         self.model = model
+        self.clip_map = {} # Maps Python TimelineClip -> C++ Clip object
         self.engine_lock = QMutex() # Protection for concurrent C++/Python access
         self.playback_rate = 1.0
         self.model.blueline.playback_rate = 1.0
         self.setWindowTitle("Rocky Video Editor")
         self.project_path = None
         self.media_source_cache = {} # Cache to avoid re-opening heavy 4K files
+        self.fx_dialogs = {} # Track open FX windows {clip_id: dialog}
+        self._active_workers = [] # Unified tracking for all background threads
 
         if not self.initialize_engine():
             # Fatal error handled inside initialize_engine
@@ -881,8 +884,18 @@ class RockyApp(QMainWindow):
     def on_clip_fx_clicked(self, clip):
         """Show the Effects Dialog for the selected clip."""
         from .effects_dialog import EffectsDialog
+        
+        # Check if already open
+        clip_id = id(clip)
+        if clip_id in self.fx_dialogs:
+            self.fx_dialogs[clip_id].raise_()
+            self.fx_dialogs[clip_id].activateWindow()
+            return
+            
         dlg = EffectsDialog(clip, self)
-        dlg.exec()
+        dlg.finished.connect(lambda: self.fx_dialogs.pop(clip_id, None))
+        self.fx_dialogs[clip_id] = dlg
+        dlg.show()
 
     def on_clip_proxy_clicked(self, clip):
         """Handler for when a clip's PX button is clicked."""
@@ -954,8 +967,9 @@ class RockyApp(QMainWindow):
         worker.finished.connect(lambda path, dur, src, w, h: self._finish_import_logic(path, dur, src, w, h, start_frame, preferred_track_idx))
         worker.error.connect(self._on_import_error)
         
-        if not hasattr(self, "_active_workers"): self._active_workers = []
         self._active_workers.append(worker)
+        # Use built-in finished for deletion safety
+        worker.finished.connect(lambda: self._safe_remove_worker(worker))
         worker.start()
 
     def _on_import_error(self, path, message):
@@ -1114,12 +1128,12 @@ class RockyApp(QMainWindow):
              
         self.status_label.setText(f"Importado: {file_name}")
         
-        # Cleanup worker
-        sender = self.sender()
-        if hasattr(self, "_import_workers") and sender in self._import_workers:
-            self._import_workers.remove(sender)
-            sender.deleteLater()
-        
+    def _safe_remove_worker(self, worker):
+        """Standardized safe removal of background threads."""
+        if worker in self._active_workers:
+            self._active_workers.remove(worker)
+        worker.deleteLater()
+
     def on_save(self):
         if self.project_path:
             self.save_project(self.project_path)
@@ -1436,8 +1450,8 @@ class RockyApp(QMainWindow):
         clip.waveform_computing = True
         worker = WaveformWorker(clip, clip.file_path)
         worker.finished.connect(self.on_waveform_finished)
-        # Unified tracking
-        if not hasattr(self, "_active_workers"): self._active_workers = []
+        # Built-in finished for safe cleanup
+        worker.finished.connect(lambda: self._safe_remove_worker(worker))
         self._active_workers.append(worker)
         worker.start()
 
@@ -1446,7 +1460,8 @@ class RockyApp(QMainWindow):
         clip.thumbnails_computing = True
         worker = ThumbnailWorker(clip, clip.file_path)
         worker.finished.connect(self.on_thumbnails_finished)
-        if not hasattr(self, "_active_workers"): self._active_workers = []
+        # Built-in finished for safe cleanup
+        worker.finished.connect(lambda: self._safe_remove_worker(worker))
         self._active_workers.append(worker)
         worker.start()
 
@@ -1456,25 +1471,25 @@ class RockyApp(QMainWindow):
         clip.waveform_computing = False
         self.timeline_widget.update()
         
-        # Cleanup worker safely
-        sender = self.sender()
-        if hasattr(self, "_active_workers") and sender in self._active_workers:
-            self._active_workers.remove(sender)
-            sender.deleteLater()
+        # Refresh FX dialog if open
+        dlg = self.fx_dialogs.get(id(clip))
+        if dlg: dlg.sub_timeline.update()
 
 
 
 
     def on_thumbnails_finished(self, clip, thumbs):
         """Callback when the C++ engine finishes extracting thumbnails."""
+        print(f"DEBUG: Thumbnails arrived for {clip.name}. Count: {len(thumbs)}")
         clip.thumbnails = thumbs
         clip.thumbnails_computing = False
         self.timeline_widget.update()
         
-        sender = self.sender()
-        if hasattr(self, "_active_workers") and sender in self._active_workers:
-             self._active_workers.remove(sender)
-             sender.deleteLater()
+        # Refresh FX dialog if open (Critical for the "Loading" placeholder)
+        dlg = self.fx_dialogs.get(id(clip))
+        if dlg: 
+            print(f"DEBUG: Triggering FX dialog update for {clip.name}")
+            dlg.display_label.update()
 
     def _trigger_proxy_generation(self, clip):
         """Starts the proxy generation process for a clip."""
@@ -1484,8 +1499,8 @@ class RockyApp(QMainWindow):
         
         worker = ProxyWorker(clip, clip.file_path)
         worker.finished.connect(self._on_proxy_finished)
-        
-        if not hasattr(self, "_active_workers"): self._active_workers = []
+        # Built-in finished for safe cleanup
+        worker.finished.connect(lambda: self._safe_remove_worker(worker))
         self._active_workers.append(worker)
         worker.start()
 
@@ -1506,12 +1521,6 @@ class RockyApp(QMainWindow):
         # If the global toggle is ON, we might need to refresh the engine to swap to this new proxy
         if self.toolbar.btn_proxy.isChecked() and success:
             self.rebuild_engine()
-            
-        # Cleanup
-        sender = self.sender()
-        if hasattr(self, "_active_workers") and sender in self._active_workers:
-             self._active_workers.remove(sender)
-             sender.deleteLater()
 
     def update_proxy_button_state(self):
         """Determines the color of the global proxy button based on all clips."""
@@ -1581,6 +1590,7 @@ class RockyApp(QMainWindow):
 
         locker = QMutexLocker(self.engine_lock)
         self.engine.clear()
+        self.clip_map = {} # Reset map
         active_fps = self.timeline_widget.get_fps()
         self.engine.set_fps(active_fps)
         
@@ -1616,9 +1626,14 @@ class RockyApp(QMainWindow):
                 clip.source_offset_frames / active_fps,
                 media_source
             )
+            self.clip_map[clip] = cpp_clip
             
             # 3. Surface extended properties
             cpp_clip.opacity = clip.start_opacity
+            cpp_clip.transform.x = clip.transform.x
+            cpp_clip.transform.y = clip.transform.y
+            cpp_clip.transform.scale_x = clip.transform.scale_x
+            cpp_clip.transform.scale_y = clip.transform.scale_y
             cpp_clip.transform.rotation = clip.transform.rotation
             cpp_clip.transform.anchor_x = clip.transform.anchor_x
             cpp_clip.transform.anchor_y = clip.transform.anchor_y
@@ -1642,6 +1657,32 @@ class RockyApp(QMainWindow):
             cpp_clip.fade_out_frames = clip.fade_out_frames
             cpp_clip.fade_in_type = rocky_core.FadeType(clip.fade_in_type.value)
             cpp_clip.fade_out_type = rocky_core.FadeType(clip.fade_out_type.value)
+            
+    def sync_clip_transform(self, clip):
+        """Syncs the transform of a specific clip to the engine and refreshes UI."""
+        if clip in self.clip_map:
+            cpp_clip = self.clip_map[clip]
+            cpp_clip.transform.x = clip.transform.x
+            cpp_clip.transform.y = clip.transform.y
+            cpp_clip.transform.scale_x = clip.transform.scale_x
+            cpp_clip.transform.scale_y = clip.transform.scale_y
+            cpp_clip.transform.rotation = clip.transform.rotation
+            cpp_clip.transform.anchor_x = clip.transform.anchor_x
+            cpp_clip.transform.anchor_y = clip.transform.anchor_y
+            
+            # 1. Refresh global viewer (real-time feedback in main window)
+            current_frame = self.model.blueline.playhead_frame
+            active_fps = self.timeline_widget.get_fps()
+            tc = self.model.format_timecode(current_frame, active_fps)
+            self.on_time_changed(current_frame / active_fps, int(current_frame), tc, True)
+            
+            # 2. Refresh FX dialog preview if open
+            dlg = self.fx_dialogs.get(id(clip))
+            if dlg:
+                dlg.seek_preview(dlg.sub_timeline.playhead_time)
+                
+            return True
+        return False
         
         # Visual Refresh
         current_frame = self.model.blueline.playhead_frame

@@ -37,23 +37,77 @@ float Clip::getOpacityAt(long absoluteFrame) {
 }
 
 Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
-    // Usar absoluteFrame (entero) en lugar de time (double) para evitar jitter de redondeo
+    // 1. Calculate local time
     double localTime = (double)(absoluteFrame - startFrame) / fps + sourceOffset;
     
-    // SOPORTE PARA BUCLE (Vegas Style): Si el clip se alarga más que la fuente, volvemos al inicio.
+    // Support for looping
     double srcDur = source->getDuration();
     if (srcDur > 0) {
         localTime = std::fmod(localTime, srcDur);
         if (localTime < 0) localTime += srcDur;
     }
 
+    // 2. Fetch Source Frame (at project resolution)
+    // Optimization: We could fetch at a smaller resolution if scale < 1.0, 
+    // but for now we fetch at project size to maintain quality during zoom.
     Frame f = source->getFrame(localTime, w, h);
-    
+    if (f.data.empty()) return f;
+
+    // 3. Apply Opacity Envelope
     float finalAlphaMult = getOpacityAt(absoluteFrame);
     if (finalAlphaMult < 1.0f) {
         for (size_t i = 3; i < f.data.size(); i += 4) {
             f.data[i] = (uint8_t)(f.data[i] * finalAlphaMult);
         }
     }
-    return f;
+
+    // 4. Transform Logic (Resize / Move)
+    // If transform is default (scale=1, pos=0), return as is.
+    if (transform.scaleX == 1.0 && transform.scaleY == 1.0 && transform.x == 0 && transform.y == 0) {
+        return f;
+    }
+
+    // Create a new canvas to hold the transformed frame
+    Frame outFrame(w, h, 4); 
+    // Fill with transparency (0)
+    std::fill(outFrame.data.begin(), outFrame.data.end(), 0);
+
+    // [VEGAS COMPOSITING MODEL]
+    // Calculate new dimensions
+    int newW = (int)(w * transform.scaleX);
+    int newH = (int)(h * transform.scaleY);
+    
+    if (newW <= 0 || newH <= 0) return outFrame;
+
+    // Center of the frame (Anchor logic)
+    int centerX = (int)(w * 0.5);
+    int centerY = (int)(h * 0.5);
+    
+    int startX = centerX - (newW / 2) + (int)(transform.x * w);
+    int startY = centerY - (newH / 2) - (int)(transform.y * h); // +Y is Up
+
+    // Simple Nearest Neighbor Scaling (Fast for Real-time dev)
+    // TODO: Switch to Bilinear or GL textures for production quality
+    for (int dstY = 0; dstY < h; ++dstY) {
+        int srcY_rel = dstY - startY;
+        if (srcY_rel < 0 || srcY_rel >= newH) continue;
+        
+        int srcY = (int)((srcY_rel / (double)newH) * h);
+        if (srcY < 0 || srcY >= h) continue;
+
+        for (int dstX = 0; dstX < w; ++dstX) {
+            int srcX_rel = dstX - startX;
+            if (srcX_rel < 0 || srcX_rel >= newW) continue;
+            
+            int srcX = (int)((srcX_rel / (double)newW) * w);
+            if (srcX < 0 || srcX >= w) continue;
+
+            // Copy pixel
+            const uint32_t* srcPix = reinterpret_cast<const uint32_t*>(f.data.data()) + (srcY * w + srcX);
+            uint32_t* dstPix = reinterpret_cast<uint32_t*>(outFrame.data.data()) + (dstY * w + dstX);
+            *dstPix = *srcPix;
+        }
+    }
+
+    return outFrame;
 }

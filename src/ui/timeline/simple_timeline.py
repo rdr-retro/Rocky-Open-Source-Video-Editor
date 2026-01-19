@@ -222,8 +222,8 @@ class SimpleTimeline(QWidget):
         
         COLOR_VIDEO_BODY = QColor("#763436")
         COLOR_VIDEO_HEADER = QColor("#9E4347")
-        COLOR_AUDIO_BODY = QColor("#347660")
-        COLOR_AUDIO_HEADER = QColor("#439E80")
+        COLOR_AUDIO_BODY = QColor("#3a9b8f")
+        COLOR_AUDIO_HEADER = QColor("#49c2b3")
         COLOR_TEXT = QColor(230, 230, 230)
         
         font = painter.font()
@@ -361,25 +361,7 @@ class SimpleTimeline(QWidget):
             # Fade Out Handle REMOVED as per user request
 
 
-            # Corner Triangles (Blue) - Top corners of body area
-            body_top_y = track_y + 13  # Just below 12px header
-            COLOR_CORNER = QColor(0, 170, 255)  # Blue
-            
-            # Top-Left Corner Triangle
-            path_tl = QPainterPath()
-            path_tl.moveTo(clip_x, body_top_y)
-            path_tl.lineTo(clip_x + 6, body_top_y)
-            path_tl.lineTo(clip_x, body_top_y + 6)
-            path_tl.closeSubpath()
-            painter.fillPath(path_tl, COLOR_CORNER)
-            
-            # Top-Right Corner Triangle
-            path_tr = QPainterPath()
-            path_tr.moveTo(clip_x + clip_w, body_top_y)
-            path_tr.lineTo(clip_x + clip_w - 6, body_top_y)
-            path_tr.lineTo(clip_x + clip_w, body_top_y + 6)
-            path_tr.closeSubpath()
-            painter.fillPath(path_tr, COLOR_CORNER)
+            # 5.5. Bottom Handles (White Triangles)
 
             # 5.5. Bottom Handles (White Triangles)
             bottom_y = track_y + 1 + clip_h
