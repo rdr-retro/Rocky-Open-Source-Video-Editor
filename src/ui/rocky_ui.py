@@ -264,10 +264,11 @@ class RenderWorker(QThread):
         audio_temp_path = self.output_path + ".audio.tmp"
         
         try:
-            # 1. Ensure dimensions are aligned to 16 (HW Encoding Requirement)
-            # Many HW encoders (VideoToolbox, NVENC) require 16-pixel alignment or they produce stride artifacts.
-            self.width = (self.width // 16) * 16
-            self.height = (self.height // 16) * 16
+            # 1. Ensure dimensions are aligned to 32 (Ultra-Safe HW Alignment)
+            # Some media engines (AMD/Intel) prefer 32 or 64 alignment for strides.
+            # 32 is a safe bet for 99% of hardware.
+            self.width = (self.width // 32) * 32
+            self.height = (self.height // 32) * 32
             
             # Prevent 0 dimensions
             if self.width <= 0: self.width = 1280
@@ -289,18 +290,23 @@ class RenderWorker(QThread):
             enc_config = FFmpegUtils.get_export_config(self.high_quality)
             print(f"DEBUG: Selected Encoder: {enc_config.codec} (HW: {FFmpegUtils.detect_hardware()})", flush=True)
             
+            # Explicitly force pixel format conversion via filter to prevent HW encoder 
+            # from receiving raw RGBA if it expects NV12/YUV.
+            # We map input (rgba) -> Filter (format=pix_fmt) -> Encoder
+            
             command = [
                 ffmpeg_exe, '-y',
                 '-f', 'rawvideo',
                 '-vcodec', 'rawvideo',
                 '-s', f'{self.width}x{self.height}',
-                '-pix_fmt', 'rgba',
+                '-pix_fmt', 'rgba', # Input from Engine is ALWAYS RGBA
                 '-r', str(self.fps),
-                '-i', '-', # Stdin para video
+                '-i', '-', # Stdin 0
                 '-f', 'f32le',
                 '-ar', '44100',
                 '-ac', '2',
-                '-i', audio_temp_path, # Temp para audio
+                '-i', audio_temp_path, # Input 1
+                '-vf', f'format={enc_config.pix_fmt}', # Force SW conversion before encoder
                 '-c:v', enc_config.codec
             ]
             
@@ -353,7 +359,16 @@ class RenderWorker(QThread):
                     frame_data = self.engine.evaluate(timestamp)
                     
                     try:
-                        process.stdin.write(frame_data.tobytes())
+                        raw_bytes = frame_data.tobytes()
+                        # DEBUG: Verify exact byte alignment
+                        if i == 0:
+                            expected_bytes = self.width * self.height * 4
+                            actual_bytes = len(raw_bytes)
+                            print(f"DEBUG: Frame 0 Bytes. Expected: {expected_bytes} ({self.width}x{self.height}x4). Actual: {actual_bytes}", flush=True)
+                            if expected_bytes != actual_bytes:
+                                print("CRITICAL ERROR: Buffer Size Mismatch! This causes render artifacts/glitches.", flush=True)
+
+                        process.stdin.write(raw_bytes)
                         
                         # CRITICAL: Flush immediately after the first frame to ensure 
                         # FFmpeg locks onto the stream start without buffer shift.
@@ -510,7 +525,8 @@ class RockyApp(QMainWindow):
         try:
             print("DEBUG: initializing rocky_core...", flush=True)
             self.engine = rocky_core.RockyEngine()
-            self.engine.set_resolution(1280, 720) # Default HD
+            # Default Template: 1920x1080 (Matches user request standard)
+            self.engine.set_resolution(1920, 1080) 
             print("DEBUG: initializing AudioPlayer...", flush=True)
             self.audio_player = AudioPlayer()
             print("DEBUG: initializing AudioWorker...", flush=True)
@@ -934,7 +950,8 @@ class RockyApp(QMainWindow):
         
         # We need to pass the state (start_frame, preferred_track_idx) to the finish method
         # We can use a lambda or partial to "bind" these values
-        worker.finished.connect(lambda path, dur, src: self._finish_import_logic(path, dur, src, start_frame, preferred_track_idx))
+        # Worker emits: path, duration, source, width, height
+        worker.finished.connect(lambda path, dur, src, w, h: self._finish_import_logic(path, dur, src, w, h, start_frame, preferred_track_idx))
         worker.error.connect(self._on_import_error)
         
         if not hasattr(self, "_active_workers"): self._active_workers = []
@@ -945,7 +962,7 @@ class RockyApp(QMainWindow):
         self.status_label.setText(f"Error importando {os.path.basename(path)}")
         QMessageBox.warning(self, "Error de Importación", f"No se pudo cargar {path}:\n{message}")
 
-    def _finish_import_logic(self, file_path, duration, source, start_frame, preferred_track_idx):
+    def _finish_import_logic(self, file_path, duration, source, width, height, start_frame, preferred_track_idx):
         """
         Completes the import process once metadata is available from the background thread.
         """
@@ -966,8 +983,60 @@ class RockyApp(QMainWindow):
         
         source = self.media_source_cache[file_path]
 
-        # Check if project was empty before this import to trigger auto-zoom
+        # Check if project was empty before this import to trigger auto-zoom/resolution-match
         was_empty = (len(self.model.clips) == 0)
+        
+        # SMART PROVISIONING: Ask to match resolution on first import
+        if was_empty and width > 0 and height > 0:
+            msg = QMessageBox()
+            msg.setWindowTitle("Configuración de Proyecto")
+            msg.setText(f"El primer medio añadido tiene una resolución de {width}x{height}.")
+            msg.setInformativeText("¿Deseas ajustar la configuración del proyecto para que coincida con este medio?")
+            msg.addButton("Sí (Ajustar)", QMessageBox.YesRole)
+            no_btn = msg.addButton("No (Usar 1080p por defecto)", QMessageBox.NoRole)
+            msg.setDefaultButton(no_btn) # Default to No (Safe Template)
+            
+            msg.setWindowIcon(self.windowIcon()) # Use Application Icon (Rocket/Custom) first
+            
+            # Try to load custom logo.png for the body icon
+            logo_path = self.get_resource_path(os.path.join("src", "img", "logo.png"))
+            if os.path.exists(logo_path):
+                # Load and Scale to 64x64
+                src_pix = QPixmap(logo_path).scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                
+                # Apply Rounded Mask
+                rounded = QPixmap(src_pix.size())
+                rounded.fill(Qt.transparent)
+                
+                painter = QPainter(rounded)
+                painter.setRenderHint(QPainter.Antialiasing)
+                painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                
+                path = QPainterPath()
+                # 12px radius matches modern "Squircle" style for 64px icon
+                path.addRoundedRect(QRectF(src_pix.rect()), 12, 12)
+                
+                painter.setClipPath(path)
+                painter.drawPixmap(0, 0, src_pix)
+                painter.end()
+
+                msg.setIconPixmap(rounded)
+                msg.setWindowIcon(QIcon(logo_path)) # Override window icon with logo if preferred
+            else:
+                msg.setIcon(QMessageBox.Question)
+
+            msg.exec() 
+                
+            # PySide6 exec returns the standard button enum if used StandardButtons. 
+            # With addButton it returns an opaque ID. Let's trace it.
+            # Simplified:
+            
+            if msg.clickedButton() == no_btn:
+                # Force Default Template 1920x1080
+                self.on_resolution_changed(1920, 1080)
+            else:
+                # Adapt to Media
+                self.on_resolution_changed(width, height)
         
         is_audio = ext in ["mp3", "wav", "aac", "m4a", "flac"]
         is_image = ext in ["jpg", "jpeg", "png", "gif", "bmp", "webp"]

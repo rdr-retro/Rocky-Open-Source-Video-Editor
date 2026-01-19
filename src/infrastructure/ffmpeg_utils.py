@@ -79,17 +79,22 @@ class FFmpegUtils:
                 text=True, 
                 startupinfo=startupinfo
             )
-            output = result.stdout
+            output = result.stdout + result.stderr # Check both streams just in case
+            
+            # DEBUG: Trace check
+            print(f"DEBUG: FFmpeg -encoders output length: {len(output)}")
+            if len(output) < 500:
+                 print(f"DEBUG: Output content: {output}")
 
             encoders = []
             for line in output.splitlines():
-                if "V....." in line: # Video encoder
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        encoders.append(parts[1])
+                if "h264_videotoolbox" in line: encoders.append("h264_videotoolbox")
+                if "h264_nvenc" in line: encoders.append("h264_nvenc")
+                if "h264_qsv" in line: encoders.append("h264_qsv")
+                if "h264_amf" in line: encoders.append("h264_amf")
             
             FFmpegUtils._available_encoders = encoders
-
+            
             # Priority Detection
             if "h264_videotoolbox" in encoders:
                 FFmpegUtils._hardware_detected = "vt" # Apple Silicon / Mac
