@@ -489,6 +489,7 @@ class RockyApp(QMainWindow):
         self._active_workers = [] # Unified tracking for all background threads
         self.viewer_registry = [] # Track all active viewer panels for frame broadcasting
         self.timeline_registry = [] # Track all active timeline widgets for playhead sync
+        self.master_meter_registry = [] # Track all active master meter panels for gain sync
 
         if not self.initialize_engine():
             # Fatal error handled inside initialize_engine
@@ -621,37 +622,18 @@ class RockyApp(QMainWindow):
         self.toolbar = RockyToolbar(self)
         main_layout.addWidget(self.toolbar)
         
-        # 2. Main Vertical Splitter 
-        # Structure: 
-        #   [TOP: Middle Splitter (Assets | Viewer | Editor)]
-        #   [BOTTOM: Timeline]
-        self.main_vertical_splitter = QSplitter(Qt.Vertical)
-        
-        # --- MIDDLE SECTION (Assets, Viewer, Editor) ---
+        # 2. Single Flexible Panel
         self.middle_section = self._create_middle_section()
-        self.main_vertical_splitter.addWidget(self.middle_section)
-        
-        # --- BOTTOM SECTION (Timeline) ---
-        self.lower_section = self._create_lower_section()
-        self.main_vertical_splitter.addWidget(self.lower_section)
-        
-        self.main_vertical_splitter.setStretchFactor(0, 2)  # Middle section bigger
-        self.main_vertical_splitter.setStretchFactor(1, 1)  # Timeline smaller
-        
-        # Splitter styling (Transparent handles to show gap color)
-        self.main_vertical_splitter.setHandleWidth(4)
-        self.main_vertical_splitter.setStyleSheet("QSplitter::handle { background-color: transparent; }")
-
-        self.main_vertical_splitter.setSizes([550, 300])
-        
-        main_layout.addWidget(self.main_vertical_splitter)
+        main_layout.addWidget(self.middle_section, stretch=1)
         
         # 3. Status Bar
         self.status_bar = self._create_status_bar()
         main_layout.addWidget(self.status_bar)
 
         # Initial data sync
-        self.sidebar.refresh_tracks()
+        if self.sidebar:
+            self.sidebar.refresh_tracks()
+            
         self.on_time_changed(0, 0, "00:00:00;00", True) # Force initial timecode display
         self.rebuild_engine()
         
@@ -660,10 +642,14 @@ class RockyApp(QMainWindow):
 
     def force_initial_render(self):
         """Ensures every technical number is painted on start."""
-        for w in self.sidebar.track_widgets:
-            w.update()
-        self.timeline_widget.update()
-        self.timeline_ruler.update()
+        if self.sidebar:
+            for w in self.sidebar.track_widgets:
+                w.update()
+        if self.timeline_widget:
+            self.timeline_widget.update()
+        if self.timeline_ruler:
+            self.timeline_ruler.update()
+            
         self.on_time_changed(0, 0, "00:00:00;00", True)
 
 
@@ -672,86 +658,23 @@ class RockyApp(QMainWindow):
     # _wrap_rounded_panel removed (replaced by RockyPanel)
 
     def _create_middle_section(self):
-        """Creates the horizontal splitter for Assets | Viewer | Editor."""
+        """Creates a single flexible panel that can be any type."""
         container = QWidget()
-        layout = QHBoxLayout(container)
+        layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        self.mid_splitter = QSplitter(Qt.Horizontal)
-        self.mid_splitter.setHandleWidth(4)
-        self.mid_splitter.setStyleSheet("QSplitter::handle { background-color: transparent; }")
+        # Create single flexible panel - starts as Viewer
+        from .viewer import ViewerPanel
+        initial_content = ViewerPanel()
+        self.main_panel = RockyPanel(initial_content, title="VISOR DE VIDEO")
         
-        # 1. Left: Asset Tabs
-        self.asset_tabs = AssetTabsPanel()
-        panel_assets = RockyPanel(self.asset_tabs, title="ASSETS")
-        self.mid_splitter.addWidget(panel_assets)
+        # Register initial viewer
+        self.register_viewer(initial_content)
         
-        # 2. Center: Viewer + Meter
-        self.viewer = ViewerPanel()
-        self.master_meter = MasterMeterPanel() 
-        
-        panel_viewer = RockyPanel(self.viewer, title="PREVIEW")
-        self.mid_splitter.addWidget(panel_viewer)
-        
-        # 3. Right: Editor Panel (New)
-        self.editor_panel = EditorPanel()
-        panel_editor = RockyPanel(self.editor_panel, title="PROPERTIES")
-        self.mid_splitter.addWidget(panel_editor)
-        
-        self.mid_splitter.setStretchFactor(0, 1) # Assets
-        self.mid_splitter.setStretchFactor(1, 2) # Viewer (Wider)
-        self.mid_splitter.setStretchFactor(2, 1) # Editor
-        
-        layout.addWidget(self.mid_splitter)
+        layout.addWidget(self.main_panel)
         return container
 
-    def _create_lower_section(self):
-        # Create container for Sidebar + Timeline
-        container = QWidget()
-        
-        # Inner splitter [Sidebar | Timeline] wrapped in one rounded panel
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet("QSplitter::handle { background-color: #1a1a1a; }") # Inner splitter
-        
-        self.sidebar = SidebarPanel(self.model)
-        
-        # Timeline Assembly
-        timeline_container = QWidget()
-        t_layout = QVBoxLayout(timeline_container)
-        t_layout.setContentsMargins(0, 0, 0, 0)
-        t_layout.setSpacing(0)
-        
-        # USE SIMPLE TIMELINE
-        self.timeline_widget = SimpleTimeline(self.model)
-        self.sidebar.timeline = self.timeline_widget 
-        
-        # Timeline Ruler
-        self.timeline_ruler = TimelineRuler(self.timeline_widget)
-        self.timeline_ruler.setAutoFillBackground(True)
-        t_layout.addWidget(self.timeline_ruler, 0)
-        
-        self.timeline_scroll_area = QScrollArea()
-        self.timeline_scroll_area.setWidgetResizable(True)
-        self.timeline_scroll_area.setWidget(self.timeline_widget)
-        self.timeline_scroll_area.setFrameShape(QFrame.NoFrame)
-        self.timeline_scroll_area.setContentsMargins(0, 0, 0, 0)
-        # Scroll area styles (kept from original)
-        self.timeline_scroll_area.setStyleSheet("""
-            QScrollArea { border: 0px; background-color: #242424; }
-            QScrollBar:horizontal { height: 14px; background: #2b2b2b; }
-            QScrollBar::handle:horizontal { background: #555555; min-width: 20px; border-radius: 2px; }
-            QScrollBar:vertical { width: 14px; background: #2b2b2b; }
-            QScrollBar::handle:vertical { background: #555555; min-height: 20px; border-radius: 2px; }
-        """)
-        t_layout.addWidget(self.timeline_scroll_area, 1)
-        
-        splitter.addWidget(self.sidebar)
-        splitter.addWidget(timeline_container)
-        splitter.setStretchFactor(1, 1)
-        
-        # Now wrap this ENTIRE splitter in the rounded look
-        return RockyPanel(splitter, title="TIMELINE")
 
     def _create_status_bar(self):
         status_frame = QFrame()
@@ -818,34 +741,8 @@ class RockyApp(QMainWindow):
             self.platform_label.setText(f"Platform: Unknown ({str(e)})")
 
     def setup_event_connections(self):
-        """Standardizes the connection logic."""
-        # Timeline -> Side UI synchronization
-        self.timeline_widget.time_updated.connect(self.on_time_changed)
-        
-        # Scroll synchronization (Sidebar <-> Timeline)
-        self.timeline_scroll_area.verticalScrollBar().valueChanged.connect(
-            self.sidebar.scroll.verticalScrollBar().setValue
-        )
-        self.sidebar.scroll.verticalScrollBar().valueChanged.connect(
-            self.timeline_scroll_area.verticalScrollBar().setValue
-        )
-        
-        # Playback Engine
-        self.playback_timer = QTimer(self)
-        self.playback_timer.timeout.connect(self.on_playback_tick)
-        self.playback_timer.start(16) 
-        
-        # Signals
-        self.timeline_widget.play_pause_requested.connect(self.toggle_play)
-        self.timeline_widget.view_updated.connect(self.sync_scroll_to_view)
-        self.timeline_scroll_area.horizontalScrollBar().valueChanged.connect(self.sync_view_to_scroll)
-        self.timeline_widget.track_addition_requested.connect(self.sidebar.add_track)
-        self.timeline_widget.structure_changed.connect(self.on_structure_changed)
-        self.timeline_widget.hover_x_changed.connect(self.sync_hover_to_ruler)
-        self.timeline_widget.clip_proxy_toggled.connect(self.on_clip_proxy_clicked)
-        self.timeline_widget.clip_fx_toggled.connect(self.on_clip_fx_clicked)
-
-        # Toolbar Actions (Menus)
+        """Standardizes global event connections."""
+        # 1. Global Toolbar Actions
         self.toolbar.action_open.triggered.connect(self.on_open)
         self.toolbar.action_save.triggered.connect(self.on_save)
         self.toolbar.action_save_as.triggered.connect(self.on_save_as)
@@ -853,24 +750,22 @@ class RockyApp(QMainWindow):
         self.toolbar.action_preferences.triggered.connect(self.on_settings)
         self.toolbar.btn_proxy.clicked.connect(self.on_proxy_toggle)
         
-        # Audio Master
-        self.master_meter.fader.valueChanged.connect(self.on_master_gain_changed)
-        self.audio_player.level_updated.connect(self.master_meter.meter.set_levels)
+        # 2. Playback Engine Timer
+        self.playback_timer = QTimer(self)
+        self.playback_timer.timeout.connect(self.on_playback_tick)
+        self.playback_timer.start(16) 
         
-        # Viewer Controls
-        self.viewer.btn_rewind.clicked.connect(lambda: self.timeline_widget.update_playhead_to_x(0))
-        self.viewer.btn_play_pause.clicked.connect(self.toggle_play)
-        self.viewer.btn_fullscreen.clicked.connect(self._toggle_fullscreen_viewer)
-        self.viewer.slider_rate.valueChanged.connect(self.on_playback_rate_changed)
-        self.viewer.slider_rate.sliderReleased.connect(self.on_playback_rate_released)
+        # 3. Audio & Master Synchronization
+        self.audio_player.level_updated.connect(self.on_audio_levels_received)
 
-
-        # Asset Tabs (Effects only now)
-        # self.asset_tabs.resolution_changed.connect(self.on_resolution_changed) # Moved to Editor Panel
+    def on_audio_levels_received(self, levels):
+        """Dispatches audio levels to ALL active vumeters."""
+        if not levels: return
+        left, right = levels
         
-        # Editor Panel (Contextual)
-        self.timeline_widget.selection_changed.connect(self.editor_panel.update_context)
-        self.editor_panel.resolution_changed.connect(self.on_resolution_changed)
+        for m in self.master_meter_registry:
+            if hasattr(m, 'meter'):
+                m.meter.set_levels(left, right)
 
     def on_clip_fx_clicked(self, clip):
         """Show the Effects Dialog for the selected clip."""
@@ -950,7 +845,7 @@ class RockyApp(QMainWindow):
         """
         self.status_label.setText(f"Probing media: {os.path.basename(file_path)}...")
         
-        worker = MediaImportWorker(file_path, self.timeline_widget.get_fps())
+        worker = MediaImportWorker(file_path, self.get_fps())
         
         # We need to pass the state (start_frame, preferred_track_idx) to the finish method
         # We can use a lambda or partial to "bind" these values
@@ -1047,7 +942,7 @@ class RockyApp(QMainWindow):
         is_image = ext in ["jpg", "jpeg", "png", "gif", "bmp", "webp"]
         is_video = not is_audio and not is_image
         
-        fps = self.timeline_widget.get_fps()
+        fps = self.get_fps()
         # duration and source_duration are passed from worker (in frames)
         source_duration = duration if not is_image else -1
         
@@ -1064,7 +959,7 @@ class RockyApp(QMainWindow):
                     v_track = preferred_track_idx
             
             if v_track == -1:
-                self.sidebar.add_track(TrackType.VIDEO)
+                self.add_track(TrackType.VIDEO)
                 v_track = len(self.model.track_types) - 1
             
             v_clip = TimelineClip(file_name, start_frame, duration, v_track)
@@ -1073,7 +968,7 @@ class RockyApp(QMainWindow):
             
             # 2. Audio Track
             a_track = -1
-            self.sidebar.add_track(TrackType.AUDIO)
+            self.add_track(TrackType.AUDIO)
             a_track = len(self.model.track_types) - 1
             
             a_clip = TimelineClip(f"[Audio] {file_name}", start_frame, duration, a_track)
@@ -1098,7 +993,7 @@ class RockyApp(QMainWindow):
                     t_idx = preferred_track_idx
             
             if t_idx == -1:
-                self.sidebar.add_track(required_type)
+                self.add_track(required_type)
                 t_idx = len(self.model.track_types) - 1
             
             clip = TimelineClip(file_name, start_frame, duration, t_idx)
@@ -1164,8 +1059,10 @@ class RockyApp(QMainWindow):
                 
             # Replace model
             self.model = new_model
-            self.sidebar.model = new_model
-            self.timeline_widget.model = new_model
+            if self.sidebar:
+                self.sidebar.model = new_model
+            if self.timeline_widget:
+                self.timeline_widget.model = new_model
             # Re-initialize workers or reconnect if needed
             self.audio_worker.model = new_model
             
@@ -1215,7 +1112,7 @@ class RockyApp(QMainWindow):
             QMessageBox.warning(self, "Renderizar", "El timeline está vacío.")
             return
 
-        active_fps = self.timeline_widget.get_fps()
+        active_fps = self.get_fps()
         render_w = config["width"]
         render_h = config["height"]
 
@@ -1259,7 +1156,13 @@ class RockyApp(QMainWindow):
         dlg.exec()
 
     def toggle_play(self):
-        """Toggles the playback state of the project blueline."""
+        """Toggles the playback state. Restores hidden panels if needed."""
+        # Restoration logic - Show middle section if it was hidden
+        if hasattr(self, 'middle_section') and self.middle_section.isHidden():
+            self.middle_section.show()
+            self.status_label.setText("Interfaz restaurada")
+            # If it's empty, we might want to recreate a panel, but let's assume at least one exists or was hidden
+
         self.model.blueline.playing = not self.model.blueline.playing
         # If it's very close to 1.0, snap it
         if 0.95 < self.playback_rate < 1.05:
@@ -1272,7 +1175,7 @@ class RockyApp(QMainWindow):
         if self.model.blueline.playing:
             self.playback_timer.setInterval(int(16 / max(0.1, self.playback_rate)))
             
-            active_fps = self.timeline_widget.get_fps()
+            active_fps = self.get_fps()
             # Capturamos el estado inicial para el Reloj Maestro
             self.playback_start_frame = self.model.blueline.playhead_frame
             self.playback_start_audio_time = self.audio_player.get_processed_us()
@@ -1285,7 +1188,7 @@ class RockyApp(QMainWindow):
             # Vegas Style: Return to start position on stop
             if hasattr(self, 'playback_start_frame'):
                 self.model.blueline.set_playhead_frame(self.playback_start_frame)
-                fps = self.timeline_widget.get_fps()
+                fps = self.get_fps()
                 tc = self.model.format_timecode(self.playback_start_frame, fps)
                 self.on_time_changed(self.playback_start_frame / fps, int(self.playback_start_frame), tc, True)
                 self.timeline_widget.update()
@@ -1298,7 +1201,7 @@ class RockyApp(QMainWindow):
         
         if self.model.blueline.playing:
             # Re-anclamos el reloj maestro para evitar saltos al cambiar la velocidad
-            active_fps = self.timeline_widget.get_fps()
+            active_fps = self.get_fps()
             
             # Use Audio Clock for accurate elapsed time
             current_audio = self.audio_player.get_processed_us()
@@ -1332,7 +1235,7 @@ class RockyApp(QMainWindow):
         if not self.model.blueline.playing:
             return
 
-        active_fps = self.timeline_widget.get_fps()
+        active_fps = self.get_fps()
         
         # RELOJ MAESTRO: Calculamos el tiempo transcurrido REAL basado en el AUDIO
         # Esto previene el desincronismo (Drift). Si el audio se adelanta/atrasa, el video lo sigue.
@@ -1350,15 +1253,18 @@ class RockyApp(QMainWindow):
 
         
         # 1. Synchronize UI (Playhead and Timeline)
-        playhead_screen_x = self.timeline_widget.update_playhead_position(current_frame, forced=False)
-        self.auto_scroll_playhead(playhead_screen_x)
-        
-        # Update all registered timelines
+        # Update all registered timelines equally
+        playhead_screen_x = None
         for timeline in self.timeline_registry:
             try:
-                timeline.update_playhead_position(current_frame, forced=False)
+                x = timeline.update_playhead_position(current_frame, forced=False)
+                if playhead_screen_x is None:  # Use first timeline for scroll reference
+                    playhead_screen_x = x
             except:
                 pass
+        
+        if playhead_screen_x is not None:
+            self.auto_scroll_playhead(playhead_screen_x)
         
         # 2. Synchronize Engine (Atomic Evaluation)
         engine_timestamp = current_frame / active_fps
@@ -1377,14 +1283,16 @@ class RockyApp(QMainWindow):
         """
         Synchronizes the UI state when the playhead is manually moved.
         """
-        # Actualizar el timecode gigante en el sidebar
-        self.sidebar.header.set_timecode(timecode)
+        if self.sidebar:
+            # Actualizar el timecode gigante en el sidebar
+            self.sidebar.header.set_timecode(timecode)
+            
+            # Forzamos el repintado de toda la barra lateral
+            for w in self.sidebar.track_widgets:
+                w.update()
         
-        # Forzamos el repintado de toda la barra lateral
-        for w in self.sidebar.track_widgets:
-            w.update()
-        
-        self.timeline_ruler.update() # Ensure ruler handle moves
+        if self.timeline_ruler:
+            self.timeline_ruler.update() # Ensure ruler handle moves
         
         # If seek is forced while playing (manual seek during playback), update start reference
         if forced and self.model.blueline.playing:
@@ -1400,19 +1308,29 @@ class RockyApp(QMainWindow):
 
     def on_structure_changed(self):
         """Triggered when clips are moved, added, or deleted."""
-        self.sidebar.refresh_tracks()
+        # Refresh ALL sidebars in multi-panel layout
+        from .sidebar import SidebarPanel
+        for sidebar in self.findChildren(SidebarPanel):
+            sidebar.refresh_tracks()
         self.rebuild_engine()
-        self.timeline_widget.updateGeometry() # Force scrollbar update
-        self.timeline_ruler.update()
+        if self.timeline_widget:
+            self.timeline_widget.updateGeometry() # Force scrollbar update
+        if self.timeline_ruler:
+            self.timeline_ruler.update()
         self.update_proxy_button_state() # Link Master Button to Clip State
+
+    def add_track(self, ttype):
+        """Adds a track to the model and updates UI globally."""
+        self.model.track_types.append(ttype)
+        self.model.track_heights.append(60)
+        
+        # Refresh ALL sidebars in multi-panel layout
+        from .sidebar import SidebarPanel
+        for sidebar in self.findChildren(SidebarPanel):
+            sidebar.refresh_tracks()
 
     def _broadcast_frame(self, frame_buffer):
         """Send rendered frame to all registered viewer panels."""
-        # Always send to main viewer
-        if hasattr(self, 'viewer') and self.viewer:
-            self.viewer.display_frame(frame_buffer)
-        
-        # Send to all additional registered viewers
         for viewer in self.viewer_registry:
             try:
                 viewer.display_frame(frame_buffer)
@@ -1421,22 +1339,74 @@ class RockyApp(QMainWindow):
                 self.viewer_registry.remove(viewer)
 
     def register_viewer(self, viewer_panel):
-        """Register a viewer panel to receive frame broadcasts."""
+        """Register a viewer panel to receive frame broadcasts and connect controls."""
         if viewer_panel not in self.viewer_registry:
             self.viewer_registry.append(viewer_panel)
+            
+            # Connect standard controls if they exist
+            if hasattr(viewer_panel, 'btn_rewind'):
+                viewer_panel.btn_rewind.clicked.connect(lambda: self.on_rewind())
+            if hasattr(viewer_panel, 'btn_play_pause'):
+                viewer_panel.btn_play_pause.clicked.connect(self.toggle_play)
+            if hasattr(viewer_panel, 'btn_fullscreen'):
+                viewer_panel.btn_fullscreen.clicked.connect(self._toggle_fullscreen_viewer)
+            if hasattr(viewer_panel, 'slider_rate'):
+                viewer_panel.slider_rate.valueChanged.connect(self.on_playback_rate_changed)
+                viewer_panel.slider_rate.sliderReleased.connect(self.on_playback_rate_released)
+
+    def on_rewind(self):
+        """Handles rewind request from any viewer."""
+        timeline = self.get_active_timeline()
+        if timeline:
+            timeline.update_playhead_to_x(0)
 
     def unregister_viewer(self, viewer_panel):
         """Unregister a viewer panel from frame broadcasts."""
         if viewer_panel in self.viewer_registry:
             self.viewer_registry.remove(viewer_panel)
 
+    def register_master_meter(self, meter_panel):
+        """Register a master meter panel to sync with main audio output."""
+        if meter_panel not in self.master_meter_registry:
+            self.master_meter_registry.append(meter_panel)
+            # Connect fader to main gain control
+            if hasattr(meter_panel, 'fader'):
+                meter_panel.fader.valueChanged.connect(self.on_master_gain_changed)
+
+    def unregister_master_meter(self, meter_panel):
+        """Unregister a master meter panel."""
+        if meter_panel in self.master_meter_registry:
+            if hasattr(meter_panel, 'fader'):
+                try:
+                    meter_panel.fader.valueChanged.disconnect(self.on_master_gain_changed)
+                except:
+                    pass
+            self.master_meter_registry.remove(meter_panel)
+
     def register_timeline(self, timeline_widget):
         """Register a timeline widget to sync with main playback."""
         if timeline_widget not in self.timeline_registry:
             self.timeline_registry.append(timeline_widget)
-            # Connect timeline signals to main app
+            
+            # 1. Sync Playhead & Structure
             timeline_widget.time_updated.connect(self.on_time_changed)
             timeline_widget.structure_changed.connect(self.on_structure_changed)
+            
+            # 2. UI Action Signals
+            timeline_widget.play_pause_requested.connect(self.toggle_play)
+            timeline_widget.view_updated.connect(self.sync_scroll_to_view)
+            timeline_widget.hover_x_changed.connect(self.sync_hover_to_ruler)
+            timeline_widget.clip_proxy_toggled.connect(self.on_clip_proxy_clicked)
+            timeline_widget.clip_fx_toggled.connect(self.on_clip_fx_clicked)
+            
+            # 3. Logic & Contextual signals
+            timeline_widget.selection_changed.connect(self.on_timeline_selection_changed)
+
+    def on_timeline_selection_changed(self, selection):
+        """Dispatches selection changes to whichever properties panel is active."""
+        # Find any active EditorPanel (Properties) and update it
+        # In this hybrid version, we just look for property panels in children if needed
+        pass
 
     def unregister_timeline(self, timeline_widget):
         """Unregister a timeline widget from playback sync."""
@@ -1447,6 +1417,71 @@ class RockyApp(QMainWindow):
             except:
                 pass
             self.timeline_registry.remove(timeline_widget)
+
+    def get_active_timeline(self):
+        """Get the first active timeline from registry, or None."""
+        return self.timeline_registry[0] if self.timeline_registry else None
+
+    def get_active_viewer(self):
+        """Get the first active viewer from registry, or None."""
+        return self.viewer_registry[0] if self.viewer_registry else None
+
+    def get_fps(self):
+        """Get FPS from active timeline or return default 30."""
+        timeline = self.get_active_timeline()
+        if timeline and hasattr(timeline, 'get_fps'):
+            return timeline.get_fps()
+        return 30  # Default FPS
+
+    @property
+    def timeline_widget(self):
+        """Backward compatibility: Get active timeline."""
+        return self.get_active_timeline()
+
+    @property
+    def sidebar(self):
+        """Dynamic lookup: Find the sidebar associated with the active timeline."""
+        timeline = self.get_active_timeline()
+        if not timeline: return None
+        # Sidebar is usually a sibling in the dynamic panel layout
+        parent = timeline.parent()
+        if parent:
+            from .sidebar import SidebarPanel
+            # Search siblings or children of parent
+            res = parent.findChild(SidebarPanel)
+            if res: return res
+            # Search in grandparents (Splitter)
+            gp = parent.parent()
+            if gp: return gp.findChild(SidebarPanel)
+        return None
+
+    @property
+    def timeline_ruler(self):
+        """Dynamic lookup: Find the ruler associated with the active timeline."""
+        timeline = self.get_active_timeline()
+        if not timeline: return None
+        parent = timeline.parent()
+        if parent:
+            from .ruler import TimelineRuler
+            return parent.findChild(TimelineRuler)
+        return None
+
+    @property
+    def master_meter(self):
+        """Dynamic lookup: Find the FIRST active master meter registry entry."""
+        return self.master_meter_registry[0] if self.master_meter_registry else None
+
+    def get_master_gain(self):
+        """Safely get master gain from meter or return default 1.0."""
+        meter = self.master_meter
+        if meter and hasattr(meter, 'fader'):
+            return meter.fader.value() / 75.0
+        return 1.0 # Default gain
+
+    @property
+    def viewer(self):
+        """Backward compatibility: Get active viewer."""
+        return self.get_active_viewer()
 
     def on_master_gain_changed(self, value):
         """
@@ -1476,7 +1511,7 @@ class RockyApp(QMainWindow):
         
         # Trigger a re-render of the current frame to show the new aspect ratio
         current_frame = self.model.blueline.playhead_frame
-        active_fps = self.timeline_widget.get_fps()
+        active_fps = self.get_fps()
         tc = self.model.format_timecode(current_frame, active_fps)
         self.on_time_changed(current_frame / active_fps, int(current_frame), tc, True)
         
@@ -1631,11 +1666,11 @@ class RockyApp(QMainWindow):
         locker = QMutexLocker(self.engine_lock)
         self.engine.clear()
         self.clip_map = {} # Reset map
-        active_fps = self.timeline_widget.get_fps()
+        active_fps = self.get_fps()
         self.engine.set_fps(active_fps)
         
         # Sync Master Gain
-        initial_gain = self.master_meter.fader.value() / 75.0
+        initial_gain = self.get_master_gain()
         self.engine.set_master_gain(initial_gain)
         
         # 1. Sync Tracks
@@ -1712,7 +1747,7 @@ class RockyApp(QMainWindow):
             
             # 1. Refresh global viewer (real-time feedback in main window)
             current_frame = self.model.blueline.playhead_frame
-            active_fps = self.timeline_widget.get_fps()
+            active_fps = self.get_fps()
             tc = self.model.format_timecode(current_frame, active_fps)
             self.on_time_changed(current_frame / active_fps, int(current_frame), tc, True)
             
@@ -1760,53 +1795,88 @@ class RockyApp(QMainWindow):
         return source
 
     def auto_scroll_playhead(self, abs_x):
-        """
-        Ensures the playhead remains visible without jarring jumps.
-        Implements 'Sticky Edge' scrolling: when the cursor reaches 85% of the view,
-        the timeline starts sliding smoothly under it.
-        """
-        viewport_width = self.timeline_scroll_area.viewport().width()
-        if viewport_width <= 0:
-            return
+        """Ensures the playhead remains visible within the active timeline's scroll area."""
+        timeline = self.get_active_timeline()
+        if not timeline: return
+        
+        from PySide6.QtWidgets import QScrollArea
+        scroll_area = timeline.findAncestor(QScrollArea) if hasattr(timeline, 'findAncestor') else None
+        # Fallback manual parent check
+        if not scroll_area:
+            p = timeline.parent()
+            while p:
+                if isinstance(p, QScrollArea):
+                    scroll_area = p
+                    break
+                p = p.parent()
+        
+        if not scroll_area: return
+
+        viewport_width = scroll_area.viewport().width()
+        if viewport_width <= 0: return
             
-        scroll_bar = self.timeline_scroll_area.horizontalScrollBar()
+        scroll_bar = scroll_area.horizontalScrollBar()
         scroll_val = scroll_bar.value()
         rel_x = abs_x - scroll_val
         
-        # Sticky threshold: 85% of the screen
         threshold = int(viewport_width * 0.85)
-        
         if rel_x > threshold:
-            # Shift the scrollbar precisely to keep the cursor at the threshold
             shift = rel_x - threshold
             scroll_bar.setValue(scroll_val + int(shift))
-            
         elif rel_x < 0:
-            # If playhead is before the view (e.g. after a manual jump), center it
             new_val = max(0, scroll_val + int(rel_x) - 100)
             scroll_bar.setValue(new_val)
 
     def sync_hover_to_ruler(self, x_coord):
-        """Mirrors the mouse position to the timeline ruler for temporal reference."""
-        self.timeline_ruler.mouse_x = x_coord
-        self.timeline_ruler.update()
+        """Mirrors mouse position to the timeline ruler. Finds ruler dynamically."""
+        timeline = self.get_active_timeline()
+        if not timeline: return
+        
+        # Ruler is usually a sibling in the same layout
+        parent = timeline.parent()
+        if parent:
+            from .ruler import TimelineRuler
+            rules = parent.findChildren(TimelineRuler)
+            for r in rules:
+                r.mouse_x = x_coord
+                r.update()
         
     def sync_scroll_to_view(self):
         """Aligns the horizontal scrollbar with the internal timeline view state."""
-        scroll_bar = self.timeline_scroll_area.horizontalScrollBar()
-        self.timeline_widget.updateGeometry()
+        timeline = self.get_active_timeline()
+        if not timeline: return
         
-        if self.timeline_widget.pixels_per_second > 0:
-            target_value = int(self.timeline_widget.visible_start_time * self.timeline_widget.pixels_per_second)
+        from PySide6.QtWidgets import QScrollArea
+        p = timeline.parent()
+        scroll_area = None
+        while p:
+            if isinstance(p, QScrollArea):
+                scroll_area = p
+                break
+            p = p.parent()
+            
+        if not scroll_area: return
+        
+        scroll_bar = scroll_area.horizontalScrollBar()
+        timeline.updateGeometry()
+        
+        if timeline.pixels_per_second > 0:
+            target_value = int(timeline.visible_start_time * timeline.pixels_per_second)
             scroll_bar.blockSignals(True)
             scroll_bar.setValue(target_value)
             scroll_bar.blockSignals(False)
 
     def sync_view_to_scroll(self, scroll_value):
-        """Aligns the internal timeline view state with the scrollbar position."""
-        if self.timeline_widget.pixels_per_second > 0:
-            self.timeline_widget.update()
-            self.timeline_ruler.update()
+        """Aligns timeline view state with scrollbar. (Triggered from ScrollArea inside panel)"""
+        timeline = self.get_active_timeline()
+        if not timeline: return
+        timeline.update()
+        # Find sibling ruler
+        parent = timeline.parent()
+        if parent:
+            from .ruler import TimelineRuler
+            for r in parent.findChildren(TimelineRuler):
+                r.update()
 
 def main():
     import signal

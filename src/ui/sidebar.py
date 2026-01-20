@@ -135,6 +135,9 @@ class SidebarPanel(QWidget):
         self.refresh_timer.timeout.connect(self.refresh_ui)
         self.refresh_timer.start(20)
 
+        # Populate existing tracks from model
+        self.refresh_tracks()
+
     def contextMenuEvent(self, event):
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)

@@ -82,12 +82,35 @@ class RockyPanelHeader(QFrame):
         """)
         self.btn_close.setToolTip("Cerrar Panel")
         
+        # 2b. Split Buttons - Circular subtle buttons
+        self.btn_split_h = QPushButton("⬒") # Looks like split horizontal
+        self.btn_split_v = QPushButton("⬔") # Looks like split vertical
+        for btn in [self.btn_split_h, self.btn_split_v]:
+            btn.setFixedSize(20, 20)
+            btn.setStyleSheet("""
+                QPushButton {
+                    color: #888; 
+                    font-size: 14px;
+                    border-radius: 4px;
+                    background-color: transparent;
+                }
+                QPushButton:hover {
+                    background-color: rgba(255, 153, 0, 0.15);
+                    color: #ff9900;
+                }
+            """)
+        
+        self.btn_split_h.setToolTip("Dividir Horizontal")
+        self.btn_split_v.setToolTip("Dividir Vertical")
+        
         # 3. Title
         self.lbl_title = QLabel(title)
         self.lbl_title.setStyleSheet("margin-left: 4px; font-weight: 600;")
         
         layout.addWidget(self.btn_type)
         layout.addWidget(self.btn_close)
+        layout.addWidget(self.btn_split_h)
+        layout.addWidget(self.btn_split_v)
         layout.addWidget(self.lbl_title)
         layout.addStretch()
         
@@ -95,6 +118,53 @@ class RockyPanelHeader(QFrame):
         self.type_menu = QMenu(self)
         self._populate_menu()
         self.btn_type.setMenu(self.type_menu)
+        
+        # Connect close button
+        self.btn_close.clicked.connect(self.on_close_clicked)
+        self.btn_split_h.clicked.connect(lambda: self.on_split_clicked(Qt.Orientation.Vertical)) # Divides vertically -> Splitter is vertical
+        self.btn_split_v.clicked.connect(lambda: self.on_split_clicked(Qt.Orientation.Horizontal)) # Divides horizontally -> Splitter is horizontal
+
+    def on_split_clicked(self, orientation):
+        """Request parent to split."""
+        parent = self.parent()
+        if parent and hasattr(parent, 'split'):
+            parent.split(orientation)
+
+    def on_close_clicked(self):
+        """Emit close signal to parent."""
+        parent = self.parent()
+        if parent and hasattr(parent, 'close_panel'):
+            parent.close_panel()
+
+    def mousePressEvent(self, event):
+        """Detect start of drag operation."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_start_pos = event.pos()
+
+    def mouseMoveEvent(self, event):
+        """Start drag if moved enough pixels."""
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+        if not hasattr(self, 'drag_start_pos'):
+            return
+            
+        if (event.pos() - self.drag_start_pos).manhattanLength() < 10:
+            return
+            
+        from PySide6.QtGui import QDrag
+        from PySide6.QtCore import QMimeData
+        
+        drag = QDrag(self)
+        mime = QMimeData()
+        
+        # We store the memory address of the parent RockyPanel to identify it on drop
+        parent_panel = self.parent()
+        if parent_panel:
+            mime.setText(f"rocky_panel:{id(parent_panel)}")
+            drag.setMimeData(mime)
+            
+            # Optional: create a small pixmap for the drag icon
+            drag.exec(Qt.DropAction.MoveAction)
 
     def _populate_menu(self):
         """Populate the panel type switcher menu."""
@@ -103,6 +173,7 @@ class RockyPanelHeader(QFrame):
             ("Línea de Tiempo", "Timeline"),
             ("Propiedades", "Properties"),
             ("Efectos", "Effects"),
+            ("Vúmetro Maestro", "MasterMeter"),
             ("Explorador de Archivos", "FileBrowser"),
         ]
         for label, panel_type in types:
@@ -134,6 +205,12 @@ class RockyPanel(QFrame):
     def __init__(self, content_widget, title="Editor", parent=None):
         super().__init__(parent)
         self.setObjectName("RockyPanelContainer")
+        self.current_type = "Viewer" # Initial default
+        if "TIEMPO" in title: self.current_type = "Timeline"
+        elif "PROPIEDADES" in title: self.current_type = "Properties"
+        elif "EFECTOS" in title: self.current_type = "Effects"
+        elif "VÚMETRO" in title: self.current_type = "MasterMeter"
+        elif "EXPLORADOR" in title: self.current_type = "FileBrowser"
         
         # Styling: The 8px radius applies to this container
         self.setStyleSheet(f"""
@@ -172,12 +249,193 @@ class RockyPanel(QFrame):
             content_layout.addWidget(content_widget)
             
         layout.addWidget(self.content_area)
+        
+        # Drag and drop support
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        """Allow drops from other RockyPanels."""
+        if event.mimeData().hasText() and event.mimeData().text().startswith("rocky_panel:"):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        """Handle the swap or docking of panel contents."""
+        try:
+            mime_text = event.mimeData().text()
+            source_id = int(mime_text.split(":")[1])
+            
+            # Find the source panel in the application hierarchy
+            from PySide6.QtWidgets import QApplication
+            source_panel = None
+            for widget in QApplication.instance().allWidgets():
+                if id(widget) == source_id:
+                    source_panel = widget
+                    break
+            
+            if not source_panel or source_panel == self:
+                return
+
+            # Edge detection for DOCKING (Windows Snap style)
+            pos = event.position().toPoint()
+            w, h = self.width(), self.height()
+            margin_x = w * 0.25
+            margin_y = h * 0.25
+            
+            edge = None # None means center swap
+            if pos.x() < margin_x: edge = "left"
+            elif pos.x() > w - margin_x: edge = "right"
+            elif pos.y() < margin_y: edge = "top"
+            elif pos.y() > h - margin_y: edge = "bottom"
+            
+            if edge:
+                # DOCK-SPLIT LOGIC
+                orientation = Qt.Orientation.Horizontal if edge in ["left", "right"] else Qt.Orientation.Vertical
+                
+                # Store source info before it might be closed
+                src_type = source_panel.current_type
+                src_title = source_panel.header.lbl_title.text()
+                
+                # 1. Close/Remove source panel from its current position
+                source_panel.close_panel()
+                
+                # 2. Split THIS panel
+                self.split(orientation)
+                
+                # 3. The split creates a sibling. 
+                # Find the newly created sibling in the splitter
+                from PySide6.QtWidgets import QSplitter
+                splitter = self.parentWidget()
+                if isinstance(splitter, QSplitter):
+                    idx = splitter.indexOf(self)
+                    # For left/top, we want the new content on the left/top
+                    # split() currently adds new panel to the RIGHT/BOTTOM (idx 1)
+                    # We might need to rearrange
+                    sibling_idx = 1 if idx == 0 else 0
+                    sibling = splitter.widget(sibling_idx)
+                    
+                    if edge in ["left", "top"]:
+                        # Swap positions in splitter: move self to index 1, sibling to 0
+                        splitter.insertWidget(0, sibling)
+                        splitter.insertWidget(1, self)
+                        target_dock = sibling
+                    else:
+                        target_dock = sibling
+                    
+                    # 4. Set the docked panel to the source's type
+                    target_dock.change_panel_type(src_type)
+                    target_dock.set_title(src_title)
+                
+                event.acceptProposedAction()
+            else:
+                # CENTER SWAP LOGIC
+                self.swap_with(source_panel)
+                event.acceptProposedAction()
+                
+        except Exception as e:
+            print(f"Drop Error: {e}")
+
+    def swap_with(self, other):
+        """Exchange content type and title with another panel."""
+        # 1. Store current states
+        my_type = self.current_type
+        my_title = self.header.lbl_title.text()
+        
+        other_type = other.current_type
+        other_title = other.header.lbl_title.text()
+        
+        # 2. Swap types
+        self.change_panel_type(other_type)
+        self.set_title(other_title)
+        
+        other.change_panel_type(my_type)
+        other.set_title(my_title)
+
+    def close_panel(self):
+        """Logic to close and join panels."""
+        from PySide6.QtWidgets import QSplitter
+        parent = self.parentWidget()
+        
+        if isinstance(parent, QSplitter):
+            # If we are in a splitter, we can "join" by closing this widget
+            # and letting the other widget take all space
+            if parent.count() > 1:
+                # Unregister self components from registries before deleting
+                self._unregister_all_components()
+                self.hide()
+                self.deleteLater()
+                # The splitter will automatically expand the other widget
+            else:
+                # Last widget in this branch? Hide parent splitter too
+                self._unregister_all_components()
+                parent.hide()
+        else:
+            # Fallback for root panel: just hide
+            self._unregister_all_components()
+            self.hide()
+
+    def _unregister_all_components(self):
+        """Helper to cleanup registries before deletion."""
+        if self.content_area.layout().count() > 0:
+            old_widget = self.content_area.layout().itemAt(0).widget()
+            if old_widget:
+                if hasattr(old_widget, 'display_frame'):
+                    self._unregister_viewer(old_widget)
+                from .master_meter import MasterMeterPanel
+                if isinstance(old_widget, MasterMeterPanel):
+                    self._unregister_master_meter(old_widget)
+                self._unregister_timeline_from_widget(old_widget)
+
+    def split(self, orientation):
+        """Partitions this panel space into two using a QSplitter."""
+        from PySide6.QtWidgets import QSplitter, QVBoxLayout, QHBoxLayout
+        
+        parent = self.parentWidget()
+        if not parent: return
+        
+        # 1. Create a neuen splitter
+        new_splitter = QSplitter(orientation)
+        new_splitter.setHandleWidth(2)
+        new_splitter.setStyleSheet("QSplitter::handle { background-color: #1a1a1a; }")
+        
+        # 2. Insert splitter into our current spot
+        if isinstance(parent, QSplitter):
+            # We are already in a splitter, insert new splitter at our index
+            idx = parent.indexOf(self)
+            parent.insertWidget(idx, new_splitter)
+        else:
+            # We are likely in the middle_section container or root
+            layout = parent.layout()
+            if layout:
+                idx = layout.indexOf(self)
+                layout.insertWidget(idx, new_splitter)
+        
+        # 3. Create sibling panel (clone current type)
+        new_content = self._create_panel_content(self.current_type)
+        new_panel = RockyPanel(new_content, title=self.header.lbl_title.text())
+        new_panel.current_type = self.current_type
+        
+        # 4. Move self to the new splitter and add new panel
+        new_splitter.addWidget(self)
+        new_splitter.addWidget(new_panel)
+        
+        # 5. Fix registries for the newly created brother
+        if hasattr(new_content, 'display_frame'):
+            self._register_viewer(new_content)
+        from .master_meter import MasterMeterPanel
+        if isinstance(new_content, MasterMeterPanel):
+            self._register_master_meter(new_content)
+        self._register_timeline_from_widget(new_content)
+        
+        self.show()
+        new_panel.show()
+        new_splitter.show()
 
     def set_title(self, text):
         self.header.set_title(text)
 
     def change_panel_type(self, panel_type):
         """Change the panel content based on selected type."""
+        self.current_type = panel_type
         # Unregister old content if needed
         if self.content_area.layout().count() > 0:
             old_widget = self.content_area.layout().itemAt(0).widget()
@@ -185,6 +443,10 @@ class RockyPanel(QFrame):
                 # Check if it's a viewer and unregister it
                 if hasattr(old_widget, 'display_frame'):
                     self._unregister_viewer(old_widget)
+                # Check if it's a master meter
+                from .master_meter import MasterMeterPanel
+                if isinstance(old_widget, MasterMeterPanel):
+                    self._unregister_master_meter(old_widget)
                 # Check if it contains a timeline and unregister it
                 self._unregister_timeline_from_widget(old_widget)
                 self.content_area.layout().removeWidget(old_widget)
@@ -197,6 +459,10 @@ class RockyPanel(QFrame):
             # Register new viewer if it's one
             if hasattr(new_widget, 'display_frame'):
                 self._register_viewer(new_widget)
+            # Register master meter if it's one
+            from .master_meter import MasterMeterPanel
+            if isinstance(new_widget, MasterMeterPanel):
+                self._register_master_meter(new_widget)
             # Register timeline if it contains one
             self._register_timeline_from_widget(new_widget)
     
@@ -274,6 +540,30 @@ class RockyPanel(QFrame):
                     break
         except:
             pass
+
+    def _register_master_meter(self, meter_widget):
+        """Register a master meter with the main application."""
+        try:
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, 'register_master_meter'):
+                    widget.register_master_meter(meter_widget)
+                    break
+        except:
+            pass
+
+    def _unregister_master_meter(self, meter_widget):
+        """Unregister a master meter with the main application."""
+        try:
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, 'unregister_master_meter'):
+                    widget.unregister_master_meter(meter_widget)
+                    break
+        except:
+            pass
     
     def _create_panel_content(self, panel_type):
         """Factory method to create panel content based on type."""
@@ -348,6 +638,14 @@ class RockyPanel(QFrame):
                 splitter.addWidget(timeline_container)
                 splitter.setStretchFactor(1, 1)  # Timeline takes more space
                 
+                # Sincronización de scroll vertical (Sidebar <-> Timeline)
+                timeline_scroll.verticalScrollBar().valueChanged.connect(
+                    sidebar.scroll.verticalScrollBar().setValue
+                )
+                sidebar.scroll.verticalScrollBar().valueChanged.connect(
+                    timeline_scroll.verticalScrollBar().setValue
+                )
+                
                 return splitter
             except Exception as e:
                 # Fallback to message if timeline creation fails
@@ -367,6 +665,13 @@ class RockyPanel(QFrame):
             try:
                 from .asset_tabs import AssetTabsPanel
                 return AssetTabsPanel()
+            except:
+                pass
+        elif panel_type == "MasterMeter":
+            # Import and create MasterMeterPanel
+            try:
+                from .master_meter import MasterMeterPanel
+                return MasterMeterPanel()
             except:
                 pass
         elif panel_type == "FileBrowser":
