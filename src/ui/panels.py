@@ -375,19 +375,35 @@ class JoinOverlay(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # Draw semi-transparent wash
-        painter.fillRect(self.rect(), QColor(255, 255, 255, 30))
+        # 1. Dark Ghosting wash (Blender Style)
+        # We use a dark semi-transparent black to "dim" the victim
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 160))
         
-        # Pulsing Arrow logic
-        alpha = int(220 * self.pulse_val)
-        painter.setPen(QPen(QColor(255, 153, 0, alpha), 12, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        # 2. Neon Orange Border for the Victim Area
+        painter.setPen(QPen(QColor(255, 156, 0, 200), 2, Qt.PenStyle.SolidLine))
+        painter.drawRect(self.rect().adjusted(1, 1, -1, -1))
+        
+        # 3. High-Contrast Pulsing Arrow
+        alpha = int(255 * self.pulse_val)
+        glow_alpha = int(100 * self.pulse_val)
         
         w, h = self.width(), self.height()
         cx, cy = w // 2, h // 2
-        size = (min(w, h) * 0.3) * self.pulse_val # Animate scale too
+        base_size = min(w, h) * 0.25
+        size = base_size * (0.9 + 0.1 * self.pulse_val) # Subtle pulse scale
         
-        head_size = size * 0.6
+        head_size = size * 0.7
         
+        # Draw Arrow Shadow/Glow first
+        painter.setPen(QPen(QColor(0, 0, 0, alpha), 16, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        self._draw_arrow_shape(painter, cx, cy, size, head_size)
+        
+        # Draw Main Arrow Line
+        painter.setPen(QPen(QColor(255, 156, 0, alpha), 10, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        self._draw_arrow_shape(painter, cx, cy, size, head_size)
+
+    def _draw_arrow_shape(self, painter, cx, cy, size, head_size):
+        """Helper to draw the arrow geometry."""
         if self.direction == 'right': 
             painter.drawLine(cx - size, cy, cx + size, cy)
             painter.drawLine(cx + size, cy, cx + size - head_size, cy - head_size)
@@ -424,7 +440,7 @@ class RockyPanel(QFrame):
         elif "EXPLORADOR" in title: self.current_type = "FileBrowser"
         
         # Interactive Corner Size
-        self.CORNER_SIZE = 12
+        self.CORNER_SIZE = 8
         
         # Interaction States
         self.is_corner_dragging = False
@@ -441,10 +457,10 @@ class RockyPanel(QFrame):
         # Styling: The 8px radius applies to this container
         self.setStyleSheet(f"""
             #RockyPanelContainer {{
-                background-color: #2b2b2b;
-                border-radius: {dt.RADIUS_CONTAINER}px;
-                margin: 2px; /* Slight gap between panels */
-                border: 1px solid #111;
+                background-color: #1a1a1a;
+                border-radius: 12px;
+                margin: 2px;
+                border: 1px solid #333;
             }}
         """)
         
@@ -571,7 +587,7 @@ class RockyPanel(QFrame):
             dist = diff.manhattanLength()
             
             # Initial Mode Locking (Refined Sensitivity)
-            if dist > 8 and self.gesture_mode is None:
+            if dist > 5 and self.gesture_mode is None:
                 is_inward = self.rect().contains(pos)
                 if is_inward:
                     self.gesture_mode = 'split'
@@ -580,7 +596,7 @@ class RockyPanel(QFrame):
                         self.locked_orient = Qt.Orientation.Horizontal # Vertical line
                     else:
                         self.locked_orient = Qt.Orientation.Vertical # Horizontal line
-                elif dist > 20: # Higher threshold for outward JOIN
+                elif dist > 12: # Higher threshold for outward JOIN
                     self.gesture_mode = 'join'
             
             # Executing Locked Mode
@@ -620,9 +636,9 @@ class RockyPanel(QFrame):
                 self.update()
                 
                 # Check for direction based on major displacement
-                # REQUIRE 25px PENETRATION (Safety Buffer)
+                # REQUIRE 15px PENETRATION (Safety Buffer)
                 w, h = self.width(), self.height()
-                SIDE_BUFFER = 25
+                SIDE_BUFFER = 15
                 side = None
                 if pos.x() < -SIDE_BUFFER: side = 'left'
                 elif pos.x() > w + SIDE_BUFFER: side = 'right'
@@ -695,7 +711,9 @@ class RockyPanel(QFrame):
         # 1. Darken the victim (Ghost Effect)
         target_panel.content_area.hide()
         target_panel.header.hide()
-        target_panel.setStyleSheet("background-color: #050505; border: 1px solid #000;")
+        # Apply a deep fade-out look for the animation
+        target_panel.setStyleSheet("background-color: #000000; border: none;")
+        target_panel.update()
         
         # 2. Animate Splitter
         idx_victim = parent.indexOf(target_panel)
@@ -788,27 +806,9 @@ class RockyPanel(QFrame):
                 # RockyApp layout will handle the rest on next resize
 
     def paintEvent(self, event):
-        """Draw interactive corner triangles (Blender style)."""
+        """Standard paint event (Hatched corners removed for a cleaner look)."""
         super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        w, h = self.width(), self.height()
-        s = self.CORNER_SIZE * 1.5
-        
-        # Hatched Corners (Radiant Orange)
-        painter.setPen(QPen(QColor(255, 153, 0, 180), 1.5, Qt.PenStyle.SolidLine))
-        
-        # Draw 4 diagonal lines in each corner for tactile feel
-        for corner_pos in [(0,0), (w,0), (0,h), (w,h)]:
-            cx, cy = corner_pos
-            for i in range(1, 5):
-                offset = i * 4
-                if cx == 0 and cy == 0: painter.drawLine(offset, 0, 0, offset) # TL
-                elif cx == w and cy == 0: painter.drawLine(w - offset, 0, w, offset) # TR
-                elif cx == 0 and cy == h: painter.drawLine(0, h - offset, offset, h) # BL
-                elif cx == w and cy == h: painter.drawLine(w - offset, h, w, h - offset) # BR
-
         # Split preview is now handled by the top-level global_split_overlay
 
     def _show_pie_menu(self):
