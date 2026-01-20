@@ -76,8 +76,6 @@ class RockyToolbar(QFrame):
         self.action_open = self.menu_archivo.addAction("Abrir")
         self.action_save = self.menu_archivo.addAction("Guardar")
         self.action_save_as = self.menu_archivo.addAction("Guardar como...")
-        self.menu_archivo.addSeparator()
-        self.action_settings = self.menu_archivo.addAction("Ajustes")
         self.btn_archivo.setMenu(self.menu_archivo)
         layout.addWidget(self.btn_archivo)
 
@@ -88,6 +86,9 @@ class RockyToolbar(QFrame):
         self.menu_editar.setStyleSheet(MENU_STYLE)
         self.menu_editar.addAction("Deshacer")
         self.menu_editar.addAction("Rehacer")
+        self.menu_editar.addSeparator()
+        self.action_preferences = self.menu_editar.addAction("Preferencias...")
+        self.action_preferences.setShortcut("Ctrl+,")
         self.btn_editar.setMenu(self.menu_editar)
         layout.addWidget(self.btn_editar)
 

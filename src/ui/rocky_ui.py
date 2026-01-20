@@ -863,7 +863,7 @@ class RockyApp(QMainWindow):
         self.toolbar.action_save.triggered.connect(self.on_save)
         self.toolbar.action_save_as.triggered.connect(self.on_save_as)
         self.toolbar.action_render.triggered.connect(self.on_render)
-        self.toolbar.action_settings.triggered.connect(self.on_settings)
+        self.toolbar.action_preferences.triggered.connect(self.on_settings)
         self.toolbar.btn_proxy.clicked.connect(self.on_proxy_toggle)
         
         # Audio Master

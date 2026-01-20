@@ -1,46 +1,61 @@
-# Exact UI Design System from Image
-# Replicating the provided reference image colors
+# Rocky Video Editor - Dynamic Styles using Design Tokens
+# This file now imports colors from design_tokens.py for theme support
 
-# Backgrounds
-WORKSPACE_BG = "#333333"  # General timeline / workspace background
-PANEL_BG = "#252525"      # Secondary panels
-TIMECODE_HEADER_BG = "#282828" # The specific dark grey for timecode
+from . import design_tokens as dt
 
-# Track Sidebar Special Colors
-TRACK_VIDEO_SIDEBAR = "#748a91" # Light blue-grey for video track info
-TRACK_AUDIO_SIDEBAR = "#333333" # Dark grey for audio track info
+# ============================================================================
+# BACKGROUND COLORS (from active theme)
+# ============================================================================
+WORKSPACE_BG = dt.BG_DEEPEST
+PANEL_BG = dt.BG_DEEP
+TIMECODE_HEADER_BG = dt.BG_MEDIUM
 
-# Strip Colors (The vertical color line)
-STRIP_VIDEO = "#7b3145" # Dark maroon
-STRIP_AUDIO = "#4f6a96" # Steel blue
+# ============================================================================
+# TRACK COLORS (from active theme)
+# ============================================================================
+TRACK_VIDEO_SIDEBAR = dt.BG_ELEVATED
+TRACK_AUDIO_SIDEBAR = dt.BG_DEEPEST
 
-# Clip Themes
-CLIP_VIDEO_HEADER = "#7b3145" # Maroon header
-CLIP_VIDEO_BODY = "#632738"   # Slightly darker body
-CLIP_AUDIO_HEADER = "#4f6a96" # Blue header
-CLIP_AUDIO_BODY = "#3a4d6e"   # Slightly darker body
+STRIP_VIDEO = dt.TRACK_VIDEO_ACCENT
+STRIP_AUDIO = dt.TRACK_AUDIO_ACCENT
 
-# Accents
-ACCENT_BLUE = "#00a3ff"       # The blue for small icons/selection
-TEXT_WHITE = "#ffffff"
-TEXT_SUBTLE = "#cccccc"
+# ============================================================================
+# CLIP COLORS (from active theme)
+# ============================================================================
+CLIP_VIDEO_HEADER = dt.TRACK_VIDEO_ACCENT
+CLIP_VIDEO_BODY = dt.TRACK_VIDEO_BODY
+CLIP_AUDIO_HEADER = dt.TRACK_AUDIO_ACCENT
+CLIP_AUDIO_BODY = dt.TRACK_AUDIO_BODY
 
-# Typography
-UI_FONT = "'Inter', '.AppleSystemUIFont', 'Helvetica Neue', sans-serif"
-MONO_FONT = "'Menlo', 'Monaco', 'Courier New', monospace"
+# ============================================================================
+# ACCENT & TEXT COLORS (from active theme)
+# ============================================================================
+ACCENT_BLUE = dt.ACCENT_PRIMARY
+TEXT_WHITE = dt.TEXT_PRIMARY
+TEXT_SUBTLE = dt.TEXT_SECONDARY
+
+# ============================================================================
+# TYPOGRAPHY (from design tokens)
+# ============================================================================
+UI_FONT = dt.FONT_FAMILY_UI
+MONO_FONT = dt.FONT_FAMILY_MONO
+
+# ============================================================================
+# QSS STYLES (using design tokens)
+# ============================================================================
 
 SLIDER_STYLE = f"""
 QSlider {{
     background: transparent;
 }}
 QSlider::groove:horizontal {{
-    border: 1px solid #444444;
+    border: 1px solid {dt.BORDER_DEFAULT};
     height: 3px;
-    background: #111111;
+    background: {dt.BG_DEEPEST};
 }}
 QSlider::handle:horizontal {{
-    background: #ffffff;
-    border: 1px solid #000000;
+    background: {dt.TEXT_PRIMARY};
+    border: 1px solid {dt.BORDER_STRONG};
     width: 8px;
     height: 12px;
     margin: -5px 0;
@@ -49,62 +64,62 @@ QSlider::handle:horizontal {{
 
 PUSH_BUTTON_STYLE = f"""
 QPushButton {{
-    background-color: #444444;
-    color: #ffffff;
-    border: 1px solid #222222;
+    background-color: {dt.BG_MEDIUM};
+    color: {dt.TEXT_PRIMARY};
+    border: 1px solid {dt.BORDER_SUBTLE};
     padding: 3px 8px;
-    font-family: {UI_FONT};
-    font-size: 10px;
+    font-family: {dt.FONT_FAMILY_UI};
+    font-size: {dt.FONT_SIZE_SM}px;
 }}
 QPushButton:hover {{
-    background-color: #555555;
+    background-color: {dt.BG_ELEVATED};
 }}
 QPushButton:pressed {{
-    background-color: #222222;
+    background-color: {dt.BG_DEEP};
 }}
 QPushButton:checked {{
-    background-color: #00a3ff;
-    color: #000000;
+    background-color: {dt.ACCENT_PRIMARY};
+    color: {dt.BG_DEEPEST};
     font-weight: bold;
 }}
 """
 
 TOOLBAR_STYLE = f"""
 QFrame#Toolbar {{
-    background-color: #333333;
-    border-bottom: 1px solid #000000;
+    background-color: {dt.BG_DEEP};
+    border-bottom: 1px solid {dt.BORDER_SUBTLE};
 }}
 """
 
 MODERN_LABEL = f"""
-color: #ffffff;
-font-family: {UI_FONT};
-font-size: 11px;
+color: {dt.TEXT_PRIMARY};
+font-family: {dt.FONT_FAMILY_UI};
+font-size: {dt.FONT_SIZE_BASE}px;
 """
 
 MENU_STYLE = f"""
 QMenu {{
-    background-color: #333333; /* Dark background */
-    border: 1px solid #000000;
-    color: #ffffff;
-    font-family: {UI_FONT};
-    font-size: 11px;
-    border-radius: 6px; /* Rounded corners */
-    padding: 4px; /* Padding for the rounding */
+    background-color: {dt.BG_DEEP};
+    border: 1px solid {dt.BORDER_DEFAULT};
+    color: {dt.TEXT_PRIMARY};
+    font-family: {dt.FONT_FAMILY_UI};
+    font-size: {dt.FONT_SIZE_BASE}px;
+    border-radius: {dt.RADIUS_MD}px;
+    padding: 4px;
 }}
 QMenu::item {{
     padding: 4px 24px 4px 12px;
     background-color: transparent;
-    border-radius: 4px; /* Rounded selection matches menu */
-    margin: 1px; /* Spacing between items */
+    border-radius: {dt.RADIUS_SM}px;
+    margin: 1px;
 }}
 QMenu::item:selected {{
-    background-color: {ACCENT_BLUE}; /* High contrast blue */
-    color: #000000; /* Dark text for contrast against bright blue */
+    background-color: {dt.ACCENT_PRIMARY};
+    color: {dt.BG_DEEPEST};
 }}
 QMenu::separator {{
     height: 1px;
-    background: #555555;
-    margin: 4px 8px; /* Indented separator */
+    background: {dt.BORDER_DEFAULT};
+    margin: 4px 8px;
 }}
 """
