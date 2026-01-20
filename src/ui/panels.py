@@ -1,7 +1,57 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                               QPushButton, QFrame, QMenu, QGraphicsDropShadowEffect)
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGraphicsOpacityEffect, 
+                               QPushButton, QFrame, QMenu, QGraphicsDropShadowEffect, QGridLayout)
+from PySide6.QtCore import Qt, Signal, QSize, QRect, QPoint, QTimer, QVariantAnimation, QEasingCurve
+from PySide6.QtGui import QPainter, QColor, QPen, QCursor
 from . import design_tokens as dt
+
+class PanelTypeGridMenu(QFrame):
+    """Blender-style grid menu for switching panel types."""
+    type_selected = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: #1a1a1a;
+                border: 1px solid #333;
+                border-radius: 4px;
+            }}
+            QPushButton {{
+                background-color: transparent;
+                border-radius: 4px;
+                color: #ddd;
+                padding: 10px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 153, 0, 0.2);
+                color: white;
+            }}
+        """)
+        
+        layout = QGridLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+        
+        types = [
+            ("📽️", "Visor", "Viewer"),
+            ("🎞️", "Timeline", "Timeline"),
+            ("⚙️", "Ajustes", "Properties"),
+            ("✨", "Efectos", "Effects"),
+            ("📊", "Audio", "MasterMeter"),
+            ("📁", "Archivos", "FileBrowser"),
+        ]
+        
+        for i, (icon, label, p_type) in enumerate(types):
+            btn = QPushButton(f"{icon}\n{label}")
+            btn.setFixedSize(70, 60)
+            btn.clicked.connect(lambda checked=False, t=p_type: self._on_selected(t))
+            layout.addWidget(btn, i // 3, i % 3)
+
+    def _on_selected(self, p_type):
+        self.type_selected.emit(p_type)
+        self.close()
 
 class RockyPanelHeader(QFrame):
     """
@@ -35,94 +85,145 @@ class RockyPanelHeader(QFrame):
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 0, 6, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
         
-        # 1. Type Switcher (Change Panel Type) - Circular Button
-        self.btn_type = QPushButton("⋮") 
-        self.btn_type.setFixedSize(20, 20)
+        # 1. Type Switcher (Now on the LEFT)
+        self.btn_type = QPushButton("📽️") # Default icon
+        self.btn_type.setFixedSize(24, 24)
         self.btn_type.setStyleSheet("""
             QPushButton {
                 color: #ff9900; 
-                font-size: 16px;
-                font-weight: bold;
-                border-radius: 10px;
-                background-color: rgba(255, 153, 0, 0.15);
-                border: 1px solid rgba(255, 153, 0, 0.3);
+                font-size: 14px;
+                background-color: transparent;
+                border: none;
             }
             QPushButton:hover {
-                background-color: rgba(255, 153, 0, 0.3);
-                border: 1px solid rgba(255, 153, 0, 0.5);
-            }
-            QPushButton:pressed {
-                background-color: rgba(255, 153, 0, 0.4);
+                background-color: rgba(255, 153, 0, 0.1);
+                border-radius: 4px;
             }
         """)
         self.btn_type.setToolTip("Cambiar Tipo de Panel")
         
-        # 2. Close Action (Close/Join Panel) - Circular Button
-        self.btn_close = QPushButton("×")
-        self.btn_close.setFixedSize(20, 20)
-        self.btn_close.setStyleSheet("""
-            QPushButton {
-                color: #ff9900; 
-                font-size: 14px;
-                font-weight: bold;
-                border-radius: 10px;
-                background-color: rgba(255, 153, 0, 0.15);
-                border: 1px solid rgba(255, 153, 0, 0.3);
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 80, 80, 0.3);
-                border: 1px solid rgba(255, 80, 80, 0.5);
-                color: #ff5050;
-            }
-            QPushButton:pressed {
-                background-color: rgba(255, 80, 80, 0.4);
-            }
-        """)
-        self.btn_close.setToolTip("Cerrar Panel")
-        
-        # 2b. Split Buttons - Circular subtle buttons
-        self.btn_split_h = QPushButton("⬒") # Looks like split horizontal
-        self.btn_split_v = QPushButton("⬔") # Looks like split vertical
-        for btn in [self.btn_split_h, self.btn_split_v]:
-            btn.setFixedSize(20, 20)
-            btn.setStyleSheet("""
-                QPushButton {
-                    color: #888; 
-                    font-size: 14px;
-                    border-radius: 4px;
-                    background-color: transparent;
-                }
-                QPushButton:hover {
-                    background-color: rgba(255, 153, 0, 0.15);
-                    color: #ff9900;
-                }
-            """)
-        
-        self.btn_split_h.setToolTip("Dividir Horizontal")
-        self.btn_split_v.setToolTip("Dividir Vertical")
-        
-        # 3. Title
+        # 2. Title
         self.lbl_title = QLabel(title)
-        self.lbl_title.setStyleSheet("margin-left: 4px; font-weight: 600;")
+        self.lbl_title.setStyleSheet("margin-left: 2px; font-weight: 600; color: #888;")
         
         layout.addWidget(self.btn_type)
-        layout.addWidget(self.btn_close)
-        layout.addWidget(self.btn_split_h)
-        layout.addWidget(self.btn_split_v)
         layout.addWidget(self.lbl_title)
+        
+        # 3. Minimal Expansion Button (Built-in '+' button)
+        self.btn_expand = QPushButton("+")
+        self.btn_expand.setFixedSize(20, 20)
+        self.btn_expand.setStyleSheet(f"""
+            QPushButton {{
+                color: {dt.ACCENT_PRIMARY};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: transparent;
+                border: none;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 153, 0, 0.2);
+            }}
+        """)
+        self.btn_expand.clicked.connect(self.toggle_collapse)
+        self.btn_expand.hide() # Hidden by default
+        layout.addWidget(self.btn_expand)
+        
         layout.addStretch()
+
+        # Connect events
+        self.btn_type.clicked.connect(self.show_grid_menu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_header_context_menu)
+
+    def mouseDoubleClickEvent(self, event):
+        """Header collapse on double click."""
+        self.toggle_collapse()
+
+    def toggle_collapse(self):
+        """Collapse header to 8px solid line with a '+' button or expand back."""
+        if self.height() > 8:
+            self.old_height = self.height()
+            self.setFixedHeight(8) # Robust indicator strip
+            self.btn_type.hide()
+            self.lbl_title.hide()
+            self.btn_expand.show()
+            self.btn_expand.setFixedSize(16, 16)
+            self.btn_expand.setStyleSheet(f"""
+                QPushButton {{
+                    color: white;
+                    font-size: 12px;
+                    font-weight: bold;
+                    background-color: rgba(0, 0, 0, 0.4);
+                    border-radius: 8px;
+                    border: none;
+                }}
+            """)
+            # Apply Solid Orange with Depth
+            self.setStyleSheet(f"QFrame {{ background-color: #ff9900; border: 1px solid #c87800; border-radius: 4px; }}") 
+            
+            # Add Shadow Effect for "Protrusion"
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(8)
+            shadow.setXOffset(0)
+            shadow.setYOffset(2)
+            shadow.setColor(QColor(0, 0, 0, 180))
+            self.setGraphicsEffect(shadow)
+        else:
+            self.setGraphicsEffect(None) # Remove shadow
+            self.setFixedHeight(self.old_height if hasattr(self, 'old_height') else 28)
+            self.btn_type.show()
+            self.lbl_title.show()
+            self.btn_expand.hide()
+            self.setStyleSheet(f"QFrame {{ background-color: transparent; border-bottom: 1px solid #1a1a1a; }}")
+
+    def show_grid_menu(self):
+        """Show the Blender-style grid menu."""
+        menu = PanelTypeGridMenu(self)
+        menu.type_selected.connect(self._on_type_selected)
         
-        # Menu for Type Switcher
-        self.type_menu = QMenu(self)
-        self._populate_menu()
-        self.btn_type.setMenu(self.type_menu)
-        
-        # Connect close button
-        self.btn_close.clicked.connect(self.on_close_clicked)
-        self.btn_split_h.clicked.connect(lambda: self.on_split_clicked(Qt.Orientation.Vertical)) # Divides vertically -> Splitter is vertical
-        self.btn_split_v.clicked.connect(lambda: self.on_split_clicked(Qt.Orientation.Horizontal)) # Divides horizontally -> Splitter is horizontal
+        pos = self.btn_type.mapToGlobal(QPoint(0, self.btn_type.height()))
+        menu.move(pos)
+        menu.show()
+
+    def _on_type_selected(self, p_type):
+        """Forward selection to parent panel."""
+        parent = self.parent()
+        if parent and hasattr(parent, 'change_panel_type'):
+            parent.change_panel_type(p_type)
+            self.update_type_icon(p_type)
+
+    def show_header_context_menu(self, pos):
+        """Right-click menu for header options."""
+        menu = QMenu(self)
+        flip_action = menu.addAction("Flip to Bottom" if self.parent().layout().indexOf(self) == 0 else "Flip to Top")
+        flip_action.triggered.connect(self.toggle_position)
+        menu.exec(self.mapToGlobal(pos))
+
+    def toggle_position(self):
+        """Move header between top and bottom of the panel."""
+        parent = self.parent()
+        layout = parent.layout()
+        idx = layout.indexOf(self)
+        layout.removeWidget(self)
+        if idx == 0:
+            layout.addWidget(self) # Add to end (bottom)
+        else:
+            layout.insertWidget(0, self) # Add to start (top)
+
+    def update_type_icon(self, panel_type):
+        """Update the icon based on current panel type."""
+        icons = {
+            "Viewer": "📽️",
+            "Timeline": "🎞️",
+            "Properties": "⚙️",
+            "Effects": "✨",
+            "MasterMeter": "📊",
+            "FileBrowser": "📂"
+        }
+        icon = icons.get(panel_type, "📽️")
+        self.btn_type.setText(icon)
 
     def on_split_clicked(self, orientation):
         """Request parent to split."""
@@ -135,36 +236,6 @@ class RockyPanelHeader(QFrame):
         parent = self.parent()
         if parent and hasattr(parent, 'close_panel'):
             parent.close_panel()
-
-    def mousePressEvent(self, event):
-        """Detect start of drag operation."""
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.drag_start_pos = event.pos()
-
-    def mouseMoveEvent(self, event):
-        """Start drag if moved enough pixels."""
-        if not (event.buttons() & Qt.MouseButton.LeftButton):
-            return
-        if not hasattr(self, 'drag_start_pos'):
-            return
-            
-        if (event.pos() - self.drag_start_pos).manhattanLength() < 10:
-            return
-            
-        from PySide6.QtGui import QDrag
-        from PySide6.QtCore import QMimeData
-        
-        drag = QDrag(self)
-        mime = QMimeData()
-        
-        # We store the memory address of the parent RockyPanel to identify it on drop
-        parent_panel = self.parent()
-        if parent_panel:
-            mime.setText(f"rocky_panel:{id(parent_panel)}")
-            drag.setMimeData(mime)
-            
-            # Optional: create a small pixmap for the drag icon
-            drag.exec(Qt.DropAction.MoveAction)
 
     def _populate_menu(self):
         """Populate the panel type switcher menu."""
@@ -184,6 +255,7 @@ class RockyPanelHeader(QFrame):
     def on_type_selected(self, panel_type, label):
         """Handle panel type selection from menu."""
         self.set_title(label.upper())
+        self.update_type_icon(panel_type)
         # Emit signal to parent RockyPanel
         parent = self.parent()
         if parent and hasattr(parent, 'change_panel_type'):
@@ -193,6 +265,145 @@ class RockyPanelHeader(QFrame):
         """Update the panel title."""
         self.lbl_title.setText(text)
 
+
+
+class LayoutAnimator:
+    """Helper to animate QSplitter sizes smoothly."""
+    def __init__(self, splitter, duration=250, easing=QEasingCurve.Type.OutQuart):
+        self.splitter = splitter
+        self.duration = duration
+        self.easing = easing
+        self.animation = QVariantAnimation()
+        self.animation.setDuration(duration)
+        self.animation.setEasingCurve(easing)
+        self.animation.valueChanged.connect(self._update_sizes)
+
+    def animate(self, start_sizes, end_sizes):
+        self.start_sizes = start_sizes
+        self.end_sizes = end_sizes
+        self.animation.setStartValue(0.0)
+        self.animation.setEndValue(1.0)
+        self.animation.start()
+
+    def _update_sizes(self, value):
+        new_sizes = []
+        for s, e in zip(self.start_sizes, self.end_sizes):
+            new_sizes.append(int(s + (e - s) * value))
+        self.splitter.setSizes(new_sizes)
+
+
+class SplitPreviewOverlay(QWidget):
+    """Overlay for drawing a solid orange split marker ON TOP of everything."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForInput)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.split_rect = None # Global coordinates
+        self.hide()
+
+    def set_preview(self, rect):
+        """Expects rect in parent (main window) coordinates."""
+        self.split_rect = rect
+        # Cover the entire parent window
+        if self.parentWidget():
+            self.setGeometry(self.parentWidget().rect())
+        self.show()
+        self.update()
+
+    def paintEvent(self, event):
+        if not self.split_rect: return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw everything in global (overlay) coordinates
+        target = QRectF(self.split_rect)
+        
+        # 1. Intense Neon Glow (Multi-layered bloom)
+        glow_color = QColor(255, 100, 0, 25) 
+        for i in range(1, 9):
+            painter.setPen(QPen(glow_color, 1 + i * 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            painter.drawRect(target.adjusted(1, 1, -1, -1))
+            
+        # 2. Hard Black Shadow
+        painter.setPen(QPen(QColor(0, 0, 0, 220), 4, Qt.PenStyle.SolidLine))
+        painter.drawRect(target.adjusted(1, 1, 0, 0))
+        
+        # 3. Main Neon Core Line
+        painter.setPen(QPen(QColor(255, 153, 0), 2, Qt.PenStyle.SolidLine))
+        painter.drawRect(target.adjusted(0, 0, -1, -1))
+        
+        # Note: No fillRect here to keep panel content visible ("sin perder la forma")
+
+
+class JoinOverlay(QWidget):
+    """Semi-transparent arrow overlay with Pulsing Animation."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForInput)
+        self.direction = 'right'
+        self.target_rect = None
+        self.pulse_val = 1.0 # For pulsing animation
+        
+        self.pulse_anim = QVariantAnimation(self)
+        self.pulse_anim.setDuration(800)
+        self.pulse_anim.setStartValue(0.6)
+        self.pulse_anim.setEndValue(1.0)
+        self.pulse_anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self.pulse_anim.setLoopCount(-1) # Infinite loop
+        self.pulse_anim.valueChanged.connect(self._update_pulse)
+        self.hide()
+
+    def _update_pulse(self, val):
+        self.pulse_val = val
+        self.update()
+
+    def set_join(self, target_rect, direction):
+        self.target_rect = target_rect
+        self.direction = direction
+        self.setGeometry(target_rect)
+        self.show()
+        self.pulse_anim.start()
+        self.update()
+
+    def hide(self):
+        self.pulse_anim.stop()
+        super().hide()
+
+    def paintEvent(self, event):
+        if not self.target_rect: return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw semi-transparent wash
+        painter.fillRect(self.rect(), QColor(255, 255, 255, 30))
+        
+        # Pulsing Arrow logic
+        alpha = int(220 * self.pulse_val)
+        painter.setPen(QPen(QColor(255, 153, 0, alpha), 12, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        
+        w, h = self.width(), self.height()
+        cx, cy = w // 2, h // 2
+        size = (min(w, h) * 0.3) * self.pulse_val # Animate scale too
+        
+        head_size = size * 0.6
+        
+        if self.direction == 'right': 
+            painter.drawLine(cx - size, cy, cx + size, cy)
+            painter.drawLine(cx + size, cy, cx + size - head_size, cy - head_size)
+            painter.drawLine(cx + size, cy, cx + size - head_size, cy + head_size)
+        elif self.direction == 'left':
+            painter.drawLine(cx + size, cy, cx - size, cy)
+            painter.drawLine(cx - size, cy, cx - size + head_size, cy - head_size)
+            painter.drawLine(cx - size, cy, cx - size + head_size, cy + head_size)
+        elif self.direction == 'bottom':
+            painter.drawLine(cx, cy - size, cx, cy + size)
+            painter.drawLine(cx, cy + size, cx - head_size, cy + size - head_size)
+            painter.drawLine(cx, cy + size, cx + head_size, cy + size - head_size)
+        elif self.direction == 'top':
+            painter.drawLine(cx, cy + size, cx, cy - size)
+            painter.drawLine(cx, cy - size, cx - head_size, cy - size + head_size)
+            painter.drawLine(cx, cy - size, cx + head_size, cy - size + head_size)
 
 
 class RockyPanel(QFrame):
@@ -211,6 +422,21 @@ class RockyPanel(QFrame):
         elif "EFECTOS" in title: self.current_type = "Effects"
         elif "VÚMETRO" in title: self.current_type = "MasterMeter"
         elif "EXPLORADOR" in title: self.current_type = "FileBrowser"
+        
+        # Interactive Corner Size
+        self.CORNER_SIZE = 12
+        
+        # Interaction States
+        self.is_corner_dragging = False
+        self.active_corner = None
+        self.drag_start_pos = None
+        self.split_preview_rect = None
+        self.is_maximized = False
+        self.pending_join_target = None
+        self.gesture_mode = None 
+        self.locked_orient = None
+        self.active_splitter = None # For live tracking
+        self.split_index = 0 # Which side of the splitter are we?
         
         # Styling: The 8px radius applies to this container
         self.setStyleSheet(f"""
@@ -250,105 +476,357 @@ class RockyPanel(QFrame):
             
         layout.addWidget(self.content_area)
         
-        # Drag and drop support
-        self.setAcceptDrops(True)
+        # Sync initial icon
+        self.header.update_type_icon(self.current_type)
+        
+        # Phase 1: Corners & Areas (Blender-style)
+        self.setMouseTracking(True)
 
-    def dragEnterEvent(self, event):
-        """Allow drops from other RockyPanels."""
-        if event.mimeData().hasText() and event.mimeData().text().startswith("rocky_panel:"):
-            event.acceptProposedAction()
+        # Install event filter to catch splitter handle context menu
+        QTimer.singleShot(100, self._setup_splitter_filter)
 
-    def dropEvent(self, event):
-        """Handle the swap or docking of panel contents."""
-        try:
-            mime_text = event.mimeData().text()
-            source_id = int(mime_text.split(":")[1])
-            
-            # Find the source panel in the application hierarchy
-            from PySide6.QtWidgets import QApplication
-            source_panel = None
-            for widget in QApplication.instance().allWidgets():
-                if id(widget) == source_id:
-                    source_panel = widget
-                    break
-            
-            if not source_panel or source_panel == self:
-                return
+    def _setup_splitter_filter(self):
+        """Find the splitter handle if this is in a splitter and install filter."""
+        from PySide6.QtWidgets import QSplitter
+        parent = self.parentWidget()
+        if isinstance(parent, QSplitter):
+            # We want to catch the handle BEFORE this widget
+            idx = parent.indexOf(self)
+            if idx > 0:
+                handle = parent.handle(idx)
+                handle.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                handle.customContextMenuRequested.connect(lambda pos, h=handle: self._show_handle_menu(pos, h))
 
-            # Edge detection for DOCKING (Windows Snap style)
-            pos = event.position().toPoint()
-            w, h = self.width(), self.height()
-            margin_x = w * 0.25
-            margin_y = h * 0.25
+    def _show_handle_menu(self, pos, handle):
+        """Show the 'Join Areas' menu on the splitter handle."""
+        menu = QMenu(self)
+        join_action = menu.addAction("Join Areas")
+        join_action.triggered.connect(lambda: self._start_join_from_handle(handle))
+        menu.exec(handle.mapToGlobal(pos))
+
+    def _start_join_from_handle(self, handle):
+        """Trigger the join arrow from a handle context menu."""
+        # This is a bit complex as we need to know which way to join.
+        # Manual says "Aparece una flecha, click hacia el área que quieres eliminar".
+        # We'll initiate the JoinOverlay mode.
+        self.is_corner_dragging = True # Simulate a drag
+        self.drag_start_pos = self.mapFromGlobal(QCursor.pos())
+        self.active_corner = 'br' # Arbitrary corner to trigger logic
+        # Force the next mouse move to trigger join feedback
+
+    def _get_neighbor(self, direction):
+        """Find the adjacent panel in the given direction within the splitter tree."""
+        from PySide6.QtWidgets import QSplitter
+        parent = self.parentWidget()
+        if not isinstance(parent, QSplitter):
+            return None
+        
+        idx = parent.indexOf(self)
+        orient = parent.orientation()
+        
+        if orient == Qt.Orientation.Horizontal:
+            if direction == 'left' and idx > 0: return parent.widget(idx - 1)
+            if direction == 'right' and idx < parent.count() - 1: return parent.widget(idx + 1)
+        else:
+            if direction == 'top' and idx > 0: return parent.widget(idx - 1)
+            if direction == 'bottom' and idx < parent.count() - 1: return parent.widget(idx + 1)
             
-            edge = None # None means center swap
-            if pos.x() < margin_x: edge = "left"
-            elif pos.x() > w - margin_x: edge = "right"
-            elif pos.y() < margin_y: edge = "top"
-            elif pos.y() > h - margin_y: edge = "bottom"
-            
-            if edge:
-                # DOCK-SPLIT LOGIC
-                orientation = Qt.Orientation.Horizontal if edge in ["left", "right"] else Qt.Orientation.Vertical
-                
-                # Store source info before it might be closed
-                src_type = source_panel.current_type
-                src_title = source_panel.header.lbl_title.text()
-                
-                # 1. Close/Remove source panel from its current position
-                source_panel.close_panel()
-                
-                # 2. Split THIS panel
-                self.split(orientation)
-                
-                # 3. The split creates a sibling. 
-                # Find the newly created sibling in the splitter
-                from PySide6.QtWidgets import QSplitter
-                splitter = self.parentWidget()
-                if isinstance(splitter, QSplitter):
-                    idx = splitter.indexOf(self)
-                    # For left/top, we want the new content on the left/top
-                    # split() currently adds new panel to the RIGHT/BOTTOM (idx 1)
-                    # We might need to rearrange
-                    sibling_idx = 1 if idx == 0 else 0
-                    sibling = splitter.widget(sibling_idx)
-                    
-                    if edge in ["left", "top"]:
-                        # Swap positions in splitter: move self to index 1, sibling to 0
-                        splitter.insertWidget(0, sibling)
-                        splitter.insertWidget(1, self)
-                        target_dock = sibling
-                    else:
-                        target_dock = sibling
-                    
-                    # 4. Set the docked panel to the source's type
-                    target_dock.change_panel_type(src_type)
-                    target_dock.set_title(src_title)
-                
-                event.acceptProposedAction()
+        return None
+
+    def _get_corner_at(self, pos):
+        """Identify which corner (if any) the position is in."""
+        w, h = self.width(), self.height()
+        s = self.CORNER_SIZE
+        if pos.x() < s and pos.y() < s: return 'tl'
+        if pos.x() > w - s and pos.y() < s: return 'tr'
+        if pos.x() < s and pos.y() > h - s: return 'bl'
+        if pos.x() > w - s and pos.y() > h - s: return 'br'
+        return None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            corner = self._get_corner_at(event.pos())
+            if corner:
+                self.active_corner = corner
+                self.is_corner_dragging = True
+                self.drag_start_pos = event.pos()
+                self.grabMouse() # Take control for the entire gesture
+                return # Intercept for corner gesture
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        pos = event.pos()
+        
+        # 1. Cursor Feedback
+        if not self.is_corner_dragging:
+            corner = self._get_corner_at(pos)
+            if corner:
+                self.setCursor(Qt.CursorShape.CrossCursor)
             else:
-                # CENTER SWAP LOGIC
-                self.swap_with(source_panel)
-                event.acceptProposedAction()
+                self.unsetCursor()
+        
+        # 2. Gesture Handling
+        if self.is_corner_dragging:
+            diff = pos - self.drag_start_pos
+            dist = diff.manhattanLength()
+            
+            # Initial Mode Locking (Refined Sensitivity)
+            if dist > 8 and self.gesture_mode is None:
+                is_inward = self.rect().contains(pos)
+                if is_inward:
+                    self.gesture_mode = 'split'
+                    # LOCK AXIS: If horizontal movement is greater, we do a vertical split
+                    if abs(diff.x()) > abs(diff.y()):
+                        self.locked_orient = Qt.Orientation.Horizontal # Vertical line
+                    else:
+                        self.locked_orient = Qt.Orientation.Vertical # Horizontal line
+                elif dist > 20: # Higher threshold for outward JOIN
+                    self.gesture_mode = 'join'
+            
+            # Executing Locked Mode
+            if self.gesture_mode == 'split':
+                self._hide_join_overlay()
                 
-        except Exception as e:
-            print(f"Drop Error: {e}")
+                # 1. Trigger Initial Split (Atomic)
+                if self.active_splitter is None:
+                    w, h = self.width(), self.height()
+                    SAFE = 40
+                    if self.locked_orient == Qt.Orientation.Horizontal:
+                        pt = max(SAFE, min(w - SAFE, pos.x()))
+                    else:
+                        pt = max(SAFE, min(h - SAFE, pos.y()))
+                        
+                    self.active_splitter = self.split(self.locked_orient, pt)
+                    # Determine side (0 or 1)
+                    idx = self.active_splitter.indexOf(self)
+                    self.split_index = idx
+                
+                # 2. Track Handle Live (High-Precision Mapping)
+                if self.active_splitter:
+                    # Map local mouse to splitter space for 1:1 precision
+                    split_pt = self.mapTo(self.active_splitter, pos)
+                    total = self.active_splitter.width() if self.active_splitter.orientation() == Qt.Orientation.Horizontal else self.active_splitter.height()
+                    
+                    val = split_pt.x() if self.active_splitter.orientation() == Qt.Orientation.Horizontal else split_pt.y()
+                    val = max(40, min(total - 40, val)) # Enforce 40px safe zone
+                    
+                    # Apply live sizes
+                    new_sizes = [val, total - val]
+                    self.active_splitter.setSizes(new_sizes)
+                self.update()
+                
+            elif self.gesture_mode == 'join':
+                self.split_preview_rect = None
+                self.update()
+                
+                # Check for direction based on major displacement
+                # REQUIRE 25px PENETRATION (Safety Buffer)
+                w, h = self.width(), self.height()
+                SIDE_BUFFER = 25
+                side = None
+                if pos.x() < -SIDE_BUFFER: side = 'left'
+                elif pos.x() > w + SIDE_BUFFER: side = 'right'
+                elif pos.y() < -SIDE_BUFFER: side = 'top'
+                elif pos.y() > h + SIDE_BUFFER: side = 'bottom'
+                
+                if side:
+                    neighbor = self._get_neighbor(side)
+                    if neighbor:
+                        self._show_join_overlay(neighbor, side)
+                    else:
+                        self._hide_join_overlay()
+                else:
+                    self._hide_join_overlay()
+            return
+        
+        super().mouseMoveEvent(event)
 
-    def swap_with(self, other):
-        """Exchange content type and title with another panel."""
-        # 1. Store current states
-        my_type = self.current_type
-        my_title = self.header.lbl_title.text()
+    def _show_join_overlay(self, neighbor, direction):
+        """Display the arrow overlay over the panel to be absorbed."""
+        # FIND THE ROOT WINDOW (Robust Blender Style)
+        main_win = self.window()
+        if not main_win: return
         
-        other_type = other.current_type
-        other_title = other.header.lbl_title.text()
+        # Ensure RockyApp attributes exist
+        if not hasattr(main_win, 'global_join_overlay'):
+            main_win.global_join_overlay = JoinOverlay(main_win)
         
-        # 2. Swap types
-        self.change_panel_type(other_type)
-        self.set_title(other_title)
+        overlay = main_win.global_join_overlay
         
-        other.change_panel_type(my_type)
-        other.set_title(my_title)
+        # Map neighbor's geometry to main_win's coordinate space
+        glob_pos = neighbor.mapTo(main_win, neighbor.rect().topLeft())
+        overlay.set_join(QRect(glob_pos, neighbor.size()), direction)
+        overlay.raise_()
+        self.pending_join_target = neighbor
+
+    def _show_split_preview(self, rect):
+        """Show the top-level split preview overlay."""
+        # FIND THE ROOT WINDOW (Robust Blender Style)
+        main_win = self.window()
+        if not main_win: return
+        
+        if not hasattr(main_win, 'global_split_overlay'):
+            main_win.global_split_overlay = SplitPreviewOverlay(main_win)
+            
+        overlay = main_win.global_split_overlay
+        # Map local rect (panel space) to main_win coordinates
+        glob_pos = self.mapTo(main_win, rect.topLeft())
+        overlay.set_preview(QRect(glob_pos, rect.size()))
+        overlay.raise_()
+
+    def _hide_join_overlay(self):
+        main_win = self.window()
+        if not main_win: return
+        
+        if hasattr(main_win, 'global_join_overlay'):
+            main_win.global_join_overlay.hide()
+        if hasattr(main_win, 'global_split_overlay'):
+            main_win.global_split_overlay.hide()
+        self.pending_join_target = None
+
+    def _execute_join(self, target_panel):
+        """Ghost Collapse: Absorb another panel with animation."""
+        parent = self.parentWidget()
+        from PySide6.QtWidgets import QSplitter
+        if not isinstance(parent, QSplitter):
+            target_panel.close_panel()
+            return
+            
+        # 1. Darken the victim (Ghost Effect)
+        target_panel.content_area.hide()
+        target_panel.header.hide()
+        target_panel.setStyleSheet("background-color: #050505; border: 1px solid #000;")
+        
+        # 2. Animate Splitter
+        idx_victim = parent.indexOf(target_panel)
+        idx_survivor = parent.indexOf(self)
+        
+        old_sizes = parent.sizes()
+        new_sizes = list(old_sizes)
+        total = old_sizes[idx_victim] + old_sizes[idx_survivor]
+        
+        new_sizes[idx_victim] = 0
+        new_sizes[idx_survivor] = total
+        
+        self.animator = LayoutAnimator(parent, duration=350, easing=QEasingCurve.Type.OutQuart)
+        self.animator.animation.finished.connect(target_panel.close_panel)
+        self.animator.animate(old_sizes, new_sizes)
+
+    def mouseReleaseEvent(self, event):
+        if self.is_corner_dragging:
+            self.releaseMouse() # Release control
+            # 1. Join Execution
+            if self.gesture_mode == 'join':
+                if hasattr(self, 'pending_join_target') and self.pending_join_target:
+                    self._execute_join(self.pending_join_target)
+            
+            # 2. Split Execution (On Release)
+            elif self.gesture_mode == 'split' and self.split_preview_rect:
+                # The line followed our cursor, now we finalize
+                if self.pending_orientation == Qt.Orientation.Horizontal:
+                    split_pos = self.split_preview_rect.x()
+                else:
+                    split_pos = self.split_preview_rect.y()
+                self.split(self.pending_orientation, split_pos)
+        
+        self._hide_join_overlay()
+        self.is_corner_dragging = False
+        self.active_corner = None
+        self.split_preview_rect = None
+        self.gesture_mode = None
+        self.locked_orient = None
+        self.active_splitter = None
+        self.update()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        """Handle hotkeys for Pie Menu (Space) and Maximize (Ctrl+Space)."""
+        if event.key() == Qt.Key.Key_Space:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self.toggle_maximize()
+            else:
+                self._show_pie_menu()
+        elif event.key() == Qt.Key.Key_A and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            self._show_pie_menu() # Blender alternate pie menu hotkey
+        else:
+            super().keyPressEvent(event)
+
+    def toggle_maximize(self):
+        """Make this panel fill the entire application window."""
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        main_win = None
+        for widget in app.topLevelWidgets():
+            if hasattr(widget, 'register_viewer'):
+                main_win = widget
+                break
+        
+        if not main_win: return
+
+        if not self.is_maximized:
+            # SAVE STATE and Maximize
+            self._old_parent = self.parentWidget()
+            self._old_index = self._old_parent.indexOf(self) if hasattr(self._old_parent, 'indexOf') else 0
+            
+            # Use a fullscreen overlay approach or replace the root layout
+            # For simplicity in this mock-up, we'll just move it to a high-Z layer or 
+            # hide everything else in the main window central widget.
+            self.setParent(main_win)
+            self.setGeometry(main_win.rect())
+            self.show()
+            self.raise_()
+            self.is_maximized = True
+        else:
+            # RESTORE
+            if hasattr(self, '_old_parent'):
+                self.setParent(self._old_parent)
+                # Re-insert into splitter if needed
+                from PySide6.QtWidgets import QSplitter
+                if isinstance(self._old_parent, QSplitter):
+                    self._old_parent.insertWidget(self._old_index, self)
+                self.is_maximized = False
+                # RockyApp layout will handle the rest on next resize
+
+    def paintEvent(self, event):
+        """Draw interactive corner triangles (Blender style)."""
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        w, h = self.width(), self.height()
+        s = self.CORNER_SIZE * 1.5
+        
+        # Hatched Corners (Radiant Orange)
+        painter.setPen(QPen(QColor(255, 153, 0, 180), 1.5, Qt.PenStyle.SolidLine))
+        
+        # Draw 4 diagonal lines in each corner for tactile feel
+        for corner_pos in [(0,0), (w,0), (0,h), (w,h)]:
+            cx, cy = corner_pos
+            for i in range(1, 5):
+                offset = i * 4
+                if cx == 0 and cy == 0: painter.drawLine(offset, 0, 0, offset) # TL
+                elif cx == w and cy == 0: painter.drawLine(w - offset, 0, w, offset) # TR
+                elif cx == 0 and cy == h: painter.drawLine(0, h - offset, offset, h) # BL
+                elif cx == w and cy == h: painter.drawLine(w - offset, h, w, h - offset) # BR
+
+        # Split preview is now handled by the top-level global_split_overlay
+
+    def _show_pie_menu(self):
+        """Generate and show the radial pie menu."""
+        from .radial_menu import RadialMenu
+        from PySide6.QtGui import QCursor
+        
+        items = [
+            ("Split H", "⬒", lambda: self.split(Qt.Orientation.Vertical)),
+            ("Split V", "⬔", lambda: self.split(Qt.Orientation.Horizontal)),
+            ("Join", "🔗", lambda: print("Drag corner outward to join")), # Tutorial entry
+            ("Viewer", "📽️", lambda: self.change_panel_type("Viewer")),
+            ("Timeline", "🎞️", lambda: self.change_panel_type("Timeline")),
+            ("Close", "×", lambda: self.close_panel())
+        ]
+        
+        menu = RadialMenu(self.window(), items)
+        menu.show_at(QCursor.pos())
 
     def close_panel(self):
         """Logic to close and join panels."""
@@ -385,8 +863,8 @@ class RockyPanel(QFrame):
                     self._unregister_master_meter(old_widget)
                 self._unregister_timeline_from_widget(old_widget)
 
-    def split(self, orientation):
-        """Partitions this panel space into two using a QSplitter."""
+    def split(self, orientation, split_pos=None):
+        """Partitions this panel space into two using a QSplitter with slide-in animation."""
         from PySide6.QtWidgets import QSplitter, QVBoxLayout, QHBoxLayout
         
         parent = self.parentWidget()
@@ -394,14 +872,35 @@ class RockyPanel(QFrame):
         
         # 1. Create a neuen splitter
         new_splitter = QSplitter(orientation)
-        new_splitter.setHandleWidth(2)
-        new_splitter.setStyleSheet("QSplitter::handle { background-color: #1a1a1a; }")
+        new_splitter.setHandleWidth(4)
+        new_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #1a1a1a;
+                background-image: radial-gradient(circle, #444 1px, transparent 1.5px);
+                background-position: center;
+                background-repeat: repeat-y;
+            }
+            QSplitter::handle:horizontal {
+                background-repeat: repeat-y;
+            }
+            QSplitter::handle:vertical {
+                background-repeat: repeat-x;
+            }
+            QSplitter::handle:hover {
+                background-color: #ff9900;
+            }
+        """)
         
         # 2. Insert splitter into our current spot
         if isinstance(parent, QSplitter):
-            # We are already in a splitter, insert new splitter at our index
+            # Capture parent state for stability
+            original_sizes = parent.sizes()
             idx = parent.indexOf(self)
+            
             parent.insertWidget(idx, new_splitter)
+            
+            # Re-apply sizes to parent so other parts don't move
+            parent.setSizes(original_sizes)
         else:
             # We are likely in the middle_section container or root
             layout = parent.layout()
@@ -414,11 +913,51 @@ class RockyPanel(QFrame):
         new_panel = RockyPanel(new_content, title=self.header.lbl_title.text())
         new_panel.current_type = self.current_type
         
-        # 4. Move self to the new splitter and add new panel
-        new_splitter.addWidget(self)
-        new_splitter.addWidget(new_panel)
+        # 4. Move self to the new splitter and add new panel with CORRECT ORDER
+        # Order depends on which corner we dragged from
+        new_panel_index = 1 # Default (New panel on right/bottom)
         
-        # 5. Fix registries for the newly created brother
+        if orientation == Qt.Orientation.Horizontal:
+            if self.active_corner in ['tl', 'bl']:
+                new_panel_index = 0
+        else: # Vertical
+            if self.active_corner in ['tl', 'tr']:
+                new_panel_index = 0
+                
+        if new_panel_index == 0:
+            new_splitter.addWidget(new_panel)
+            new_splitter.addWidget(self)
+        else:
+            new_splitter.addWidget(self)
+            new_splitter.addWidget(new_panel)
+        
+        # 5. Slide-In Transition (Matches Release Position)
+        total_size = new_splitter.width() if orientation == Qt.Orientation.Horizontal else new_splitter.height()
+        
+        if split_pos is None:
+            final_split_point = total_size // 2
+        else:
+            final_split_point = split_pos
+            
+        initial_sizes = [total_size, 0] if new_panel_index == 1 else [0, total_size]
+        target_sizes = [final_split_point, total_size - final_split_point]
+        
+        # User said "se crea y no se mueve mas": 
+        # Set final sizes immediately for manual release, skipping bounce
+        new_splitter.setSizes(target_sizes)
+        
+        # Fade-In the content for the "birth" appearance
+        opacity_effect = QGraphicsOpacityEffect(new_panel)
+        new_panel.setGraphicsEffect(opacity_effect)
+        fade_anim = QVariantAnimation(new_panel)
+        fade_anim.setDuration(250)
+        fade_anim.setStartValue(0.0)
+        fade_anim.setEndValue(1.0)
+        fade_anim.valueChanged.connect(opacity_effect.setOpacity)
+        fade_anim.start()
+        new_panel._fade_anim = fade_anim
+        
+        # 6. Fix registries for the newly created brother
         if hasattr(new_content, 'display_frame'):
             self._register_viewer(new_content)
         from .master_meter import MasterMeterPanel
@@ -429,6 +968,7 @@ class RockyPanel(QFrame):
         self.show()
         new_panel.show()
         new_splitter.show()
+        return new_splitter
 
     def set_title(self, text):
         self.header.set_title(text)
@@ -599,7 +1139,24 @@ class RockyPanel(QFrame):
                 
                 # Create horizontal splitter for sidebar + timeline
                 splitter = QSplitter(Qt.Orientation.Horizontal)
-                splitter.setStyleSheet("QSplitter::handle { background-color: #1a1a1a; }")
+                splitter.setHandleWidth(4)
+                splitter.setStyleSheet("""
+                    QSplitter::handle {
+                        background-color: #1a1a1a;
+                        background-image: radial-gradient(circle, #444 1px, transparent 1.5px);
+                        background-position: center;
+                        background-repeat: repeat-y;
+                    }
+                    QSplitter::handle:horizontal {
+                        background-repeat: repeat-y;
+                    }
+                    QSplitter::handle:vertical {
+                        background-repeat: repeat-x;
+                    }
+                    QSplitter::handle:hover {
+                        background-color: #ff9900;
+                    }
+                """)
                 
                 # Create sidebar
                 sidebar = SidebarPanel(model)

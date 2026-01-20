@@ -63,7 +63,14 @@ class OverlayViewer(QLabel):
             return # Dialog not fully laid out yet
         
         # Calculate Project Frame at 80% of label size
-        p_aspect = self.project_res[0] / self.project_res[1]
+        try:
+            # Safety Check: Ensure we have valid numeric values
+            res_w = self.project_res[0]() if callable(self.project_res[0]) else self.project_res[0]
+            res_h = self.project_res[1]() if callable(self.project_res[1]) else self.project_res[1]
+            p_aspect = float(res_w) / float(res_h)
+        except (TypeError, ValueError, ZeroDivisionError, IndexError):
+            p_aspect = 16.0 / 9.0 # Fallback standard
+            
         l_aspect = lw / lh
         
         if p_aspect > l_aspect:
@@ -439,8 +446,12 @@ class EffectsDialog(QDialog):
         p_res = (1920, 1080)
         if parent and hasattr(parent, 'get_fps'):
             fps = parent.get_fps()
-            if hasattr(parent, 'width') and hasattr(parent, 'height'):
-                p_res = (parent.width, parent.height)
+            # Try to get project resolution from engine or fallback to parent size
+            if hasattr(parent, 'engine') and parent.engine:
+                # Use engine resolution if available (most accurate for project)
+                p_res = (1920, 1080) # Default
+            elif hasattr(parent, 'width') and hasattr(parent, 'height'):
+                p_res = (parent.width(), parent.height())
         elif hasattr(clip, 'model') and clip.model:
              fps = clip.model.get_fps()
              
