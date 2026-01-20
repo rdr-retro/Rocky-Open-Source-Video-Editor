@@ -65,6 +65,8 @@ class RockyPanelHeader(QFrame):
             QFrame {{
                 background-color: transparent;
                 border-bottom: 1px solid #1a1a1a;
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
             }}
             QLabel {{
                 color: #e0e0e0;
@@ -482,9 +484,13 @@ class RockyPanel(QFrame):
         # 2. Content
         # We wrap content in a container to handle margins/clipping if needed
         self.content_area = QWidget()
-        self.content_area.setStyleSheet("background-color: transparent;")
+        self.content_area.setStyleSheet("""
+            background-color: transparent;
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
+        """)
         content_layout = QVBoxLayout(self.content_area)
-        content_layout.setContentsMargins(0, 0, 0, 0) # Content flush with panel edges
+        content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
         
         if content_widget:
