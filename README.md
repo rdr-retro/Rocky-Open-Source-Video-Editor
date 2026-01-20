@@ -28,6 +28,12 @@ Rocky's unique strength lies in its "Engine-Frontend separation" philosophy.
 
 ## Key Features
 
+### Dynamic Panel Architecture (New!)
+- **Blender-Style Flexibility**: The editor has transitioned from a fixed layout to a "Single Flexible Panel" philosophy. Every panel can be split horizontally or vertically to create an infinite variety of workspaces.
+- **Advanced Snap & Docking**: Drag any panel by its header and drop it on the edges of another to "snap" and dock it. Interchanging panel types (Timeline, Viewer, etc.) is instantaneous.
+- **Multi-Instance Synchronization**: Open multiple instances of the Timeline or Video Viewer. All views remain synchronized to the master clock and project model in real-time.
+- **Professional Handling**: Interactive splitters (4px) with orange hover highlights and grip icons for intuitive workspace customization.
+
 ### Advanced Timeline & Editing
 - **Professional Standard**: Support for Ripple Edits, Rolling Edits, and multi-track snapping.
 - **Dynamic Fades**: Real-time crossfades and opacity/gain handles for every clip.
@@ -97,7 +103,8 @@ Rocky is engineered to be hardware-sympathetic:
 Rocky Video Editor no es solo una herramienta, es una plataforma de procesamiento multimedia diseñada para la era del vídeo 8K. Su núcleo C++ permite una manipulación de píxeles a velocidad nativa, mientras que PySide6 ofrece una interfaz flexible y moderna.
 
 ### Características Pro
-1. **Motor Híbrido**: La potencia del C++17 combinada con la agilidad de Python.
+1. **Arquitectura de Paneles Dinámicos**: Migración de un diseño estático a un sistema totalmente flexible inspirado en Blender. Divide, acopla y reorganiza paneles mediante arrastrar y soltar con "snap" inteligente.
+2. **Motor Híbrido**: La potencia del C++17 combinada con la agilidad de Python.
 2. **OpenFX Nativo**: Soporte para el estándar de la industria en plugins de efectos.
 3. **Flujo de Trabajo Pro**: Proxies automáticos, edición Ripple/Rolling y gestión de color profesional.
 4. **Audio de 64 bits**: Calidad de audio de estudio para tus producciones de vídeo.
