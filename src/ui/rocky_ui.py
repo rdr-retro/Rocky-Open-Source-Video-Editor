@@ -49,14 +49,19 @@ from .toolbar import RockyToolbar
 from .settings_dialog import SettingsDialog
 from .styles import MODERN_LABEL
 from .asset_tabs import AssetTabsPanel
-
-# Signal definition moved to core imports
-
-# Infrastructure (Workers)
-from ..infrastructure.workers.proxy_gen import ProxyWorker
+from .editor_panel import EditorPanel 
+from . import design_tokens as dt
+from .panels import RockyPanel # New Panel System
+ 
+from ..infrastructure.workers.import_worker import MediaImportWorker 
 from ..infrastructure.workers.waveform import WaveformWorker
-from ..infrastructure.workers.thumbnail import ThumbnailWorker
-from ..infrastructure.workers.import_worker import MediaImportWorker
+from ..infrastructure.workers.thumbnail import ThumbnailWorker 
+from ..infrastructure.workers.proxy_gen import ProxyWorker 
+
+# ... (previous imports)
+
+
+
 
 
 class AudioPlayer(QIODevice):
@@ -482,6 +487,8 @@ class RockyApp(QMainWindow):
         self.media_source_cache = {} # Cache to avoid re-opening heavy 4K files
         self.fx_dialogs = {} # Track open FX windows {clip_id: dialog}
         self._active_workers = [] # Unified tracking for all background threads
+        self.viewer_registry = [] # Track all active viewer panels for frame broadcasting
+        self.timeline_registry = [] # Track all active timeline widgets for playhead sync
 
         if not self.initialize_engine():
             # Fatal error handled inside initialize_engine
@@ -597,9 +604,10 @@ class RockyApp(QMainWindow):
         print("DEBUG: Cleanup finished.", flush=True)
 
     def initialize_ui_components(self):
-        """Standardizes the interface construction following Vegas Pro aesthetics."""
+        """Standardizes the interface construction following Blender Aesthetics."""
         self.setWindowTitle("Rocky Video Editor Pro")
         self.resize(1200, 850)
+        # Background of the window = Gap color (Dark Grey/Black)
         self.setStyleSheet("background-color: #111111; color: #ffffff;") 
         
         # Central widget and main layout
@@ -613,27 +621,28 @@ class RockyApp(QMainWindow):
         self.toolbar = RockyToolbar(self)
         main_layout.addWidget(self.toolbar)
         
-        # 2. Main Vertical Splitter (Top Viewers / Bottom Timeline)
+        # 2. Main Vertical Splitter 
+        # Structure: 
+        #   [TOP: Middle Splitter (Assets | Viewer | Editor)]
+        #   [BOTTOM: Timeline]
         self.main_vertical_splitter = QSplitter(Qt.Vertical)
         
-        # Upper section (Asset Explorer, Viewer, Master Meter)
-        self.upper_section = self._create_upper_section()
-        self.main_vertical_splitter.addWidget(self.upper_section)
+        # --- MIDDLE SECTION (Assets, Viewer, Editor) ---
+        self.middle_section = self._create_middle_section()
+        self.main_vertical_splitter.addWidget(self.middle_section)
         
-        # Lower section (Sidebar, Timeline)
+        # --- BOTTOM SECTION (Timeline) ---
         self.lower_section = self._create_lower_section()
         self.main_vertical_splitter.addWidget(self.lower_section)
         
-        self.main_vertical_splitter.setStretchFactor(0, 2)  # Upper: MÁS espacio para el visor/assets
-        self.main_vertical_splitter.setStretchFactor(1, 1)  # Lower: menos espacio para el timeline por defecto
+        self.main_vertical_splitter.setStretchFactor(0, 2)  # Middle section bigger
+        self.main_vertical_splitter.setStretchFactor(1, 1)  # Timeline smaller
         
-        # Splitter styling (Universal)
-        self.main_vertical_splitter.setHandleWidth(1)
+        # Splitter styling (Transparent handles to show gap color)
+        self.main_vertical_splitter.setHandleWidth(4)
         self.main_vertical_splitter.setStyleSheet("QSplitter::handle { background-color: transparent; }")
 
-
-        # Establecer tamaños iniciales (Upper: mayor protagonismo, Lower: más compacto)
-        self.main_vertical_splitter.setSizes([650, 350])
+        self.main_vertical_splitter.setSizes([550, 300])
         
         main_layout.addWidget(self.main_vertical_splitter)
         
@@ -656,115 +665,93 @@ class RockyApp(QMainWindow):
         self.timeline_widget.update()
         self.timeline_ruler.update()
         self.on_time_changed(0, 0, "00:00:00;00", True)
-        
-    def _create_upper_section(self):
+
+
+
+
+    # _wrap_rounded_panel removed (replaced by RockyPanel)
+
+    def _create_middle_section(self):
+        """Creates the horizontal splitter for Assets | Viewer | Editor."""
         container = QWidget()
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        self.top_splitter = QSplitter(Qt.Horizontal)
+        self.mid_splitter = QSplitter(Qt.Horizontal)
+        self.mid_splitter.setHandleWidth(4)
+        self.mid_splitter.setStyleSheet("QSplitter::handle { background-color: transparent; }")
         
+        # 1. Left: Asset Tabs
         self.asset_tabs = AssetTabsPanel()
+        panel_assets = RockyPanel(self.asset_tabs, title="ASSETS")
+        self.mid_splitter.addWidget(panel_assets)
+        
+        # 2. Center: Viewer + Meter
         self.viewer = ViewerPanel()
-        self.master_meter = MasterMeterPanel()
+        self.master_meter = MasterMeterPanel() 
         
-        self.top_splitter.addWidget(self.asset_tabs)
-        self.top_splitter.addWidget(self.viewer)
-        self.top_splitter.addWidget(self.master_meter)
+        panel_viewer = RockyPanel(self.viewer, title="PREVIEW")
+        self.mid_splitter.addWidget(panel_viewer)
         
-        self.top_splitter.setStretchFactor(0, 2) # Asset Tabs (General/Media) - More prominent
-        self.top_splitter.setStretchFactor(1, 1) # Viewer
-        self.top_splitter.setStretchFactor(2, 0) # Master Meter
-
-        # Set explicit initial hierarchy (Asset Tabs: 600px, Viewer: 500px, Meter: 100px)
-        self.top_splitter.setSizes([600, 500, 100])
+        # 3. Right: Editor Panel (New)
+        self.editor_panel = EditorPanel()
+        panel_editor = RockyPanel(self.editor_panel, title="PROPERTIES")
+        self.mid_splitter.addWidget(panel_editor)
         
-        layout.addWidget(self.top_splitter)
+        self.mid_splitter.setStretchFactor(0, 1) # Assets
+        self.mid_splitter.setStretchFactor(1, 2) # Viewer (Wider)
+        self.mid_splitter.setStretchFactor(2, 1) # Editor
+        
+        layout.addWidget(self.mid_splitter)
         return container
 
     def _create_lower_section(self):
+        # Create container for Sidebar + Timeline
+        container = QWidget()
+        
+        # Inner splitter [Sidebar | Timeline] wrapped in one rounded panel
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setStyleSheet("QSplitter::handle { background-color: #1a1a1a; }") # Inner splitter
+        
         self.sidebar = SidebarPanel(self.model)
         
+        # Timeline Assembly
         timeline_container = QWidget()
-        layout = QVBoxLayout(timeline_container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        t_layout = QVBoxLayout(timeline_container)
+        t_layout.setContentsMargins(0, 0, 0, 0)
+        t_layout.setSpacing(0)
         
-        # USE SIMPLE TIMELINE - guaranteed to render
+        # USE SIMPLE TIMELINE
         self.timeline_widget = SimpleTimeline(self.model)
         self.sidebar.timeline = self.timeline_widget 
         
-        # Timeline Ruler - positioned above the timeline
+        # Timeline Ruler
         self.timeline_ruler = TimelineRuler(self.timeline_widget)
-        self.timeline_ruler.setContentsMargins(0, 0, 0, 0)
-        # Ensure ruler has proper background and doesn't interfere with scrolling
         self.timeline_ruler.setAutoFillBackground(True)
-        layout.addWidget(self.timeline_ruler, 0)
+        t_layout.addWidget(self.timeline_ruler, 0)
         
         self.timeline_scroll_area = QScrollArea()
         self.timeline_scroll_area.setWidgetResizable(True)
         self.timeline_scroll_area.setWidget(self.timeline_widget)
-        self.timeline_scroll_area.setFrameShape(QFrame.NoFrame)  # Sin borde
+        self.timeline_scroll_area.setFrameShape(QFrame.NoFrame)
         self.timeline_scroll_area.setContentsMargins(0, 0, 0, 0)
-        self.timeline_scroll_area.setViewportMargins(0, 0, 0, 0)
+        # Scroll area styles (kept from original)
         self.timeline_scroll_area.setStyleSheet("""
-            QScrollArea { 
-                border: 0px; 
-                background-color: #242424;
-                margin: 0px;
-                padding: 0px;
-            }
-            QScrollBar:horizontal {
-                border: none;
-                background: #2b2b2b;
-                height: 14px;
-                margin: 0px 0px 0px 0px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #555555;
-                min-width: 20px;
-                border-radius: 2px;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                border: none;
-                background: none;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: #2b2b2b;
-                width: 14px;
-                margin: 0px 0px 0px 0px;
-            }
-            QScrollBar::handle:vertical {
-                background: #555555;
-                min-height: 20px;
-                border-radius: 2px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                border: none;
-                background: none;
-            }
+            QScrollArea { border: 0px; background-color: #242424; }
+            QScrollBar:horizontal { height: 14px; background: #2b2b2b; }
+            QScrollBar::handle:horizontal { background: #555555; min-width: 20px; border-radius: 2px; }
+            QScrollBar:vertical { width: 14px; background: #2b2b2b; }
+            QScrollBar::handle:vertical { background: #555555; min-height: 20px; border-radius: 2px; }
         """)
-        self.timeline_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self.timeline_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self.timeline_scroll_area.setViewportMargins(0, 0, 0, 0)
-        self.timeline_scroll_area.viewport().setContentsMargins(0, 0, 0, 0)
-        self.timeline_scroll_area.viewport().setAutoFillBackground(True)
-        self.timeline_scroll_area.viewport().setStyleSheet("background-color: #242424; border: none;")
-        layout.addWidget(self.timeline_scroll_area, 1) # stretch 1
+        t_layout.addWidget(self.timeline_scroll_area, 1)
         
         splitter.addWidget(self.sidebar)
         splitter.addWidget(timeline_container)
         splitter.setStretchFactor(1, 1)
-        splitter.setHandleWidth(1)
-        splitter.setStyleSheet("""
-            QSplitter::handle {
-                background-color: #1a1a1a;
-            }
-        """)
-        return splitter
+        
+        # Now wrap this ENTIRE splitter in the rounded look
+        return RockyPanel(splitter, title="TIMELINE")
 
     def _create_status_bar(self):
         status_frame = QFrame()
@@ -878,8 +865,12 @@ class RockyApp(QMainWindow):
         self.viewer.slider_rate.sliderReleased.connect(self.on_playback_rate_released)
 
 
-        # Asset Tabs
-        self.asset_tabs.resolution_changed.connect(self.on_resolution_changed)
+        # Asset Tabs (Effects only now)
+        # self.asset_tabs.resolution_changed.connect(self.on_resolution_changed) # Moved to Editor Panel
+        
+        # Editor Panel (Contextual)
+        self.timeline_widget.selection_changed.connect(self.editor_panel.update_context)
+        self.editor_panel.resolution_changed.connect(self.on_resolution_changed)
 
     def on_clip_fx_clicked(self, clip):
         """Show the Effects Dialog for the selected clip."""
@@ -1362,12 +1353,19 @@ class RockyApp(QMainWindow):
         playhead_screen_x = self.timeline_widget.update_playhead_position(current_frame, forced=False)
         self.auto_scroll_playhead(playhead_screen_x)
         
+        # Update all registered timelines
+        for timeline in self.timeline_registry:
+            try:
+                timeline.update_playhead_position(current_frame, forced=False)
+            except:
+                pass
+        
         # 2. Synchronize Engine (Atomic Evaluation)
         engine_timestamp = current_frame / active_fps
         try:
             # Video (GUI Thread)
             rendered_frame = self.engine.evaluate(engine_timestamp)
-            self.viewer.display_frame(rendered_frame)
+            self._broadcast_frame(rendered_frame)
             
             # NOTE: Audio is now handled by AudioWorker thread to ensure ZERO drops
             
@@ -1397,7 +1395,7 @@ class RockyApp(QMainWindow):
         rendered_frame = self.engine.evaluate(timestamp)
         del locker
         
-        self.viewer.display_frame(rendered_frame)
+        self._broadcast_frame(rendered_frame)
 
 
     def on_structure_changed(self):
@@ -1407,6 +1405,48 @@ class RockyApp(QMainWindow):
         self.timeline_widget.updateGeometry() # Force scrollbar update
         self.timeline_ruler.update()
         self.update_proxy_button_state() # Link Master Button to Clip State
+
+    def _broadcast_frame(self, frame_buffer):
+        """Send rendered frame to all registered viewer panels."""
+        # Always send to main viewer
+        if hasattr(self, 'viewer') and self.viewer:
+            self.viewer.display_frame(frame_buffer)
+        
+        # Send to all additional registered viewers
+        for viewer in self.viewer_registry:
+            try:
+                viewer.display_frame(frame_buffer)
+            except:
+                # Remove dead viewers
+                self.viewer_registry.remove(viewer)
+
+    def register_viewer(self, viewer_panel):
+        """Register a viewer panel to receive frame broadcasts."""
+        if viewer_panel not in self.viewer_registry:
+            self.viewer_registry.append(viewer_panel)
+
+    def unregister_viewer(self, viewer_panel):
+        """Unregister a viewer panel from frame broadcasts."""
+        if viewer_panel in self.viewer_registry:
+            self.viewer_registry.remove(viewer_panel)
+
+    def register_timeline(self, timeline_widget):
+        """Register a timeline widget to sync with main playback."""
+        if timeline_widget not in self.timeline_registry:
+            self.timeline_registry.append(timeline_widget)
+            # Connect timeline signals to main app
+            timeline_widget.time_updated.connect(self.on_time_changed)
+            timeline_widget.structure_changed.connect(self.on_structure_changed)
+
+    def unregister_timeline(self, timeline_widget):
+        """Unregister a timeline widget from playback sync."""
+        if timeline_widget in self.timeline_registry:
+            try:
+                timeline_widget.time_updated.disconnect(self.on_time_changed)
+                timeline_widget.structure_changed.disconnect(self.on_structure_changed)
+            except:
+                pass
+            self.timeline_registry.remove(timeline_widget)
 
     def on_master_gain_changed(self, value):
         """
@@ -1890,7 +1930,7 @@ def main():
         app.aboutToQuit.connect(w.cleanup_resources)
         
         print("DEBUG: Showing Window...", flush=True)
-        w.show()
+        w.showMaximized()
         
         print("DEBUG: Entering Event Loop...", flush=True)
         ret = app.exec()

@@ -4,6 +4,7 @@ from PySide6.QtGui import QFont, QIcon, QDrag, QPixmap, QImage, QPainter, QColor
 import os
 import sys
 import rocky_core
+from . import design_tokens as dt
 
 def get_resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
@@ -189,13 +190,13 @@ class DraggableEffectButton(QPushButton):
         border_color = QColor("#00a3ff") if is_hovered else QColor("#333")
         painter.setPen(QPen(border_color, 1.5 if is_hovered else 1))
         painter.setBrush(QColor("#181818"))
-        painter.drawRoundedRect(bg_rect, 6, 6)
+        painter.drawRoundedRect(bg_rect, dt.RADIUS_ELEMENT, dt.RADIUS_ELEMENT)
 
         # Image Area
         img_rect = QRect(2, 2, self.width()-4, 80)
         
         # Clip to rounded rect for image
-        painter.setClipPath(self._get_rounded_path(img_rect, 6))
+        painter.setClipPath(self._get_rounded_path(img_rect, dt.RADIUS_ELEMENT))
         
         # 1. Base Image
         painter.drawPixmap(img_rect, self.base_pixmap)
@@ -436,72 +437,74 @@ class AssetTabsPanel(QFrame):
         super().__init__()
         self.setObjectName("AssetTabsPanel")
         self.setMinimumWidth(450)
-        self.setStyleSheet("""
-            #AssetTabsPanel {
+        self.setStyleSheet(f"""
+            #AssetTabsPanel {{
                 background-color: #111111;
                 border: none;
-            }
-            QTabWidget::pane {
+            }}
+            QTabWidget::pane {{
                 border: none;
                 background: #111111;
-            }
+            }}
 
 
-            QTabBar::tab {
+            QTabBar::tab {{
                 background: transparent;
                 color: #777;
                 padding: 10px 20px;
                 margin-right: 15px;
                 border-bottom: 2px solid transparent;
+                border-top-left-radius: {dt.RADIUS_ELEMENT}px;
+                border-top-right-radius: {dt.RADIUS_ELEMENT}px;
                 font-family: 'Inter', -apple-system, sans-serif;
                 font-size: 11px;
                 font-weight: 600;
-            }
-            QTabBar::tab:selected {
+            }}
+            QTabBar::tab:selected {{
                 background: transparent;
                 color: #00a3ff;
                 border-bottom: 2px solid #00a3ff;
-            }
+            }}
 
-            QTabBar::tab:hover:!selected {
+            QTabBar::tab:hover:!selected {{
                 color: #bbb;
-            }
+            }}
             
             /* Aspect Ratio Card Styling */
-            QPushButton.AspectCard {
+            QPushButton.AspectCard {{
                 background-color: #1a1a1a;
                 border: 1px solid #333;
-                border-radius: 8px;
+                border-radius: 0px;
                 min-width: 100px;
                 max-width: 250px;
                 min-height: 120px;
                 padding: 15px;
-            }
-            QPushButton.AspectCard:hover {
+            }}
+            QPushButton.AspectCard:hover {{
                 background-color: #222;
                 border-color: #00a3ff;
-            }
-            QPushButton.AspectCard:pressed {
+            }}
+            QPushButton.AspectCard:pressed {{
                 background-color: #00a3ff;
-            }
+            }}
 
-            QLabel.AspectTitle {
+            QLabel.AspectTitle {{
                 color: #e0e0e0;
                 font-size: 10px;
                 font-weight: 600;
                 margin-top: 8px;
-            }
+            }}
             
             /* Visual Geometry Boxes */
-            QFrame.RatioBox {
+            QFrame.RatioBox {{
                 background-color: #333;
                 border: 1px solid #555;
-            }
-            QPushButton.AspectCard:hover QFrame.RatioBox {
+            }}
+            QPushButton.AspectCard:hover QFrame.RatioBox {{
                 border-color: #00a3ff;
-            }
+            }}
 
-            QLabel.SectionHeader {
+            QLabel.SectionHeader {{
                 color: #00a3ff;
                 font-size: 10px;
                 font-weight: bold;
@@ -510,7 +513,7 @@ class AssetTabsPanel(QFrame):
                 margin-left: 20px;
                 margin-bottom: 10px;
                 text-transform: uppercase;
-            }
+            }}
         """)
 
         layout = QVBoxLayout(self)
@@ -524,9 +527,7 @@ class AssetTabsPanel(QFrame):
         self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
         self.tabs.tabBar().setUsesScrollButtons(True)
 
-        # 1. General (Configuración del Proyecto)
-        self.tab_general = self._create_general_view()
-        self.tabs.addTab(self.tab_general, "General")
+
 
         # 2. Transiciones
         self.tab_transitions = self._create_empty_view()

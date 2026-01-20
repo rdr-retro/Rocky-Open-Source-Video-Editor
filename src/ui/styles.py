@@ -104,15 +104,16 @@ QMenu {{
     color: {dt.TEXT_PRIMARY};
     font-family: {dt.FONT_FAMILY_UI};
     font-size: {dt.FONT_SIZE_BASE}px;
-    border-radius: {dt.RADIUS_MD}px;
+    border-radius: {dt.RADIUS_CONTAINER}px;
     padding: 4px;
 }}
 QMenu::item {{
     padding: 4px 24px 4px 12px;
     background-color: transparent;
-    border-radius: {dt.RADIUS_SM}px;
+    border-radius: {dt.RADIUS_ELEMENT}px;
     margin: 1px;
 }}
+
 QMenu::item:selected {{
     background-color: {dt.ACCENT_PRIMARY};
     color: {dt.BG_DEEPEST};

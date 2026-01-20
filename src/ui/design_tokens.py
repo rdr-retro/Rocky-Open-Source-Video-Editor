@@ -236,10 +236,16 @@ SPACE_XXL = 32
 # BORDER RADIUS SYSTEM
 # ============================================================================
 
-RADIUS_SM = 3
-RADIUS_MD = 6
+RADIUS_SM = 0
+RADIUS_MD = 0
 RADIUS_LG = 8
 RADIUS_XL = 12
+
+# Semantic Radius Names
+RADIUS_CONTAINER = RADIUS_LG  # 8px (Outer Panels)
+RADIUS_ELEMENT = 0            # 0px (Internal buttons, tabs, inputs - Square)
+
+
 
 
 # ============================================================================
