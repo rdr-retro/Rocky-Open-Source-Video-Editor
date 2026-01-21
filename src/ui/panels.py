@@ -65,8 +65,8 @@ class RockyPanelHeader(QFrame):
             QFrame {{
                 background-color: transparent;
                 border-bottom: 1px solid #1a1a1a;
-                border-top-left-radius: 12px;
-                border-top-right-radius: 12px;
+                border-top-left-radius: {dt.RADIUS_CONTAINER}px;
+                border-top-right-radius: {dt.RADIUS_CONTAINER}px;
             }}
             QLabel {{
                 color: #e0e0e0;
@@ -456,22 +456,15 @@ class RockyPanel(QFrame):
         self.active_splitter = None # For live tracking
         self.split_index = 0 # Which side of the splitter are we?
         
-        # Styling: The 8px radius applies to this container
+        # Styling: The radius applies to this container
         self.setStyleSheet(f"""
             #RockyPanelContainer {{
                 background-color: #1a1a1a;
-                border-radius: 12px;
-                margin: 2px;
-                border: 1px solid #333;
+                border-radius: {dt.RADIUS_CONTAINER}px;
+                margin: 0px;
+                border: 1px solid #444;
             }}
         """)
-        
-        # Shadow for depth
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(10)
-        shadow.setColor(Qt.GlobalColor.black)
-        shadow.setOffset(0, 2)
-        self.setGraphicsEffect(shadow)
         
         # Sub-pixel border margins for anti-aliasing safety (Removed to avoid gaps)
         # self.setContentsMargins(1, 1, 1, 1)
@@ -488,12 +481,12 @@ class RockyPanel(QFrame):
         # We wrap content in a container to handle margins/clipping if needed
         self.content_area = QWidget()
         self.content_area.setObjectName("PanelContentArea")
-        self.content_area.setStyleSheet("""
-            #PanelContentArea {
+        self.content_area.setStyleSheet(f"""
+            #PanelContentArea {{
                 background-color: transparent;
-                border-bottom-left-radius: 12px;
-                border-bottom-right-radius: 12px;
-            }
+                border-bottom-left-radius: {dt.RADIUS_CONTAINER}px;
+                border-bottom-right-radius: {dt.RADIUS_CONTAINER}px;
+            }}
         """)
         content_layout = QVBoxLayout(self.content_area)
         content_layout.setContentsMargins(0, 0, 0, 0)

@@ -609,7 +609,7 @@ class RockyApp(QMainWindow):
         self.setWindowTitle("Rocky Video Editor Pro")
         self.resize(1200, 850)
         # Background of the window = Gap color (Dark Grey/Black)
-        self.setStyleSheet("background-color: #111111; color: #ffffff;") 
+        self.setStyleSheet("background-color: #1a1a1a; color: #ffffff;") 
         
         # Central widget and main layout
         central_widget = QWidget()

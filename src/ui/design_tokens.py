@@ -242,7 +242,7 @@ RADIUS_LG = 8
 RADIUS_XL = 12
 
 # Semantic Radius Names
-RADIUS_CONTAINER = RADIUS_LG  # 8px (Outer Panels)
+RADIUS_CONTAINER = 10           # 10px (Outer Panels - Elegant Rounding)
 RADIUS_ELEMENT = 0            # 0px (Internal buttons, tabs, inputs - Square)
 
 

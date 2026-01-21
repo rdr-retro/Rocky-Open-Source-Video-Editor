@@ -49,8 +49,8 @@ ACCENT_PRIMARY = dt.ACCENT_PRIMARY
 
 TOOLBAR_STYLE = f"""
     QFrame#Toolbar {{
-        background-color: {dt.BG_DEEP};
-        border-bottom: 1px solid {dt.BORDER_SUBTLE};
+        background-color: #1a1a1a;
+        border: none;
         border-radius: 0px;
     }}
 """
