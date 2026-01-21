@@ -473,6 +473,9 @@ class RockyPanel(QFrame):
         shadow.setOffset(0, 2)
         self.setGraphicsEffect(shadow)
         
+        # Sub-pixel border margins for anti-aliasing safety (Removed to avoid gaps)
+        # self.setContentsMargins(1, 1, 1, 1)
+        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -744,14 +747,10 @@ class RockyPanel(QFrame):
                 if hasattr(self, 'pending_join_target') and self.pending_join_target:
                     self._execute_join(self.pending_join_target)
             
-            # 2. Split Execution (On Release)
-            elif self.gesture_mode == 'split' and self.split_preview_rect:
-                # The line followed our cursor, now we finalize
-                if self.pending_orientation == Qt.Orientation.Horizontal:
-                    split_pos = self.split_preview_rect.x()
-                else:
-                    split_pos = self.split_preview_rect.y()
-                self.split(self.pending_orientation, split_pos)
+            # 2. Split (Finalize state)
+            elif self.gesture_mode == 'split':
+                # Split already happened live, just release tracking
+                pass
         
         self._hide_join_overlay()
         self.is_corner_dragging = False
@@ -875,22 +874,15 @@ class RockyPanel(QFrame):
         
         parent = self.parentWidget()
         if not parent: return
+        original_sizes = None
         
         # 1. Create a neuen splitter
         new_splitter = QSplitter(orientation)
-        new_splitter.setHandleWidth(4)
+        new_splitter.setHandleWidth(4) # Seamless but usable (2px was too thin to grab)
         new_splitter.setStyleSheet("""
             QSplitter::handle {
                 background-color: #1a1a1a;
-                background-image: radial-gradient(circle, #444 1px, transparent 1.5px);
-                background-position: center;
-                background-repeat: repeat-y;
-            }
-            QSplitter::handle:horizontal {
-                background-repeat: repeat-y;
-            }
-            QSplitter::handle:vertical {
-                background-repeat: repeat-x;
+                border: none;
             }
             QSplitter::handle:hover {
                 background-color: #ff9900;
@@ -904,9 +896,6 @@ class RockyPanel(QFrame):
             idx = parent.indexOf(self)
             
             parent.insertWidget(idx, new_splitter)
-            
-            # Re-apply sizes to parent so other parts don't move
-            parent.setSizes(original_sizes)
         else:
             # We are likely in the middle_section container or root
             layout = parent.layout()
@@ -943,14 +932,19 @@ class RockyPanel(QFrame):
         if split_pos is None:
             final_split_point = total_size // 2
         else:
+            # If split_pos is provided (live drag), we use it
             final_split_point = split_pos
             
         initial_sizes = [total_size, 0] if new_panel_index == 1 else [0, total_size]
         target_sizes = [final_split_point, total_size - final_split_point]
         
-        # User said "se crea y no se mueve mas": 
-        # Set final sizes immediately for manual release, skipping bounce
-        new_splitter.setSizes(target_sizes)
+        # Smooth Slide-In Animation for the "birth" of the panel
+        # ONLY if not being driven by a live mouse drag to avoid jitter
+        if not self.is_corner_dragging:
+            self.split_animator = LayoutAnimator(new_splitter, duration=300, easing=QEasingCurve.Type.OutQuart)
+            self.split_animator.animate(initial_sizes, target_sizes)
+        else:
+            new_splitter.setSizes(target_sizes)
         
         # Fade-In the content for the "birth" appearance
         opacity_effect = QGraphicsOpacityEffect(new_panel)
@@ -974,6 +968,12 @@ class RockyPanel(QFrame):
         self.show()
         new_panel.show()
         new_splitter.show()
+
+        # 7. Finalize Parent Layout Stability
+        if isinstance(parent, QSplitter):
+            # Applying sizes now that the count matches (new_splitter replaced self)
+            parent.setSizes(original_sizes)
+
         return new_splitter
 
     def set_title(self, text):
@@ -1145,19 +1145,11 @@ class RockyPanel(QFrame):
                 
                 # Create horizontal splitter for sidebar + timeline
                 splitter = QSplitter(Qt.Orientation.Horizontal)
-                splitter.setHandleWidth(4)
+                splitter.setHandleWidth(4) # Seamless but usable
                 splitter.setStyleSheet("""
                     QSplitter::handle {
                         background-color: #1a1a1a;
-                        background-image: radial-gradient(circle, #444 1px, transparent 1.5px);
-                        background-position: center;
-                        background-repeat: repeat-y;
-                    }
-                    QSplitter::handle:horizontal {
-                        background-repeat: repeat-y;
-                    }
-                    QSplitter::handle:vertical {
-                        background-repeat: repeat-x;
+                        border: none;
                     }
                     QSplitter::handle:hover {
                         background-color: #ff9900;

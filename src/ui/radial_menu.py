@@ -48,9 +48,9 @@ class RadialMenu(QWidget):
             path.arcTo(cx - self.inner_radius, cy - self.inner_radius, self.inner_radius * 2, self.inner_radius * 2, -start_angle - angle_step, angle_step)
             path.closeSubpath()
             
-            color = QColor(255, 153, 0, 200) if i == self.hovered_idx else QColor(30, 30, 30, 230)
+            color = QColor(255, 156, 0, 255) if i == self.hovered_idx else QColor(20, 20, 20, 250)
             painter.fillPath(path, QBrush(color))
-            painter.setPen(QPen(QColor(255, 255, 255, 20), 1))
+            painter.setPen(QPen(QColor(255, 255, 255, 40), 1))
             painter.drawPath(path)
             
             # Draw Label & Icon
