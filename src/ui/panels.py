@@ -999,19 +999,92 @@ class RockyPanel(QFrame):
                 old_widget.deleteLater()
         
         # Create new content based on panel type
-        new_widget = self._create_panel_content(panel_type)
-        if new_widget:
-            self.content_area.layout().addWidget(new_widget)
+        new_content = self._create_panel_content(panel_type)
+        if new_content:
+            self.content_area.layout().addWidget(new_content)
             # Register new viewer if it's one
-            if hasattr(new_widget, 'display_frame'):
-                self._register_viewer(new_widget)
+            if hasattr(new_content, 'display_frame'):
+                self._register_viewer(new_content)
             # Register master meter if it's one
             from .master_meter import MasterMeterPanel
-            if isinstance(new_widget, MasterMeterPanel):
-                self._register_master_meter(new_widget)
+            if isinstance(new_content, MasterMeterPanel):
+                self._register_master_meter(new_content)
             # Register timeline if it contains one
-            self._register_timeline_from_widget(new_widget)
+            self._register_timeline_from_widget(new_content)
     
+    @staticmethod
+    def serialize_layout(widget):
+        """Recursively captures the layout of splitters and panels."""
+        from PySide6.QtWidgets import QSplitter
+        
+        if isinstance(widget, RockyPanel):
+            return {
+                "type": "panel",
+                "panel_type": widget.current_type,
+                "title": widget.header.lbl_title.text()
+            }
+        elif isinstance(widget, QSplitter):
+            children_count = widget.count()
+            children = []
+            for i in range(children_count):
+                children.append(RockyPanel.serialize_layout(widget.widget(i)))
+                
+            return {
+                "type": "splitter",
+                "orientation": int(widget.orientation().value),
+                "sizes": widget.sizes(),
+                "children": children
+            }
+        return None
+
+    @classmethod
+    def deserialize_layout(cls, data, parent_app):
+        """Recursively builds the layout from serialized data."""
+        from PySide6.QtWidgets import QSplitter
+        from PySide6.QtCore import Qt
+        
+        if data["type"] == "panel":
+            panel_type = data.get("panel_type", "Viewer")
+            title = data.get("title", "Panel")
+            content = cls._create_panel_content(panel_type)
+            panel = RockyPanel(content, title=title)
+            panel.current_type = panel_type
+            
+            # Register with app
+            if hasattr(content, 'display_frame'):
+                parent_app.register_viewer(content)
+            from .master_meter import MasterMeterPanel
+            if isinstance(content, MasterMeterPanel):
+                parent_app.register_master_meter(content)
+            parent_app.sync_timeline_registration(content)
+            
+            return panel
+            
+        elif data["type"] == "splitter":
+            orientation = Qt.Orientation(data["orientation"])
+            splitter = QSplitter(orientation)
+            splitter.setHandleWidth(4)
+            splitter.setStyleSheet("""
+                QSplitter::handle {
+                    background-color: #1a1a1a;
+                    border: none;
+                }
+                QSplitter::handle:hover {
+                    background-color: #ff9900;
+                }
+            """)
+            
+            for child_data in data["children"]:
+                child_widget = RockyPanel.deserialize_layout(child_data, parent_app)
+                if child_widget:
+                    splitter.addWidget(child_widget)
+            
+            if "sizes" in data:
+                splitter.setSizes(data["sizes"])
+                
+            return splitter
+        return None
+
     def _register_timeline_from_widget(self, widget):
         """Find and register timeline widgets recursively."""
         try:
@@ -1111,7 +1184,8 @@ class RockyPanel(QFrame):
         except:
             pass
     
-    def _create_panel_content(self, panel_type):
+    @classmethod
+    def _create_panel_content(cls, panel_type):
         """Factory method to create panel content based on type."""
         from PySide6.QtWidgets import QLabel
         

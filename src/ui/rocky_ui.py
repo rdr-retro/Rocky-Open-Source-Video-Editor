@@ -622,13 +622,20 @@ class RockyApp(QMainWindow):
         self.toolbar = RockyToolbar(self)
         main_layout.addWidget(self.toolbar)
         
-        # 2. Single Flexible Panel
+        # Setup Workspace callbacks
+        self.toolbar.workspace_bar.on_save_requested = self.save_current_layout_to_workspace
+        self.toolbar.workspace_bar.on_load_requested = self.load_layout_from_workspace
+        
+        # 2. Middle Section
         self.middle_section = self._create_middle_section()
         main_layout.addWidget(self.middle_section, stretch=1)
         
         # 3. Status Bar
         self.status_bar = self._create_status_bar()
         main_layout.addWidget(self.status_bar)
+
+        # 4. Workspaces Initialization
+        QTimer.singleShot(0, self._init_default_workspace)
 
         # Initial data sync
         if self.sidebar:
@@ -1389,18 +1396,120 @@ class RockyApp(QMainWindow):
             self.timeline_registry.append(timeline_widget)
             
             # 1. Sync Playhead & Structure
+            # Avoid duplicate connections if already connected
+            try:
+                timeline_widget.time_updated.disconnect(self.on_time_changed)
+            except: pass
             timeline_widget.time_updated.connect(self.on_time_changed)
+            
+            try:
+                timeline_widget.structure_changed.disconnect(self.on_structure_changed)
+            except: pass
             timeline_widget.structure_changed.connect(self.on_structure_changed)
             
             # 2. UI Action Signals
+            try:
+                timeline_widget.play_pause_requested.disconnect(self.toggle_play)
+            except: pass
             timeline_widget.play_pause_requested.connect(self.toggle_play)
-            timeline_widget.view_updated.connect(self.sync_scroll_to_view)
-            timeline_widget.hover_x_changed.connect(self.sync_hover_to_ruler)
-            timeline_widget.clip_proxy_toggled.connect(self.on_clip_proxy_clicked)
-            timeline_widget.clip_fx_toggled.connect(self.on_clip_fx_clicked)
             
-            # 3. Logic & Contextual signals
-            timeline_widget.selection_changed.connect(self.on_timeline_selection_changed)
+            try:
+                timeline_widget.view_updated.disconnect(self.sync_scroll_to_view)
+            except: pass
+            timeline_widget.view_updated.connect(self.sync_scroll_to_view)
+            
+            try:
+                timeline_widget.hover_x_changed.disconnect(self.sync_hover_to_ruler)
+            except: pass
+            timeline_widget.hover_x_changed.connect(self.sync_hover_to_ruler)
+            
+            try:
+                timeline_widget.clip_proxy_toggled.disconnect(self.on_clip_proxy_clicked)
+            except: pass
+            timeline_widget.clip_proxy_toggled.connect(self.on_clip_proxy_clicked)
+            
+            try:
+                timeline_widget.clip_fx_toggled.disconnect(self.on_clip_fx_clicked)
+            except: pass
+            timeline_widget.clip_fx_toggled.connect(self.on_clip_fx_clicked)
+
+    def sync_timeline_registration(self, widget):
+        """Recursively find and register all timelines within a widget."""
+        from .timeline.simple_timeline import SimpleTimeline
+        if isinstance(widget, SimpleTimeline):
+            self.register_timeline(widget)
+        
+        for child in widget.findChildren(SimpleTimeline):
+            self.register_timeline(child)
+
+    def save_current_layout_to_workspace(self):
+        """Serializes current layout and returns it."""
+        from .panels import RockyPanel
+        # We find the root widget of the middle section
+        root_layout = self.middle_section.layout()
+        if root_layout.count() > 0:
+            root_widget = root_layout.itemAt(0).widget()
+            return RockyPanel.serialize_layout(root_widget)
+        return None
+
+    def load_layout_from_workspace(self, layout_data):
+        """Clears current layout and reconstructs from data."""
+        from .panels import RockyPanel
+        
+        # 1. Unregister everything first
+        self.viewer_registry.clear()
+        self.master_meter_registry.clear()
+        self.timeline_registry.clear()
+        
+        # 2. Clear middle section
+        root_layout = self.middle_section.layout()
+        while root_layout.count() > 0:
+            item = root_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+        
+        # 3. Reconstruct
+        new_root = RockyPanel.deserialize_layout(layout_data, self)
+        if new_root:
+            root_layout.addWidget(new_root)
+            self.main_panel = new_root # Update reference if needed
+            
+        # 4. Refresh sidebar and others
+        self.on_structure_changed()
+        self.update()
+
+    def _init_default_workspace(self):
+        """Creates the initial default workspace button with standard layout."""
+        # Standard layout as per requested image:
+        # 1. Main Horizontal Split (Left: Viewer+Timeline, Right: Properties)
+        # 2. Left Vertical Split (Top: Viewer, Bottom: Timeline)
+        
+        default_layout = {
+            "type": "splitter",
+            "orientation": 1, # Horizontal
+            "sizes": [1000, 400],
+            "children": [
+                {
+                    "type": "splitter",
+                    "orientation": 2, # Vertical
+                    "sizes": [700, 300],
+                    "children": [
+                        {"type": "panel", "panel_type": "Viewer", "title": "VISOR DE VIDEO"},
+                        {"type": "panel", "panel_type": "Timeline", "title": "LÍNEA DE TIEMPO"}
+                    ]
+                },
+                {"type": "panel", "panel_type": "Properties", "title": "FORMATO DE PROYECTO"}
+            ]
+        }
+        
+        # We use "Edición" to match the user request aesthetic
+        self.toolbar.workspace_bar.add_workspace("Edición", default_layout)
+        self.toolbar.workspace_bar.set_active("Edición")
+        
+        if self.timeline_widget:
+            self.timeline_widget.selection_changed.connect(self.on_timeline_selection_changed)
 
     def on_timeline_selection_changed(self, selection):
         """Dispatches selection changes to whichever properties panel is active."""

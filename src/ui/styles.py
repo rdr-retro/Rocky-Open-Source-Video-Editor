@@ -31,6 +31,7 @@ CLIP_AUDIO_BODY = dt.TRACK_AUDIO_BODY
 # ACCENT & TEXT COLORS (from active theme)
 # ============================================================================
 ACCENT_BLUE = dt.ACCENT_PRIMARY
+ACCENT_PRIMARY = dt.ACCENT_PRIMARY
 TEXT_WHITE = dt.TEXT_PRIMARY
 TEXT_SUBTLE = dt.TEXT_SECONDARY
 
@@ -88,6 +89,44 @@ TOOLBAR_STYLE = f"""
 QFrame#Toolbar {{
     background-color: {dt.BG_DEEP};
     border-bottom: 1px solid {dt.BORDER_SUBTLE};
+}}
+"""
+
+TOOLBAR_MENU_BTN_STYLE = f"""
+QPushButton {{
+    background-color: transparent;
+    color: #ffffff;
+    border: none;
+    padding: 2px 8px;
+    font-family: {dt.FONT_FAMILY_UI};
+    font-size: 11px;
+}}
+QPushButton:hover {{
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}}
+QPushButton::menu-indicator {{
+    image: none;
+}}
+"""
+
+WORKSPACE_BTN_STYLE = f"""
+QPushButton {{
+    background-color: transparent;
+    color: #ffffff;
+    border: none;
+    padding: 2px 8px;
+    font-family: {dt.FONT_FAMILY_UI};
+    font-size: 11px;
+}}
+QPushButton:hover {{
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}}
+QPushButton:checked {{
+    background-color: transparent;
+    color: {dt.ACCENT_PRIMARY};
+    font-weight: bold;
 }}
 """
 
