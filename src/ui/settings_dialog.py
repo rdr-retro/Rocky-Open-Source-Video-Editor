@@ -1,0 +1,433 @@
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
+                             QPushButton, QComboBox, QCheckBox, QSpinBox, QGridLayout, 
+                             QSizePolicy, QWidget, QListWidget, QListWidgetItem, QStackedWidget)
+from PySide6.QtCore import Qt, QRect
+from PySide6.QtGui import QPainter, QPen, QColor, QFont
+
+class PreferencesDialog(QDialog):
+    """
+    macOS-style Preferences dialog with sidebar navigation.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Preferencias")
+        self.resize(900, 600)
+        
+        # Main layout
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Sidebar
+        self.sidebar = QListWidget()
+        self.sidebar.setFixedWidth(180)
+        self.sidebar.setStyleSheet("""
+            QListWidget {
+                background-color: #2d2d2d;
+                border: none;
+                border-right: 1px solid #1f1f1f;
+                outline: none;
+                padding: 8px 0;
+            }
+            QListWidget::item {
+                color: #b8b8b8;
+                padding: 10px 20px;
+                border: none;
+                font-size: 13px;
+                border-radius: 6px;
+                margin: 2px 8px;
+            }
+            QListWidget::item:selected {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #5a9fd4, stop:1 #4a8fc4);
+                color: #ffffff;
+            }
+            QListWidget::item:hover:!selected {
+                background-color: #3a3a3a;
+            }
+        """)
+        
+        # Add sidebar items
+        categories = ["Vídeo", "Audio", "Proxies", "Visor", "Tema"]
+        for cat in categories:
+            item = QListWidgetItem(cat)
+            self.sidebar.addItem(item)
+        
+        # Content area
+        self.content_stack = QStackedWidget()
+        self.content_stack.setStyleSheet("""
+            QStackedWidget {
+                background-color: #3a3a3a;
+            }
+        """)
+        
+        # Create content pages
+        self.content_stack.addWidget(self._create_video_page())
+        self.content_stack.addWidget(self._create_audio_page())
+        self.content_stack.addWidget(self._create_proxy_page())
+        self.content_stack.addWidget(self._create_preview_page())
+        self.content_stack.addWidget(self._create_theme_page())
+        
+        # Connect sidebar selection
+        self.sidebar.currentRowChanged.connect(self.content_stack.setCurrentIndex)
+        self.sidebar.setCurrentRow(0)
+        
+        # Add to main layout
+        main_layout.addWidget(self.sidebar)
+        main_layout.addWidget(self.content_stack)
+        
+        # Apply enhanced dark theme
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #3a3a3a;
+                border-radius: 10px;
+            }
+            QLabel {
+                color: #e8e8e8;
+                font-size: 12px;
+            }
+            QComboBox, QSpinBox {
+                background-color: #4f4f4f;
+                border: 1px solid #2f2f2f;
+                border-radius: 6px;
+                color: #e8e8e8;
+                padding: 6px 10px;
+                min-width: 140px;
+                min-height: 24px;
+            }
+            QComboBox:hover, QSpinBox:hover {
+                border-color: #5a9fd4;
+                background-color: #555555;
+            }
+            QComboBox:focus, QSpinBox:focus {
+                border-color: #5a9fd4;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #b8b8b8;
+                margin-right: 8px;
+            }
+            QCheckBox {
+                color: #e8e8e8;
+                spacing: 10px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                background-color: #4f4f4f;
+                border: 1px solid #2f2f2f;
+                border-radius: 4px;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #5a9fd4;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #5a9fd4;
+                border-color: #5a9fd4;
+                image: none;
+            }
+            QCheckBox::indicator:checked:after {
+                content: "✓";
+                color: white;
+            }
+        """)
+
+
+    def _create_content_page(self):
+        """Create a base content page with proper styling."""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        return page, layout
+
+    def _create_section(self, title):
+        """Create a section header with enhanced styling."""
+        section = QFrame()
+        section.setStyleSheet("""
+            QFrame {
+                background-color: #424242;
+                border-radius: 8px;
+                padding: 4px;
+            }
+        """)
+        section_layout = QVBoxLayout(section)
+        section_layout.setContentsMargins(16, 12, 16, 16)
+        section_layout.setSpacing(16)
+        
+        # Section title
+        title_label = QLabel(title)
+        title_label.setStyleSheet("""
+            font-size: 14px; 
+            font-weight: bold; 
+            color: #ffffff;
+            background: transparent;
+        """)
+        section_layout.addWidget(title_label)
+        
+        return section, section_layout
+
+    def _create_video_page(self):
+        page, layout = self._create_content_page()
+        
+        # Resolution section
+        section, sec_layout = self._create_section("Formato de Proyecto")
+        
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        
+        grid.addWidget(QLabel("Anchura:"), 0, 0)
+        self.w_spin = QSpinBox()
+        self.w_spin.setRange(100, 8192)
+        self.w_spin.setValue(1920)
+        self.w_spin.setSuffix(" px")
+        grid.addWidget(self.w_spin, 0, 1)
+        
+        grid.addWidget(QLabel("Altura:"), 1, 0)
+        self.h_spin = QSpinBox()
+        self.h_spin.setRange(100, 8192)
+        self.h_spin.setValue(1080)
+        self.h_spin.setSuffix(" px")
+        grid.addWidget(self.h_spin, 1, 1)
+        
+        grid.addWidget(QLabel("FPS:"), 2, 0)
+        self.fps_combo = QComboBox()
+        self.fps_combo.addItems(["23.976", "24.0", "25.0", "29.97", "30.0", "50.0", "60.0"])
+        self.fps_combo.setCurrentIndex(4)
+        grid.addWidget(self.fps_combo, 2, 1)
+        
+        sec_layout.addLayout(grid)
+        layout.addWidget(section)
+        layout.addStretch()
+        
+        return page
+
+    def _create_audio_page(self):
+        page, layout = self._create_content_page()
+        
+        section, sec_layout = self._create_section("Configuración de Audio")
+        
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        
+        grid.addWidget(QLabel("Sample Rate:"), 0, 0)
+        sr_combo = QComboBox()
+        sr_combo.addItems(["44.100 Hz", "48.000 Hz", "96.000 Hz"])
+        sr_combo.setCurrentIndex(1)
+        grid.addWidget(sr_combo, 0, 1)
+        
+        grid.addWidget(QLabel("Profundidad de bits:"), 1, 0)
+        bits_combo = QComboBox()
+        bits_combo.addItems(["16-bit", "24-bit", "32-bit Float"])
+        grid.addWidget(bits_combo, 1, 1)
+        
+        sec_layout.addLayout(grid)
+        layout.addWidget(section)
+        layout.addStretch()
+        
+        return page
+
+    def _create_proxy_page(self):
+        page, layout = self._create_content_page()
+        
+        section, sec_layout = self._create_section("Flujo de Trabajo Proxy")
+        
+        cb_auto = QCheckBox("Generar proxies automáticamente")
+        cb_auto.setChecked(True)
+        sec_layout.addWidget(cb_auto)
+        
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        
+        grid.addWidget(QLabel("Resolución:"), 0, 0)
+        res_combo = QComboBox()
+        res_combo.addItems(["360p", "540p", "720p"])
+        res_combo.setCurrentIndex(1)
+        grid.addWidget(res_combo, 0, 1)
+        
+        grid.addWidget(QLabel("Codec:"), 1, 0)
+        codec_combo = QComboBox()
+        codec_combo.addItems(["H.264", "ProRes 422 Proxy"])
+        grid.addWidget(codec_combo, 1, 1)
+        
+        sec_layout.addLayout(grid)
+        layout.addWidget(section)
+        layout.addStretch()
+        
+        return page
+
+    def _create_preview_page(self):
+        page, layout = self._create_content_page()
+        
+        section, sec_layout = self._create_section("Optimización del Visor")
+        
+        cb_hw = QCheckBox("Aceleración por hardware (Metal / DX12)")
+        cb_hw.setChecked(True)
+        sec_layout.addWidget(cb_hw)
+        
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        
+        grid.addWidget(QLabel("Resolución de Preview:"), 0, 0)
+        sc_combo = QComboBox()
+        sc_combo.addItems(["Completa", "1/2", "1/4", "1/8"])
+        grid.addWidget(sc_combo, 0, 1)
+        
+        sec_layout.addLayout(grid)
+        layout.addWidget(section)
+        layout.addStretch()
+        
+        return page
+
+    def _create_theme_page(self):
+        page, layout = self._create_content_page()
+        
+        section, sec_layout = self._create_section("Tema de Color")
+        
+        # Theme selection
+        self.theme_group = []
+        themes_layout = QVBoxLayout()
+        themes_layout.setSpacing(8)
+        
+        themes = [
+            ("Midnight Slate", "Cinematográfico profesional"),
+            ("Obsidian Gold", "Cálido y premium"),
+            ("Arctic Night", "Limpio y moderno")
+        ]
+        
+        for name, desc in themes:
+            btn = ThemeButton(name, desc)
+            btn.clicked.connect(lambda n=name: self.apply_theme(n))
+            themes_layout.addWidget(btn)
+            self.theme_group.append(btn)
+        
+        self.theme_group[0].set_selected(True)
+        
+        sec_layout.addLayout(themes_layout)
+        layout.addWidget(section)
+        layout.addStretch()
+        
+        return page
+
+    def apply_theme(self, theme_name):
+        """Apply selected theme."""
+        for btn in self.theme_group:
+            btn.set_selected(btn.name == theme_name)
+        
+        # Update design_tokens.py
+        import os
+        import re
+        tokens_path = os.path.join(os.path.dirname(__file__), 'design_tokens.py')
+        
+        try:
+            with open(tokens_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            theme_map = {
+                "Midnight Slate": "MidnightSlate",
+                "Obsidian Gold": "ObsidianGold",
+                "Arctic Night": "ArcticNight"
+            }
+            
+            theme_class = theme_map.get(theme_name, "MidnightSlate")
+            new_content = re.sub(r'ACTIVE_THEME = \w+', f'ACTIVE_THEME = {theme_class}', content)
+            
+            with open(tokens_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            
+            # Ask to restart
+            from PySide6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self,
+                "Reiniciar Aplicación",
+                f"El tema '{theme_name}' se ha guardado.\n\n¿Deseas reiniciar ahora?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.accept()
+                import sys, subprocess
+                from PySide6.QtCore import QCoreApplication
+                python = sys.executable
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                QCoreApplication.quit()
+                run_script = os.path.join(project_root, 'run.sh')
+                if os.path.exists(run_script):
+                    subprocess.Popen(['bash', run_script], cwd=project_root)
+                else:
+                    subprocess.Popen([python, '-m', 'src.ui.rocky_ui'], cwd=project_root)
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error", f"Error al aplicar tema: {e}")
+
+
+class ThemeButton(QPushButton):
+    """Enhanced theme selection button with modern styling."""
+    
+    def __init__(self, name, description, parent=None):
+        super().__init__(parent)
+        self.name = name
+        self.description = description
+        self.is_selected = False
+        
+        self.setCheckable(True)
+        self.setMinimumHeight(60)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        # Layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(4)
+        
+        name_label = QLabel(name)
+        name_label.setStyleSheet("font-weight: bold; color: #ffffff; font-size: 13px; background: transparent;")
+        
+        desc_label = QLabel(description)
+        desc_label.setStyleSheet("color: #a8a8a8; font-size: 11px; background: transparent;")
+        desc_label.setWordWrap(True)
+        
+        layout.addWidget(name_label)
+        layout.addWidget(desc_label)
+        
+        self._update_style()
+        
+    def set_selected(self, selected):
+        self.is_selected = selected
+        self.setChecked(selected)
+        self._update_style()
+        
+    def _update_style(self):
+        if self.is_selected:
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #5a9fd4, stop:1 #4a8fc4);
+                    border: 2px solid #4a8fc4;
+                    border-radius: 8px;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: #4f4f4f;
+                    border: 1px solid #3a3a3a;
+                    border-radius: 8px;
+                }
+                QPushButton:hover {
+                    background-color: #5a5a5a;
+                    border-color: #5a9fd4;
+                }
+            """)
+
+
+# Alias for compatibility
+SettingsDialog = PreferencesDialog
