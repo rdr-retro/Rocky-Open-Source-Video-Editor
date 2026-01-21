@@ -39,6 +39,7 @@ class PanelTypeGridMenu(QFrame):
             ("🎞️", "Timeline", "Timeline"),
             ("⚙️", "Ajustes", "Properties"),
             ("✨", "Efectos", "Effects"),
+            ("🎬", "Transformador", "MediaTransformer"),
             ("📊", "Audio", "MasterMeter"),
             ("📁", "Archivos", "FileBrowser"),
         ]
@@ -182,19 +183,33 @@ class RockyPanelHeader(QFrame):
 
     def show_grid_menu(self):
         """Show the Blender-style grid menu."""
+        print("DEBUG: show_grid_menu called")
         menu = PanelTypeGridMenu(self)
         menu.type_selected.connect(self._on_type_selected)
         
         pos = self.btn_type.mapToGlobal(QPoint(0, self.btn_type.height()))
         menu.move(pos)
         menu.show()
+        print(f"DEBUG: Grid menu shown at {pos}")
 
     def _on_type_selected(self, p_type):
         """Forward selection to parent panel."""
+        print(f"DEBUG: _on_type_selected called with {p_type}")
+        
+        # The header's parent is the RockyPanel's main layout widget
+        # We need to traverse up to find the actual RockyPanel
         parent = self.parent()
+        while parent and not hasattr(parent, 'change_panel_type'):
+            parent = parent.parent()
+        
+        print(f"DEBUG: Found RockyPanel: {parent}, type: {type(parent)}")
+        
         if parent and hasattr(parent, 'change_panel_type'):
             parent.change_panel_type(p_type)
             self.update_type_icon(p_type)
+            self.set_title(p_type.upper())
+        else:
+            print(f"DEBUG: Could not find RockyPanel parent!")
 
     def show_header_context_menu(self, pos):
         """Right-click menu for header options."""
@@ -221,6 +236,7 @@ class RockyPanelHeader(QFrame):
             "Timeline": "🎞️",
             "Properties": "⚙️",
             "Effects": "✨",
+            "MediaTransformer": "🎬",
             "MasterMeter": "📊",
             "FileBrowser": "📂"
         }
@@ -1005,6 +1021,7 @@ class RockyPanel(QFrame):
 
     def change_panel_type(self, panel_type):
         """Change the panel content based on selected type."""
+        print(f"DEBUG: Changing panel type to {panel_type}")
         self.current_type = panel_type
         # Unregister old content if needed
         if self.content_area.layout().count() > 0:
@@ -1333,6 +1350,16 @@ class RockyPanel(QFrame):
             label.setStyleSheet("color: #888; padding: 20px; font-size: 12px;")
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             return label
+        elif panel_type == "MediaTransformer":
+            # Import and create MediaTransformerPanel
+            try:
+                from .fx_panel import VideoEventFXPanel
+                return VideoEventFXPanel()
+            except Exception as e:
+                label = QLabel(f"Error cargando Transformador de Medios: {e}")
+                label.setStyleSheet("color: #ff5050; padding: 20px;")
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                return label
         
         # Default fallback
         label = QLabel(f"Panel: {panel_type}")

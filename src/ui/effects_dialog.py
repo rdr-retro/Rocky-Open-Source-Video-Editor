@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QFrame, QSizePolicy, QPushButton
-from PySide6.QtCore import Qt, QRectF, QLineF, QPointF, QTimer, QRect
+from PySide6.QtCore import Qt, QRectF, QLineF, QPointF, QTimer, QRect, Signal
 from PySide6.QtGui import QPainter, QColor, QPen, QFont, QImage, QPixmap, QPainterPath
 import math
 
@@ -7,6 +7,8 @@ class OverlayViewer(QLabel):
     """
     Subclass of QLabel that draws interactive Pan/Crop handles over the video.
     """
+    transform_changed = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -303,6 +305,7 @@ class OverlayViewer(QLabel):
         
         if self.dragging_handle and self.app:
             self.app.sync_clip_transform(self.clip)
+            self.transform_changed.emit()
         self.update()
 
     def mouseReleaseEvent(self, event):
@@ -311,126 +314,7 @@ class OverlayViewer(QLabel):
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
-class FXTimeline(QWidget):
-    """
-    A local, restricted timeline for the FX Dialog.
-    Only displays the duration of the current clip (0 to duration).
-    """
-    def __init__(self, clip, fps=30.0, parent=None):
-        super().__init__(parent)
-        self.clip = clip
-        self.fps = fps
-        self.setMinimumHeight(100)
-        self.pixels_per_second = 100.0  # Zoom
-        self.playhead_time = 0.0
-        self.setFixedHeight(140)
-        
-        # Consistent Colors with main timeline
-        self.COLOR_BG = QColor("#1e1e1e")
-        self.COLOR_PLAYHEAD_OUTER = QColor(0, 0, 0)
-        self.COLOR_PLAYHEAD_INNER = QColor(255, 255, 255)
-        self.COLOR_GRID_MAJOR = QColor(80, 80, 80, 150)
-        self.COLOR_GRID_MINOR = QColor(60, 60, 60, 80)
-        self.COLOR_CLIP_BODY = QColor("#3a9b8f")
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        w = self.width()
-        h = self.height()
-        duration = self.clip.duration_frames / self.get_fps()
-        
-        # 1. Background
-        painter.fillRect(self.rect(), self.COLOR_BG)
-        
-        # 2. Adaptive Grid Logic (Vegas Style)
-        chosen_step, divs = self.calculate_adaptive_step(self.pixels_per_second, self.get_fps())
-        
-        # Draw Minor Grid first
-        pen_minor = QPen(self.COLOR_GRID_MINOR, 1, Qt.PenStyle.DotLine)
-        painter.setPen(pen_minor)
-        sub_step = chosen_step / float(divs)
-        
-        # Only draw within clip range
-        for s in range(int(duration / sub_step) + 1):
-            x = s * sub_step * self.pixels_per_second
-            if x > w: break
-            # Don't overlap with major if it's a multiple
-            if s % divs != 0:
-                painter.drawLine(QLineF(x, 20, x, h))
-        
-        # Draw Major Grid
-        pen_major = QPen(self.COLOR_GRID_MAJOR, 1, Qt.PenStyle.DotLine)
-        painter.setPen(pen_major)
-        for s in range(int(duration / chosen_step) + 1):
-            x = s * chosen_step * self.pixels_per_second
-            if x > w: break
-            painter.drawLine(QLineF(x, 0, x, h))
-
-        # 3. Clip Range Labeling (Start/End)
-        clip_width = duration * self.pixels_per_second
-        painter.setFont(QFont("Arial", 8))
-        painter.setPen(QColor("#cccccc"))
-        painter.drawText(5, 15, "00:00:00")
-        
-        dur_str = self._format_seconds(duration)
-        painter.drawText(int(min(clip_width, w) - 50), 15, dur_str)
-
-        # Labels for Start and End (0 and Duration)
-        painter.setFont(QFont("Arial", 8))
-        painter.setPen(QColor("#cccccc"))
-        painter.drawText(5, 15, "00:00:00")
-        
-        dur_str = self._format_seconds(duration)
-        painter.drawText(int(min(clip_width, w) - 50), 15, dur_str)
-        
-        # 4. Draw Local Playhead (Matching Main Timeline)
-        px_x = self.playhead_time * self.pixels_per_second
-        
-        # Outer thick line
-        painter.setPen(QPen(self.COLOR_PLAYHEAD_OUTER, 3))
-        painter.drawLine(QLineF(px_x, 0, px_x, h))
-        
-        # Inner thin line
-        painter.setPen(QPen(self.COLOR_PLAYHEAD_INNER, 1))
-        painter.drawLine(QLineF(px_x, 0, px_x, h))
-
-    def _format_seconds(self, s):
-        mins = int(s // 60)
-        secs = int(s % 60)
-        frames = int((s % 1) * self.fps)
-        return f"{mins:02d}:{secs:02d}:{frames:02d}"
-
-    def calculate_adaptive_step(self, pps, fps):
-        """Standard adaptive logic to match main timeline."""
-        candidates = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0]
-        chosen_step = candidates[-1]
-        for s in candidates:
-            if s * pps >= 80:
-                chosen_step = s
-                break
-        return chosen_step, 5
-
-    def get_fps(self):
-        return self.fps
-
-    def mousePressEvent(self, event):
-        self._update_playhead(event.position().x())
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton:
-            self._update_playhead(event.position().x())
-
-    def _update_playhead(self, x):
-        duration = self.clip.duration_frames / self.get_fps()
-        self.playhead_time = max(0, min(duration, x / self.pixels_per_second))
-        self.update()
-        # Notify dialog to update preview
-        if isinstance(self.parent(), EffectsDialog):
-            self.parent().seek_preview(self.playhead_time)
-        elif self.parent() and isinstance(self.parent().parent(), EffectsDialog):
-            self.parent().parent().seek_preview(self.playhead_time)
+# FXTimeline removed as per PROHIBIDO constraint.
 
 class EffectsDialog(QDialog):
     """
@@ -485,27 +369,13 @@ class EffectsDialog(QDialog):
         self.display_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         viewer_layout.addWidget(self.display_label)
         
-        # Playback Controls for FX
-        self.controls = QFrame()
-        self.controls.setFixedHeight(40)
-        self.controls.setStyleSheet("background-color: #222; border-top: 1px solid #444;")
-        c_layout = QHBoxLayout(self.controls)
-        c_layout.setContentsMargins(10, 0, 10, 0)
-        
-        self.play_btn = QPushButton("▶")
-        self.play_btn.setFixedSize(30, 30)
-        self.play_btn.setStyleSheet("QPushButton { background: transparent; color: white; border: none; font-size: 18px; } QPushButton:hover { background: #444; }")
-        self.play_btn.clicked.connect(self.toggle_playback)
-        c_layout.addWidget(self.play_btn)
         c_layout.addStretch()
         
         v_layout.addWidget(self.viewer_frame, stretch=1)
-        v_layout.addWidget(self.controls)
         
-        # 2. FX Controls Placeholder
+        # 2. FX Controls Area
         self.fx_area = QFrame()
-        self.fx_area.setFrameShape(QFrame.StyledPanel)
-        self.fx_area.setStyleSheet("background-color: #333333; border-radius: 4px;")
+        self.fx_area.setStyleSheet("background-color: #1a1a1a; border-radius: 4px;")
         fx_layout = QVBoxLayout(self.fx_area)
         
         label = QLabel("FX Parameters & Controls")
@@ -520,21 +390,9 @@ class EffectsDialog(QDialog):
         
         layout.addWidget(splitter, stretch=1)
         
-        # Lower Area: Local Sub-Timeline
-        layout.addSpacing(10)
+        layout.addWidget(splitter, stretch=1)
         
-        timeline_label = QLabel("Local Timeline (Clip Duration)")
-        timeline_label.setStyleSheet("color: #aaaaaa; font-size: 11px; margin-left: 5px;")
-        layout.addWidget(timeline_label)
-        
-        self.sub_timeline = FXTimeline(clip, fps, self)
-        layout.addWidget(self.sub_timeline)
-        
-        # Playback logic
-        self.preview_timer = QTimer(self)
-        self.preview_timer.timeout.connect(self.update_preview)
-        
-        # Force initial frame
+        # Trigger initial preview
         QTimer.singleShot(100, lambda: self.seek_preview(0.0))
         # If thumbnails are already there, show them immediately
         if hasattr(clip, 'thumbnails') and clip.thumbnails:
@@ -545,7 +403,12 @@ class EffectsDialog(QDialog):
         if not self.rocky_app or not hasattr(self.rocky_app, 'engine'):
             return
             
-        global_time = (self.clip.start_frame / self.sub_timeline.fps) + time_s
+        # Use project/app FPS
+        fps = 30.0
+        if self.rocky_app and hasattr(self.rocky_app, 'get_fps'):
+            fps = self.rocky_app.get_fps()
+            
+        global_time = (self.clip.start_frame / fps) + time_s
         
         try:
             frame_data = self.rocky_app.engine.evaluate(global_time)
@@ -554,26 +417,7 @@ class EffectsDialog(QDialog):
         except Exception as e:
             print(f"FX Preview Error: {e}")
 
-    def toggle_playback(self):
-        if self.preview_timer.isActive():
-            self.preview_timer.stop()
-            self.play_btn.setText("▶")
-        else:
-            self.preview_timer.start(int(1000 / self.sub_timeline.fps))
-            self.play_btn.setText("⏸")
-
-    def update_preview(self):
-        duration = self.clip.duration_frames / self.sub_timeline.fps
-        next_time = self.sub_timeline.playhead_time + (1.0 / self.sub_timeline.fps)
-        
-        if next_time >= duration:
-            next_time = 0.0
-            self.preview_timer.stop()
-            self.play_btn.setText("▶")
-            
-        self.sub_timeline.playhead_time = next_time
-        self.sub_timeline.update()
-        self.seek_preview(next_time)
+    # Local playback removed as per PROHIBIDO constraint.
 
     def display_frame(self, frame_buffer):
         """Heavily optimized frame display."""
@@ -591,5 +435,5 @@ class EffectsDialog(QDialog):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Re-render frame on resize to fit new label size
-        self.seek_preview(self.sub_timeline.playhead_time)
+        # Re-render frame on resize
+        self.seek_preview(0.0)

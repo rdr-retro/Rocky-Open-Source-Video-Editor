@@ -775,20 +775,63 @@ class RockyApp(QMainWindow):
                 m.meter.set_levels(left, right)
 
     def on_clip_fx_clicked(self, clip):
-        """Show the Effects Dialog for the selected clip."""
-        from .effects_dialog import EffectsDialog
+        """Show the Video Event FX panel for the selected clip in the workspace."""
+        from .panels import RockyPanel
         
-        # Check if already open
-        clip_id = id(clip)
-        if clip_id in self.fx_dialogs:
-            self.fx_dialogs[clip_id].raise_()
-            self.fx_dialogs[clip_id].activateWindow()
-            return
+        # 1. Select the clip (ensures context sync)
+        for c in self.model.clips:
+            c.selected = (c == clip)
+        self.on_timeline_selection_changed([clip])
+        
+        # 2. Find a panel to host the FX controls
+        target_panel = None
+        
+        # Priority 1: A panel already showing MediaTransformer
+        for panel in self.findChildren(RockyPanel):
+            if panel.current_type == "MediaTransformer":
+                target_panel = panel
+                break
+        
+        # Priority 2: A panel showing Properties (contextual buddy)
+        if not target_panel:
+            for panel in self.findChildren(RockyPanel):
+                if panel.current_type == "Properties":
+                    target_panel = panel
+                    break
+        
+        # 3. If no panel is found, create one by splitting the right-most panel
+        if not target_panel:
+            # Look for the root splitter or any large panel to split
+            # In our Blender system, we can find the rightmost panel
+            panels = self.findChildren(RockyPanel)
+            if panels:
+                # Target the largest panel (usually Viewer or Timeline)
+                target_panel = panels[0]
+                for p in panels:
+                    if p.width() * p.height() > target_panel.width() * target_panel.height():
+                        target_panel = p
+                
+                # Split it vertically
+                target_panel.split(Qt.Orientation.Horizontal)
+                # After split, find the NEWLY created panel. 
+                # Our split logic creates a brother. Let's search again.
+                for p in self.findChildren(RockyPanel):
+                    if p != target_panel and p.current_type == target_panel.current_type:
+                        target_panel = p # This is the new clone
+                        break
+        
+        # 4. Switch and Refresh
+        if target_panel:
+            target_panel.change_panel_type("MediaTransformer")
+            # Update header icon/title to reflect the change
+            target_panel.header.update_type_icon("MediaTransformer")
+            target_panel.header.set_title("TRANSFORMADOR DE MEDIOS")
             
-        dlg = EffectsDialog(clip, self)
-        dlg.finished.connect(lambda: self.fx_dialogs.pop(clip_id, None))
-        self.fx_dialogs[clip_id] = dlg
-        dlg.show()
+            # Re-dispatched to ensure the new content_area widget gets the clip data
+            self.on_timeline_selection_changed([clip])
+        else:
+            # Extremely rare case: No panels exist at all (not possible in standard Rocky)
+            print("WARNING: Could not find or create a panel for FX.")
 
     def on_clip_proxy_clicked(self, clip):
         """Handler for when a clip's PX button is clicked."""
@@ -1320,6 +1363,12 @@ class RockyApp(QMainWindow):
         for sidebar in self.findChildren(SidebarPanel):
             sidebar.refresh_tracks()
         self.rebuild_engine()
+        
+        # Refresh Contextual Panels (FX Panel)
+        from .fx_panel import VideoEventFXPanel
+        for fx_panel in self.findChildren(VideoEventFXPanel):
+             if fx_panel.current_clip:
+                  fx_panel._refresh_effects_list()
         if self.timeline_widget:
             self.timeline_widget.updateGeometry() # Force scrollbar update
         if self.timeline_ruler:
@@ -1512,10 +1561,20 @@ class RockyApp(QMainWindow):
             self.timeline_widget.selection_changed.connect(self.on_timeline_selection_changed)
 
     def on_timeline_selection_changed(self, selection):
-        """Dispatches selection changes to whichever properties panel is active."""
-        # Find any active EditorPanel (Properties) and update it
-        # In this hybrid version, we just look for property panels in children if needed
-        pass
+        """Dispatches selection changes to whichever properties or FX panel is active."""
+        print(f"DEBUG RockyUI: on_timeline_selection_changed called with {len(selection) if selection else 0} clips")
+        # Find all RockyPanel descendants and check their content
+        from .panels import RockyPanel
+        from .editor_panel import EditorPanel
+        from .fx_panel import VideoEventFXPanel
+        
+        # Traverse the entire widget tree to find active contextual panels
+        # This is robust for multiple splitters/panels
+        for panel in self.findChildren(RockyPanel):
+            content = panel.content_area.layout().itemAt(0).widget() if panel.content_area.layout().count() > 0 else None
+            if content and hasattr(content, 'update_context'):
+                print(f"DEBUG RockyUI: Updating panel {type(content).__name__}")
+                content.update_context(selection)
 
     def unregister_timeline(self, timeline_widget):
         """Unregister a timeline widget from playback sync."""
