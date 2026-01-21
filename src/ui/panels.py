@@ -487,10 +487,13 @@ class RockyPanel(QFrame):
         # 2. Content
         # We wrap content in a container to handle margins/clipping if needed
         self.content_area = QWidget()
+        self.content_area.setObjectName("PanelContentArea")
         self.content_area.setStyleSheet("""
-            background-color: transparent;
-            border-bottom-left-radius: 12px;
-            border-bottom-right-radius: 12px;
+            #PanelContentArea {
+                background-color: transparent;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }
         """)
         content_layout = QVBoxLayout(self.content_area)
         content_layout.setContentsMargins(0, 0, 0, 0)
