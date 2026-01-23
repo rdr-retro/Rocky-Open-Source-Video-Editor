@@ -34,6 +34,7 @@ class TimelinePainter:
     COLOR_BTN_PROXY_GEN = QColor("#FF8800")
     COLOR_BTN_PROXY_READY = QColor("#00FF00")
     COLOR_BTN_PROXY_OFF = QColor("#000000")
+    COLOR_BTN_SUB = QColor("#673AB7") # Purple for Subs
     COLOR_BTN_TEXT = QColor("#FFFFFF")
     COLOR_BTN_TEXT_BLACK = QColor("#000000")
     
@@ -349,6 +350,22 @@ class TimelinePainter:
         # Text "..."
         painter.setPen(self.COLOR_BTN_TEXT)
         painter.drawText(rect_fx, Qt.AlignmentFlag.AlignCenter, "...")
+        
+        # Button 0: SUB (Subtitles) - Left of FX
+        sub_x = fx_x - button_w - spacing
+        sub_y = px_y
+        rect_sub = QRectF(sub_x, sub_y, button_w, button_h)
+        
+        painter.setBrush(self.COLOR_BTN_SUB)
+        painter.setPen(QPen(QColor(255, 255, 255, 60), 0.5))
+        painter.drawRoundedRect(rect_sub, dt.RADIUS_SM, dt.RADIUS_SM)
+        
+        font_sub = painter.font()
+        font_sub.setPointSize(5.5) # Extra small
+        painter.setFont(font_sub)
+        painter.setPen(self.COLOR_BTN_TEXT)
+        painter.drawText(rect_sub, Qt.AlignmentFlag.AlignCenter, "SUB")
+
 
 
     def _draw_waveform(self, painter, peaks, x, y, w, h, visible_rect):

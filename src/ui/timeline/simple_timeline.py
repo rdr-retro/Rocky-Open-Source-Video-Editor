@@ -78,33 +78,6 @@ class SimpleTimeline(QWidget):
         
         print("SimpleTimeline: Widget initialized with TimelinePainter", flush=True)
 
-    def _handle_clip_click(self, event, clip):
-        """Handle clicking directly on a clip (Selection, FX, PX)."""
-        clip_x = self.frameToProjectedX(clip.start_frame)
-        clip_w = self.frameToProjectedX(clip.duration_frames)
-        track_y = self._get_track_y_positions()[clip.track_index]
-        
-        button_w, button_h, spacing = 14, 8, 2
-        px_x = clip_x + clip_w - button_w - 4
-        rect_px = QRectF(px_x, track_y + 2, button_w, button_h)
-        rect_fx = QRectF(px_x - button_w - spacing, track_y + 2, button_w, button_h)
-        
-        if rect_fx.contains(event.position()):
-            self.clip_fx_toggled.emit(clip)
-            return
-        if rect_px.contains(event.position()):
-            self.clip_proxy_toggled.emit(clip)
-            return
-
-        if not (event.modifiers() & Qt.ShiftModifier):
-            for c in self.model.clips: c.selected = False
-        clip.selected = True
-        
-        self.potential_drag_clip = clip
-        self.potential_drag_start_pos = event.position()
-        self.drag_offset_x = event.x() - clip_x
-        self.structure_changed.emit()
-        self.selection_changed.emit([c for c in self.model.clips if c.selected])
 
     @Property(float)
     def pixels_per_second(self):
@@ -247,19 +220,40 @@ class SimpleTimeline(QWidget):
         return False
 
     def _handle_clip_click(self, event, clip):
-        """Handle clicking directly on a clip (Selection, FX, PX)."""
+        """Handle clicking directly on a clip (Selection, FX, PX, SUB)."""
         clip_x = self.frameToProjectedX(clip.start_frame)
         clip_w = self.frameToProjectedX(clip.duration_frames)
         track_y = self._get_track_y_positions()[clip.track_index]
         
         button_w, button_h, spacing = 14, 8, 2
+        
+        # Hit regions (Right to Left)
+        # PX
         px_x = clip_x + clip_w - button_w - 4
         rect_px = QRectF(px_x, track_y + 2, button_w, button_h)
-        rect_fx = QRectF(px_x - button_w - spacing, track_y + 2, button_w, button_h)
         
+        # FX
+        fx_x = px_x - button_w - spacing
+        rect_fx = QRectF(fx_x, track_y + 2, button_w, button_h)
+        
+        # SUB
+        sub_x = fx_x - button_w - spacing
+        rect_sub = QRectF(sub_x, track_y + 2, button_w, button_h)
+        
+        if rect_sub.contains(event.position()):
+            # 1. Select clip
+            for c in self.model.clips: c.selected = (c == clip)
+            self.selection_changed.emit([c for c in self.model.clips if c.selected])
+            # 2. Switch to Subtitle Panel
+            app = self.window()
+            if hasattr(app, 'show_subtitle_panel'):
+                app.show_subtitle_panel()
+            return
+            
         if rect_fx.contains(event.position()):
             self.clip_fx_toggled.emit(clip)
             return
+            
         if rect_px.contains(event.position()):
             self.clip_proxy_toggled.emit(clip)
             return
@@ -272,6 +266,8 @@ class SimpleTimeline(QWidget):
         self.potential_drag_start_pos = event.position()
         self.drag_offset_x = event.x() - clip_x
         self.structure_changed.emit()
+        self.selection_changed.emit([c for c in self.model.clips if c.selected])
+
 
     def mouseMoveEvent(self, event):
         """Handle mouse move - drag clips, update hover, SCRUB PLAYHEAD, or DRAG FADES."""
@@ -734,6 +730,20 @@ class SimpleTimeline(QWidget):
 
         menu.addAction("Eliminar").triggered.connect(partial(self.delete_clip, clip))
         menu.addAction("Dividir").triggered.connect(partial(self.split_clip_at_pos, clip, pos))
+        
+        # Integración de Subtítulos
+        menu.addSeparator()
+        def switch_to_subs():
+            # Force selection
+            for c in self.model.clips: c.selected = (c == clip)
+            self.selection_changed.emit([clip])
+            # Call app method to switch panel
+            app = self.window()
+            if hasattr(app, 'show_subtitle_panel'):
+                app.show_subtitle_panel()
+        
+        menu.addAction("💬 Generar Subtítulos").triggered.connect(switch_to_subs)
+        
         menu.exec(self.mapToGlobal(pos))
         
     def _add_fade_menu(self, menu, clip, is_fade_in):

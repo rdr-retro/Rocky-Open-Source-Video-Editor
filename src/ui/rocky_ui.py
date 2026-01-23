@@ -830,6 +830,53 @@ class RockyApp(QMainWindow):
             # Extremely rare case: No panels exist at all (not possible in standard Rocky)
             print("WARNING: Could not find or create a panel for FX.")
 
+    def show_subtitle_panel(self):
+        """Contextual switch to subtitle panel for selected clips."""
+        from .panels import RockyPanel
+        
+        # 1. Get currently selected clips
+        selected = [c for c in self.model.clips if c.selected]
+        if not selected:
+             print("SubtitlePanel: No clips selected.")
+             return
+             
+        # 2. Find a panel to host the subtitle controls
+        target_panel = None
+        for panel in self.findChildren(RockyPanel):
+            if panel.current_type == "SubtitleGenerator":
+                target_panel = panel
+                break
+        
+        if not target_panel:
+            for panel in self.findChildren(RockyPanel):
+                if panel.current_type == "Properties" or panel.current_type == "MediaTransformer":
+                    target_panel = panel
+                    break
+                    
+        # 3. If no contextual panel found, split largest
+        if not target_panel:
+            panels = self.findChildren(RockyPanel)
+            if panels:
+                target_panel = panels[0]
+                for p in panels:
+                    if p.width() * p.height() > target_panel.width() * target_panel.height():
+                        target_panel = p
+                target_panel.split(Qt.Orientation.Horizontal)
+                for p in self.findChildren(RockyPanel):
+                    if p != target_panel and p.current_type == target_panel.current_type:
+                        target_panel = p
+                        break
+        
+        # 4. Switch
+        if target_panel:
+            target_panel.change_panel_type("SubtitleGenerator")
+            target_panel.header.update_type_icon("SubtitleGenerator")
+            target_panel.header.set_title("SUBTÍTULOS AUTOMÁTICOS")
+            
+            # Dispatch context
+            self.on_timeline_selection_changed(selected)
+
+
     def on_clip_proxy_clicked(self, clip):
         """Handler for when a clip's PX button is clicked."""
         from .models import ProxyStatus
@@ -896,22 +943,24 @@ class RockyApp(QMainWindow):
         
         # We need to pass the state (start_frame, preferred_track_idx) to the finish method
         # We can use a lambda or partial to "bind" these values
-        # Worker emits: path, duration, source, width, height
-        worker.finished.connect(lambda path, dur, src, w, h: self._finish_import_logic(path, dur, src, w, h, start_frame, preferred_track_idx))
+        # Worker emits: path, duration, source, width, height, rotation, fps
+        worker.finished.connect(lambda path, dur, src, w, h, r, f: self._finish_import_logic(path, dur, src, w, h, r, f, start_frame, preferred_track_idx))
         worker.error.connect(self._on_import_error)
         
         self._active_workers.append(worker)
         # Use built-in finished for deletion safety
         worker.finished.connect(lambda: self._safe_remove_worker(worker))
+        print(f"DEBUG: Starting Import Worker for {file_path}")
         worker.start()
 
     def _on_import_error(self, path, message):
         self.status_label.setText(f"Error importando {os.path.basename(path)}")
         QMessageBox.warning(self, "Error de Importación", f"No se pudo cargar {path}:\n{message}")
 
-    def _finish_import_logic(self, file_path, duration, source, width, height, start_frame, preferred_track_idx):
+    def _finish_import_logic(self, file_path, duration, source, width, height, rotation, fps, start_frame, preferred_track_idx):
         """
         Completes the import process once metadata is available from the background thread.
+        ULTRA-FAST: Avoids blocking calls on the UI thread.
         """
         # Cleanup import worker (the sender)
         sender = self.sender()
@@ -924,17 +973,17 @@ class RockyApp(QMainWindow):
         file_name = os.path.basename(file_path)
         ext = file_name.lower().split('.')[-1]
         
-        # Instantiate and Update Cache on the MAIN thread for stability
-        if file_path not in self.media_source_cache:
-            self.media_source_cache[file_path] = self._instantiate_source(file_path)
+        # PERFORMANCE OPTIMIZATION: Do NOT instantiate C++ sources on the UI thread if possible.
+        # We start by checking if it's already cached.
+        source = self.media_source_cache.get(file_path)
         
-        source = self.media_source_cache[file_path]
-
         # Check if project was empty before this import to trigger auto-zoom/resolution-match
         was_empty = (len(self.model.clips) == 0)
         
         # SMART PROVISIONING: Ask to match resolution on first import
         if was_empty and width > 0 and height > 0:
+            # Short-circuit long dialogs if we want < 1s? 
+            # No, user input is separate. But the PROBE is done.
             msg = QMessageBox()
             msg.setWindowTitle("Configuración de Proyecto")
             msg.setText(f"El primer medio añadido tiene una resolución de {width}x{height}.")
@@ -1013,6 +1062,35 @@ class RockyApp(QMainWindow):
             v_clip.file_path = file_path
             v_clip.source_duration_frames = source_duration
             
+            # --- METADATA CACHE (Instant UI Optimization) ---
+            v_clip.source_width = width
+            v_clip.source_height = height
+            v_clip.source_rotation = rotation
+            v_clip.source_fps = fps
+            
+            # DEFERRED SOURCE LOADING: Avoid blocking UI thread
+            # We schedule the heavy load for the NEXT event loop cycle
+            if file_path not in self.media_source_cache:
+                QTimer.singleShot(0, lambda: self._instantiate_source(file_path))
+            
+            # --- INITIAL TRANSFORMATION (Aspect Fit) ---
+            v_clip.transform.rotation = float(rotation)
+            
+            vis_w = width if rotation % 180 == 0 else height
+            vis_h = height if rotation % 180 == 0 else width
+            
+            # Project aspect
+            p_w, p_h = self.width(), self.height()
+            clip_aspect = vis_w / vis_h if vis_h > 0 else 1.77
+            proj_aspect = p_w / p_h if p_h > 0 else 1.77
+            
+            if clip_aspect > proj_aspect:
+                v_clip.transform.scale_x = 1.0
+                v_clip.transform.scale_y = proj_aspect / clip_aspect
+            else:
+                v_clip.transform.scale_y = 1.0
+                v_clip.transform.scale_x = clip_aspect / proj_aspect
+            
             # 2. Audio Track
             a_track = -1
             self.add_track(TrackType.AUDIO)
@@ -1021,6 +1099,7 @@ class RockyApp(QMainWindow):
             a_clip = TimelineClip(f"[Audio] {file_name}", start_frame, duration, a_track)
             a_clip.file_path = file_path
             a_clip.source_duration_frames = source_duration
+            a_clip.source_fps = fps
             
             v_clip.linked_to = a_clip
             a_clip.linked_to = v_clip
@@ -1028,6 +1107,7 @@ class RockyApp(QMainWindow):
             self.model.add_clip(v_clip)
             self.model.add_clip(a_clip)
             
+            # Trigger background workers (Async by nature)
             self._start_waveform_analysis(a_clip)
             self._start_thumbnail_analysis(v_clip)
             self._trigger_proxy_generation(v_clip)
@@ -1046,6 +1126,14 @@ class RockyApp(QMainWindow):
             clip = TimelineClip(file_name, start_frame, duration, t_idx)
             clip.file_path = file_path
             clip.source_duration_frames = source_duration
+            clip.source_width = width
+            clip.source_height = height
+            clip.source_rotation = rotation
+            clip.source_fps = fps
+            
+            if file_path not in self.media_source_cache:
+                QTimer.singleShot(0, lambda: self._instantiate_source(file_path))
+                
             self.model.add_clip(clip)
             
             if is_audio:
@@ -1058,7 +1146,6 @@ class RockyApp(QMainWindow):
         
         # Trigger cinematic "Zoom to Fit" animation on every import
         QTimer.singleShot(100, lambda: self.timeline_widget.zoom_to_fit(animate=True))
-             
         self.status_label.setText(f"Importado: {file_name}")
         
     def _safe_remove_worker(self, worker):

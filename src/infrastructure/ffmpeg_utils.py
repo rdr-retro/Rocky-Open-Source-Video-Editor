@@ -57,6 +57,16 @@ class FFmpegUtils:
         return ffmpeg_exe
 
     @staticmethod
+    def get_ffprobe_path() -> str:
+        """Robustly finds ffprobe binary."""
+        ffmpeg_bin = FFmpegUtils.get_ffmpeg_path()
+        if "ffmpeg" in ffmpeg_bin:
+            ffprobe_bin = ffmpeg_bin.replace("ffmpeg", "ffprobe")
+            if os.path.exists(ffprobe_bin):
+                return ffprobe_bin
+        return "ffprobe"
+
+    @staticmethod
     def detect_hardware():
         """Scans for available hardware encoders."""
         if FFmpegUtils._hardware_detected:

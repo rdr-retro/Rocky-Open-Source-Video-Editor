@@ -45,7 +45,8 @@ struct Clip {
     ClipTransform transform;
     
     std::vector<Effect> effects;
-
+    
+    Clip() : startFrame(0), durationFrames(0), sourceOffset(0.0), trackIndex(0), opacity(1.0f) {}
     Clip(std::string n, long s, long d, double o, std::shared_ptr<MediaSource> src, int ti);
 
     float getFadeValue(FadeType type, double t, bool isFadeIn);

@@ -125,6 +125,7 @@ PYBIND11_MODULE(rocky_core, m) {
         .def(py::init<std::string>());
 
     py::class_<Clip, std::shared_ptr<Clip>>(m, "Clip")
+        .def(py::init<>())
         .def_readwrite("opacity", &Clip::opacity)
         .def_readwrite("fade_in_frames", &Clip::fadeInFrames)
         .def_readwrite("fade_out_frames", &Clip::fadeOutFrames)

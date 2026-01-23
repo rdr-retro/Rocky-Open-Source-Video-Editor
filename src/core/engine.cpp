@@ -49,10 +49,11 @@ py::array_t<uint8_t> RockyEngine::evaluate(double time) {
         curFps = fps;
     }
     
-    // Sort by track index descending (Background first, Foreground last)
+    // Sort by track index ASCENDING (Background [0] first, Foreground [N] last)
+    // Painter's Algorithm: Draw bottom layers first, then overlay top layers.
     std::sort(visibleVideoClips.begin(), visibleVideoClips.end(), 
         [](const auto& first, const auto& second) {
-            return first->trackIndex > second->trackIndex;
+            return first->trackIndex < second->trackIndex;
         }
     );
 

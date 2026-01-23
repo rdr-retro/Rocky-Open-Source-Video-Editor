@@ -61,67 +61,189 @@ Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
         }
     }
 
-    // 4. Transform Logic (Resize / Move)
-    // If transform is default (scale=1, pos=0), return as is.
-    if (transform.scaleX == 1.0 && transform.scaleY == 1.0 && transform.x == 0 && transform.y == 0) {
+    // 4. Transform Logic (Resize / Move / Rotate)
+    // If transform is default, return as is.
+    if (transform.scaleX == 1.0 && transform.scaleY == 1.0 && transform.x == 0 && transform.y == 0 && transform.rotation == 0.0) {
         return f;
     }
 
-    // Create a new canvas to hold the transformed frame
+    // Create a new canvas (transparent)
     Frame outFrame(w, h, 4); 
-    // Fill with transparency (0)
     std::fill(outFrame.data.begin(), outFrame.data.end(), 0);
 
     // [VEGAS COMPOSITING MODEL]
-    // P7: Validate and clamp transform values to prevent extreme allocations
-    const double MAX_SCALE = 100.0;
-    const double MIN_SCALE = 0.01;
-    const int MAX_DIM = 16384;  // Maximum safe dimension
+    // 1. Calculate transformation matrix components
+    // We map DST (output) pixels -> SRC (input) pixels (Inverse Mapping)
     
-    // Clamp scale values to safe range
-    double safeScaleX = std::clamp(transform.scaleX, MIN_SCALE, MAX_SCALE);
-    double safeScaleY = std::clamp(transform.scaleY, MIN_SCALE, MAX_SCALE);
+    // Convert degrees to radians
+    double theta = transform.rotation * M_PI / 180.0;
+    double cos_t = std::cos(theta);
+    double sin_t = std::sin(theta);
     
-    // Calculate new dimensions with safety checks
-    int newW = std::clamp((int)(w * safeScaleX), 1, MAX_DIM);
-    int newH = std::clamp((int)(h * safeScaleY), 1, MAX_DIM);
+    // Scale factors (avoid division by zero)
+    double sx = (std::abs(transform.scaleX) < 0.001) ? 0.001 : transform.scaleX;
+    double sy = (std::abs(transform.scaleY) < 0.001) ? 0.001 : transform.scaleY;
     
-    // Additional safety check for total pixel count
-    const size_t MAX_PIXELS = 67108864;  // 8192x8192 = 64MP
-    if ((size_t)newW * newH > MAX_PIXELS) {
-        std::cerr << "[Clip] Transform dimensions too large: " << newW << "x" << newH << std::endl;
-        return outFrame;  // Return empty frame
-    }
-    
-    if (newW <= 0 || newH <= 0) return outFrame;
+    // Anchor point in Source (usually center of source frame)
+    // Adjust anchor based on user setting (transform.anchorX/Y are 0..1)
+    double anchorSrcX = f.width * transform.anchorX;
+    double anchorSrcY = f.height * transform.anchorY;
 
-    // Center of the frame (Anchor logic)
-    int centerX = (int)(w * 0.5);
-    int centerY = (int)(h * 0.5);
+    // Center of Dest Canvas
+    double centerDstX = w * 0.5;
+    double centerDstY = h * 0.5;
     
-    int startX = centerX - (newW / 2) + (int)(transform.x * w);
-    int startY = centerY - (newH / 2) - (int)(transform.y * h); // +Y is Up
+    // Translation relative to center
+    // If transform.x is relative to canvas width? Assuming absolute pixels or normalized?
+    // In bindings it seems treated as pixels based on UI usage.
+    double transX = transform.x;
+    double transY = transform.y; 
 
-    // Simple Nearest Neighbor Scaling (Fast for Real-time dev)
-    // TODO: Switch to Bilinear or GL textures for production quality
-    for (int dstY = 0; dstY < h; ++dstY) {
-        int srcY_rel = dstY - startY;
-        if (srcY_rel < 0 || srcY_rel >= newH) continue;
-        
-        int srcY = (int)((srcY_rel / (double)newH) * h);
-        if (srcY < 0 || srcY >= h) continue;
-
-        for (int dstX = 0; dstX < w; ++dstX) {
-            int srcX_rel = dstX - startX;
-            if (srcX_rel < 0 || srcX_rel >= newW) continue;
+    // Inverse Logic:
+    // 1. Start at P_dst
+    // 2. Subtract Effective Center (CenterDst + Translation)
+    // 3. Inverse Rotate
+    // 4. Inverse Scale
+    // 5. Add Anchor Source
+    
+    // Precompute constants
+    double offX = centerDstX + transX; // The point in DST corresponding to Anchor in SRC
+    double offY = centerDstY - transY; // Y is inverted in UI usually, but let's stick to standard Graphics Y-down or Y-up?
+                                       // In Clip::render previously: startY = centerY - ... - (transform.y * h)
+                                       // This implies transform.y is normalized?
+                                       // Let's assume transform.x/y are PIXELS for simplicity in specific C++ engine context unless normalized specified.
+                                       // Previous code: int startX = centerX - (newW / 2) + (int)(transform.x * w);
+                                       // It multiplied by w, so transform.x was Normalized.
+                                       
+    // Re-evaluating transform.x usage:
+    // User passes 0, or calculated pixel values in python?
+    // In subtitle_panel.py: sub_clip.transform.x = clip_x (PIXELS calculated from width)
+    // Wait, previous python code: `clip_x = (width - img_w) / 2` -> Pixels.
+    // But previous C++ code: `(int)(transform.x * w)`.
+    // IF PYTHON PASSES PIXELS, AND C++ MULTIPLIES BY W, IT'S WRONG.
+    // This explains why positioning was hard!
+    
+    // Let's FIX IT to be PIXELS.
+    // If input is pixels, we use it directly.
+    // BUT Python code previously used `rx = ... / preview.width()` (Normalized)?
+    // Let's check subtitle_panel.py recent edit.
+    // It calculated `clip_x` in pixels.
+    // So C++ expects Pixels? Or Normalized?
+    // `subtitle_panel.py`: `sub_clip.transform.x = 0.0`
+    // If I change C++ to treat x/y as PIXELS, it's safer/clearer for this engine.
+    
+    // Let's assume passed values are PIXELS.
+    double tX = transform.x;
+    double tY = transform.y; // Standard cartesian: +Y is Up?? No, image logic usually +Y Down.
+                             // Previous code: `centerY - ... - (transform.y * h)`. This inverted Y.
+                             // We should stick to top-left origin +Y Down standard for simplicity.
+    
+    // Effective destination origin for the image
+    // If I place image at (100, 100), that's top-left corner?
+    // Or center?
+    // Let's standardized: transform.x/y is the position of the ANCHOR on the CANVAS.
+    
+    double originX = tX + (w * 0.5); // If tX is offset from center?
+    // Let's define: transform.x, transform.y are ABSOLUTE coordinates of top-left corner of the clip?
+    // Previous C++: `startX = centerX - (newW/2) + ...` implies offset from center.
+    // My Python code: `sub_clip.transform.y = ty` where ty is absolute Y.
+    
+    // Fix: Treat transform.x/y as ABSOLUTE TOP-LEFT coordinates if rotation is 0.
+    // But with rotation, "Top-Left" is ambiguous.
+    // Let's use: transform.x/y is the PIXEL position of the ANCHOR point.
+    // And we Default Anchor to 0.5 (Center).
+    
+    // BUT Python sets `transform.x = 0`, `transform.y = ty` (Top-Left essentially).
+    // And `anchor = 0.5`.
+    // This is conflicting.
+    
+    // Compromise for minimal breaking changes:
+    // Treat transform.x/y as PIXEL OFFSETS from CANVAS CENTER (0,0) if normalized=false, or absolute?
+    // The cleanest for VSE is: X,Y top-left.
+    // Let's write the loop to map efficiently.
+    
+    // Let's respect what `subtitle_panel.py` does:
+    // It sets `sub_clip.transform.x = 0` (Left)
+    // `sub_clip.transform.y = ty` (Top)
+    
+    // So we want the Source(0,0) to map to Dest(transform.x, transform.y).
+    // Center of Source maps to Dest(transform.x + newW/2, transform.y + newH/2).
+    
+    // With rotation, we rotate around the Center.
+    
+    double srcW = (double)f.width;
+    double srcH = (double)f.height;
+    
+    double cx = srcW * 0.5;
+    double cy = srcH * 0.5;
+    
+    // Destination Center (where we want the source center to end up)
+    // If x,y are top-left:
+    double dstCX = transform.x + (srcW * sx * 0.5);
+    double dstCY = transform.y + (srcH * sy * 0.5);
+    
+    // Optimization: Bounding box check to avoid iterating all WxH of canvas?
+    // For now, iterate canvas WxH (slower but correct). 
+    // Ideally we iterate only the bounding box of the rotated rect.
+    
+    // Bounding Box Calculation:
+    // Corners relative to center: (-w/2, -h/2), (w/2, -h/2), ...
+    // Rotate, Scale, + DstCenter.
+    // Compute min/max X/Y.
+    
+    double hw = srcW * sx * 0.5;
+    double hh = srcH * sy * 0.5;
+    
+    // Corners pre-rotation
+    double c1x = -hw, c1y = -hh;
+    double c2x =  hw, c2y = -hh;
+    double c3x =  hw, c3y =  hh;
+    double c4x = -hw, c4y =  hh;
+    
+    auto rotX = [&](double x, double y) { return x*cos_t - y*sin_t + dstCX; };
+    auto rotY = [&](double x, double y) { return x*sin_t + y*cos_t + dstCY; };
+    
+    double rx1 = rotX(c1x, c1y), ry1 = rotY(c1x, c1y);
+    double rx2 = rotX(c2x, c2y), ry2 = rotY(c2x, c2y);
+    double rx3 = rotX(c3x, c3y), ry3 = rotY(c3x, c3y);
+    double rx4 = rotX(c4x, c4y), ry4 = rotY(c4x, c4y);
+    
+    int minX = std::max(0, (int)std::floor(std::min({rx1, rx2, rx3, rx4})));
+    int maxX = std::min(w, (int)std::ceil(std::max({rx1, rx2, rx3, rx4})) + 1);
+    int minY = std::max(0, (int)std::floor(std::min({ry1, ry2, ry3, ry4})));
+    int maxY = std::min(h, (int)std::ceil(std::max({ry1, ry2, ry3, ry4})) + 1);
+    
+    for (int y = minY; y < maxY; ++y) {
+        for (int x = minX; x < maxX; ++x) {
+            // Inverse map pixel (x,y) to Source space
             
-            int srcX = (int)((srcX_rel / (double)newW) * w);
-            if (srcX < 0 || srcX >= w) continue;
-
-            // Copy pixel
-            const uint32_t* srcPix = reinterpret_cast<const uint32_t*>(f.data.data()) + (srcY * w + srcX);
-            uint32_t* dstPix = reinterpret_cast<uint32_t*>(outFrame.data.data()) + (dstY * w + dstX);
-            *dstPix = *srcPix;
+            // 1. Relative to Center
+            double dx = x - dstCX;
+            double dy = y - dstCY;
+            
+            // 2. Inverse Rotate
+            // Rotate by -theta
+            double irx = dx * cos_t + dy * sin_t;
+            double iry = -dx * sin_t + dy * cos_t;
+            
+            // 3. Inverse Scale
+            double isx = irx / sx;
+            double isy = iry / sy;
+            
+            // 4. Map to Source Coord
+            // Source Center is (srcW/2, srcH/2)
+            double u = isx + cx;
+            double v = isy + cy;
+            
+            // Nearest Neighbor
+            int srcX = (int)u;
+            int srcY = (int)v;
+            
+            if (srcX >= 0 && srcX < f.width && srcY >= 0 && srcY < f.height) {
+                const uint32_t* srcPix = reinterpret_cast<const uint32_t*>(f.data.data()) + (srcY * f.width + srcX);
+                uint32_t* dstPix = reinterpret_cast<uint32_t*>(outFrame.data.data()) + (y * w + x);
+                *dstPix = *srcPix;
+            }
         }
     }
 

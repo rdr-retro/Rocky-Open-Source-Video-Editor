@@ -71,6 +71,9 @@ class PanelTypeGridMenu(QFrame):
                 ("✨", "Efectos", "Effects", "Shift F3"),
                 ("📊", "Audio Master", "MasterMeter", "Shift F9"),
                 ("📂", "Explorador", "FileBrowser", "Shift F1"),
+            ]),
+            ("IA Tools", [
+                ("💬", "Subtítulos", "SubtitleGenerator", "Shift F6"),
             ])
         ]
 
@@ -303,7 +306,8 @@ class RockyPanelHeader(QFrame):
             "MediaTransformer": "🎬",
             "MasterMeter": "📊",
             "FileBrowser": "📂",
-            "PythonTerminal": "🐍"
+            "PythonTerminal": "🐍",
+            "SubtitleGenerator": "💬"
         }
         icon = icons.get(panel_type, "📽️")
         self.btn_type.setText(f"{icon} ▾")
@@ -520,6 +524,7 @@ class RockyPanel(QFrame):
         elif "EFECTOS" in title: self.current_type = "Effects"
         elif "VÚMETRO" in title: self.current_type = "MasterMeter"
         elif "EXPLORADOR" in title: self.current_type = "FileBrowser"
+        elif "SUBTÍTULOS" in title or "SUBTITULOS" in title: self.current_type = "SubtitleGenerator"
         
         # Interactive Corner Size
         self.CORNER_SIZE = 8
@@ -1430,6 +1435,16 @@ class RockyPanel(QFrame):
                 return PythonTerminalPanel()
             except Exception as e:
                 label = QLabel(f"Error cargando Terminal Python: {e}")
+                label.setStyleSheet("color: #ff5050; padding: 20px;")
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                return label
+        elif panel_type == "SubtitleGenerator":
+            # Import and create SubtitlePanel
+            try:
+                from .subtitle_panel import SubtitlePanel
+                return SubtitlePanel()
+            except Exception as e:
+                label = QLabel(f"Error cargando Panel de Subtítulos: {e}")
                 label.setStyleSheet("color: #ff5050; padding: 20px;")
                 label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 return label

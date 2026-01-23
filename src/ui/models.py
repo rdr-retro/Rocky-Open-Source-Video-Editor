@@ -141,6 +141,12 @@ class TimelineClip:
         
         # Transform (Spatial properties for C++ engine)
         self.transform = Transform()
+        
+        # Metadata Cache (Optimización Audit)
+        self.source_width = 0
+        self.source_height = 0
+        self.source_rotation = 0
+        self.source_fps = 30.0
 
     def to_dict(self) -> dict:
         """Serializes the clip state to a dictionary for JSON storage."""
@@ -161,7 +167,11 @@ class TimelineClip:
             "opacity_level": self.opacity_level,
             "use_proxy": self.use_proxy,
             "effects": self.effects,
-            "transform": self.transform.to_dict()
+            "transform": self.transform.to_dict(),
+            "source_width": self.source_width,
+            "source_height": self.source_height,
+            "source_rotation": self.source_rotation,
+            "source_fps": self.source_fps
         }
 
     @classmethod
@@ -187,6 +197,11 @@ class TimelineClip:
         clip.effects = data.get("effects", [])
         if "transform" in data:
             clip.transform = Transform.from_dict(data["transform"])
+            
+        clip.source_width = data.get("source_width", 0)
+        clip.source_height = data.get("source_height", 0)
+        clip.source_rotation = data.get("source_rotation", 0)
+        clip.source_fps = data.get("source_fps", 30.0)
         return clip
 
     def copy(self) -> 'TimelineClip':
@@ -219,6 +234,10 @@ class TimelineClip:
             self.transform.rotation,
             self.transform.anchor_x, self.transform.anchor_y
         )
+        new_clip.source_width = self.source_width
+        new_clip.source_height = self.source_height
+        new_clip.source_rotation = self.source_rotation
+        new_clip.source_fps = self.source_fps
         return new_clip
 
     # --- Blue Line / Keyframe Logic ---
