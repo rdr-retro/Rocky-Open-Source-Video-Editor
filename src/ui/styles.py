@@ -173,3 +173,64 @@ SLIDER_STYLE = f"""
         margin: -5px 0;
     }}
 """
+# --- SCROLLBARS (MINIMALIST PILL STYLE) ---
+
+SCROLLBAR_STYLE = f"""
+    QScrollBar:horizontal {{
+        border: none;
+        background: transparent;
+        height: 14px;
+        margin: 0px;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: #444;
+        min-width: 30px;
+        border-radius: 5px;
+        border: 1px solid transparent; /* Forced clipping for macOS */
+        margin: 2px;
+    }}
+    QScrollBar::handle:horizontal:hover {{
+        background: #ffffff;
+        border-radius: 5px;
+        border: 1px solid transparent;
+    }}
+
+    /* Vertical ScrollBar */
+    QScrollBar:vertical {{
+        border: none;
+        background: transparent;
+        width: 14px;
+        margin: 0px;
+    }}
+    QScrollBar::handle:vertical {{
+        background: #444;
+        min-height: 30px;
+        border-radius: 5px;
+        border: 1px solid transparent; /* Forced clipping for macOS */
+        margin: 2px;
+    }}
+    QScrollBar::handle:vertical:hover {{
+        background: #ffffff;
+        border-radius: 5px;
+        border: 1px solid transparent;
+    }}
+    
+    /* Background elements */
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+        border: none;
+        background: none;
+        width: 0px;
+        height: 0px;
+    }}
+    
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal,
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+        background: none;
+    }}
+
+    QAbstractScrollArea::corner {{
+        background: transparent;
+        border: none;
+    }}
+"""

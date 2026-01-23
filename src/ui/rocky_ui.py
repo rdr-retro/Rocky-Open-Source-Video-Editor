@@ -2111,10 +2111,9 @@ def main():
 
     app = QApplication(sys.argv)
     
-    # Set Application Identity
-    app.setApplicationName("Rocky Video Editor")
-    app.setApplicationDisplayName("Rocky Video Editor")
-    app.setOrganizationName("Antigravity")
+    # [MACOS FIX] Force Fusion style to Ensure QSS scrollbar rounding works
+    from PySide6.QtWidgets import QStyleFactory
+    app.setStyle(QStyleFactory.create("Fusion"))
     
     # Windows Taskbar Icon Fix (AppUserModelID)
     if os.name == 'nt':

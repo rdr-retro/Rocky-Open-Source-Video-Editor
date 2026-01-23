@@ -55,13 +55,15 @@ class PythonTerminalPanel(QWidget):
             font = QFont("Courier New", 10)
         self.editor.setFont(font)
         
-        self.editor.setStyleSheet("""
-            QPlainTextEdit {
+        from . import styles as s
+        self.editor.setStyleSheet(f"""
+            QPlainTextEdit {{
                 background-color: #0d0d0d;
                 color: #00ff44;
                 border: none;
                 selection-background-color: #2f4f4f;
-            }
+            }}
+            {s.SCROLLBAR_STYLE}
         """)
         
         layout.addWidget(self.editor)

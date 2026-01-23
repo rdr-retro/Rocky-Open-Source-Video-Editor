@@ -8,48 +8,109 @@ class PanelTypeGridMenu(QFrame):
     """Blender-style grid menu for switching panel types."""
     type_selected = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, active_type: str = None, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setStyleSheet(f"""
             QFrame {{
-                background-color: #1a1a1a;
-                border: 1px solid #333;
+                background-color: #242424;
+                border: 1px solid #111;
                 border-radius: 4px;
+            }}
+            QLabel#CategoryHeader {{
+                color: #555;
+                font-size: 10px;
+                font-weight: bold;
+                padding-left: 8px;
+                padding-top: 4px;
+                padding-bottom: 2px;
+                border-bottom: 1px solid #333;
+                margin-bottom: 4px;
+                text-transform: uppercase;
             }}
             QPushButton {{
                 background-color: transparent;
-                border-radius: 4px;
-                color: #ddd;
-                padding: 10px;
+                border-radius: 2px;
+                color: #ccc;
+                padding: 4px 10px;
                 font-size: 11px;
+                text-align: left;
+                border: none;
             }}
             QPushButton:hover {{
-                background-color: rgba(255, 153, 0, 0.2);
+                background-color: #444;
                 color: white;
+            }}
+            QPushButton[active="true"] {{
+                background-color: {dt.ACCENT_PRIMARY};
+                color: #000;
+            }}
+            QLabel#Shortcut {{
+                color: #666;
+                font-size: 9px;
             }}
         """)
         
-        layout = QGridLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-        
-        types = [
-            ("📽️", "Visor", "Viewer"),
-            ("🎞️", "Timeline", "Timeline"),
-            ("⚙️", "Ajustes", "Properties"),
-            ("✨", "Efectos", "Effects"),
-            ("🎬", "Transformador", "MediaTransformer"),
-            ("📊", "Audio", "MasterMeter"),
-            ("📁", "Archivos", "FileBrowser"),
-            ("🐍", "Python", "PythonTerminal"),
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(1)
+
+        # Blender Categories
+        categories = [
+            ("General", [
+                ("📽️", "Visor de Video", "Viewer", "Shift F5"),
+                ("🎞️", "Línea de tiempo", "Timeline", "Shift F12"),
+                ("🎬", "Transformador", "MediaTransformer", "Shift F8"),
+            ]),
+            ("Scripts", [
+                ("🐍", "Consola de Python", "PythonTerminal", "Shift F4"),
+                ("📝", "Editor de texto", "TextEditor", "Shift F11"),
+            ]),
+            ("Datos", [
+                ("⚙️", "Propiedades", "Properties", "Shift F7"),
+                ("✨", "Efectos", "Effects", "Shift F3"),
+                ("📊", "Audio Master", "MasterMeter", "Shift F9"),
+                ("📂", "Explorador", "FileBrowser", "Shift F1"),
+            ])
         ]
-        
-        for i, (icon, label, p_type) in enumerate(types):
-            btn = QPushButton(f"{icon}\n{label}")
-            btn.setFixedSize(70, 60)
-            btn.clicked.connect(lambda checked=False, t=p_type: self._on_selected(t))
-            layout.addWidget(btn, i // 3, i % 3)
+
+        for cat_name, items in categories:
+            col_widget = QFrame()
+            col_widget.setStyleSheet("border: none; border-right: 1px solid #333;")
+            col_layout = QVBoxLayout(col_widget)
+            col_layout.setContentsMargins(4, 4, 4, 8)
+            col_layout.setSpacing(1)
+            col_layout.setAlignment(Qt.AlignTop)
+
+            header = QLabel(cat_name)
+            header.setObjectName("CategoryHeader")
+            col_layout.addWidget(header)
+
+            for icon, label, p_type, shortcut in items:
+                btn_container = QWidget()
+                btn_layout = QHBoxLayout(btn_container)
+                btn_layout.setContentsMargins(0, 0, 0, 0)
+                btn_layout.setSpacing(10)
+
+                btn = QPushButton(f"{icon}  {label}")
+                btn.setFixedWidth(145)
+                
+                # Mark as active if it matches the current panel type
+                if p_type == active_type:
+                    btn.setProperty("active", "true")
+                
+                btn.clicked.connect(lambda checked=False, t=p_type: self._on_selected(t))
+                
+                sc_label = QLabel(shortcut)
+                sc_label.setObjectName("Shortcut")
+                sc_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+                btn_layout.addWidget(btn)
+                # btn_layout.addWidget(sc_label) # Optional: Blender shows shortcuts on the right
+                
+                col_layout.addWidget(btn_container)
+            
+            main_layout.addWidget(col_widget)
 
     def _on_selected(self, p_type):
         self.type_selected.emit(p_type)
@@ -184,14 +245,16 @@ class RockyPanelHeader(QFrame):
 
     def show_grid_menu(self):
         """Show the Blender-style grid menu."""
-        print("DEBUG: show_grid_menu called")
-        menu = PanelTypeGridMenu(self)
+        active_type = None
+        if self.parent() and hasattr(self.parent(), "current_type"):
+            active_type = self.parent().current_type
+            
+        menu = PanelTypeGridMenu(active_type, self)
         menu.type_selected.connect(self._on_type_selected)
         
         pos = self.btn_type.mapToGlobal(QPoint(0, self.btn_type.height()))
         menu.move(pos)
         menu.show()
-        print(f"DEBUG: Grid menu shown at {pos}")
 
     def _on_type_selected(self, p_type):
         """Forward selection to parent panel."""
@@ -1296,12 +1359,10 @@ class RockyPanel(QFrame):
                 timeline_scroll.setWidgetResizable(True)
                 timeline_scroll.setWidget(timeline_widget)
                 timeline_scroll.setFrameShape(QFrame.Shape.NoFrame)
-                timeline_scroll.setStyleSheet("""
-                    QScrollArea { border: 0px; background-color: #242424; }
-                    QScrollBar:horizontal { height: 14px; background: #2b2b2b; }
-                    QScrollBar::handle:horizontal { background: #555555; min-width: 20px; border-radius: 2px; }
-                    QScrollBar:vertical { width: 14px; background: #2b2b2b; }
-                    QScrollBar::handle:vertical { background: #555555; min-height: 20px; border-radius: 2px; }
+                from . import styles as s
+                timeline_scroll.setStyleSheet(f"""
+                    QScrollArea {{ border: 0px; background-color: #242424; }}
+                    {s.SCROLLBAR_STYLE}
                 """)
                 t_layout.addWidget(timeline_scroll, 1)
                 

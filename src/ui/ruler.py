@@ -1,7 +1,7 @@
 import numpy as np
 import math
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QPoint, QRect, QPointF
+from PySide6.QtCore import Qt, QPoint, QRect, QPointF, QLineF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygon
 
 class TimelineRuler(QWidget):
@@ -196,30 +196,69 @@ class TimelineRuler(QWidget):
         pass
 
     def _draw_playhead_handle(self, painter, scroll_x, fps):
-        from PySide6.QtCore import QPointF
-        from PySide6.QtGui import QPolygonF
+        from PySide6.QtCore import QPointF, QRectF
+        from PySide6.QtGui import QPolygonF, QLinearGradient, QColor, QBrush
         
         # Sub-pixel precision
         ph_x = self.timeline.timeToScreen(self.timeline.model.blueline.playhead_frame / fps) - scroll_x
         
-        # Shield shape handle
-        painter.setBrush(self.COLOR_PLAYHEAD)
+        # 1. Shadow/Glow (Subtle elevation)
+        painter.setBrush(QColor(0, 0, 0, 80))
         painter.setPen(Qt.NoPen)
-        
-        # Draw the little shield/pentagon shape at the top
-        # We use QPolygonF for float coordinates
-        handle = QPolygonF([
-            QPointF(ph_x - 5, 2), 
-            QPointF(ph_x + 5, 2), 
-            QPointF(ph_x + 5, 9), 
-            QPointF(ph_x, 14), 
-            QPointF(ph_x - 5, 9)
+        shadow_off = 1.5
+        shadow_handle = QPolygonF([
+            QPointF(ph_x - 6 + shadow_off, 2 + shadow_off), 
+            QPointF(ph_x + 6 + shadow_off, 2 + shadow_off), 
+            QPointF(ph_x + 6 + shadow_off, 11 + shadow_off), 
+            QPointF(ph_x + shadow_off, 18 + shadow_off), 
+            QPointF(ph_x - 6 + shadow_off, 11 + shadow_off)
         ])
-        painter.drawPolygon(handle)
+        painter.drawPolygon(shadow_handle)
+
+        # 2. Main Diamond Handle Geometry
+        # A more stylized, taller and sharper hexagonal diamond
+        handle_poly = QPolygonF([
+            QPointF(ph_x - 6, 2),   # Top Left
+            QPointF(ph_x + 6, 2),   # Top Right
+            QPointF(ph_x + 6, 11),  # Mid Right
+            QPointF(ph_x, 18),      # Tip Bottom
+            QPointF(ph_x - 6, 11)   # Mid Left
+        ])
         
-        # Draw the vertical line down the ruler only (UI distinct)
-        painter.setPen(QPen(QColor("#000000"), 1))
-        # painter.drawLine(ph_x, 0, ph_x, 38)
+        # 3. Base Fill (Deep Dark Gray)
+        painter.setBrush(QColor("#1a1a1a"))
+        painter.setPen(QPen(QColor("#444"), 1))
+        painter.drawPolygon(handle_poly)
+        
+        # 4. Glowing Core (Diamond facet look)
+        core_poly = QPolygonF([
+            QPointF(ph_x - 3, 4), 
+            QPointF(ph_x + 3, 4), 
+            QPointF(ph_x + 3, 9), 
+            QPointF(ph_x, 14), 
+            QPointF(ph_x - 3, 9)
+        ])
+        
+        grad = QLinearGradient(ph_x, 4, ph_x, 14)
+        grad.setColorAt(0, QColor("#00c3ff")) # Bright Cyan
+        grad.setColorAt(1, QColor("#005577")) # Deep Navy
+        
+        painter.setBrush(QBrush(grad))
+        painter.setPen(Qt.NoPen)
+        painter.drawPolygon(core_poly)
+        
+        # 5. Highlight on the tip
+        painter.setPen(QPen(QColor(255, 255, 255, 180), 1.5))
+        painter.drawPoint(QPointF(ph_x, 18))
+
+        # 6. Playhead Line (Double-line style)
+        line_ruler = QLineF(ph_x, 18, ph_x, self.height())
+        
+        painter.setPen(QPen(QColor(0, 0, 0), 3))
+        painter.drawLine(line_ruler)
+        
+        painter.setPen(QPen(QColor(255, 255, 255), 1))
+        painter.drawLine(line_ruler)
 
 
 

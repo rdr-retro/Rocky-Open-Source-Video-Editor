@@ -71,20 +71,18 @@ class SidebarPanel(QWidget):
         self.scroll.setLineWidth(0)
         self.scroll.setMidLineWidth(0)
         self.scroll.setContentsMargins(0, 0, 0, 0)
-        self.scroll.setStyleSheet("""
-            QScrollArea { 
+        from . import styles as s
+        self.scroll.setStyleSheet(f"""
+            QScrollArea {{ 
                 border: 0px;
                 margin: 0px;
                 padding: 0px;
                 background: #111111;
-            }
-
-            QWidget {
+            }}
+            QWidget {{
                 background: #111111;
-            }
-
-
-            QScrollBar:vertical { width: 0px; }
+            }}
+            {s.SCROLLBAR_STYLE}
         """)
 
         
