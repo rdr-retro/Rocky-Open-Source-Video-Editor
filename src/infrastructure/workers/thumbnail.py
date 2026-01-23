@@ -12,6 +12,10 @@ class ThumbnailWorker(QThread):
         super().__init__()
         self.clip = clip
         self.file_path = file_path
+        self._stopped = False
+        
+    def stop(self):
+        self._stopped = True
 
     def run(self):
         print(f"DEBUG: ThumbnailWorker starting for {self.file_path}")
@@ -26,6 +30,15 @@ class ThumbnailWorker(QThread):
             else:
                 src = rocky_core.VideoSource(self.file_path)
             
+            # ORIENTATION AWARE THUMBS
+            from ..ffmpeg_utils import FFmpegUtils
+            specs = FFmpegUtils.get_media_specs(self.file_path)
+            rot = specs['rotation']
+            
+            tw, th = 160, 90
+            if abs(rot) == 90 or abs(rot) == 270:
+                tw, th = 90, 160
+            
             duration = src.get_duration()
             if duration < 0: duration = 0 # Static image
             
@@ -34,8 +47,9 @@ class ThumbnailWorker(QThread):
             thumbs = []
             
             for t in times:
-                # 160x90 is a good thumbnail size for the timeline
-                frame_data = src.get_frame(t, 160, 90)
+                if self._stopped: break
+                # Optimized extraction at correct aspect ratio
+                frame_data = src.get_frame(t, tw, th)
                 if frame_data is not None:
                     # Convert raw RGBA data to QImage
                     height, width, channels = frame_data.shape

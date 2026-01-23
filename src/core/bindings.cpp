@@ -119,6 +119,9 @@ PYBIND11_MODULE(rocky_core, m) {
 
     py::class_<VideoSource, MediaSource, std::shared_ptr<VideoSource>>(m, "VideoSource")
         .def(py::init<std::string>())
+        .def("get_width", &VideoSource::getWidth)
+        .def("get_height", &VideoSource::getHeight)
+        .def("get_rotation", &VideoSource::getRotation)
         .def("get_waveform", &VideoSource::getWaveform, py::call_guard<py::gil_scoped_release>());
 
     py::class_<ImageSource, MediaSource, std::shared_ptr<ImageSource>>(m, "ImageSource")

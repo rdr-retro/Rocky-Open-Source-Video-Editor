@@ -48,6 +48,11 @@ public:
     std::vector<float> getWaveform(int points);
     double getDuration() override;
     bool isValid() const { return is_valid; }  // P6: Expose validation status
+    
+    // Resolution and Metadata Getters (Refined for immediate access)
+    int getWidth() const;
+    int getHeight() const;
+    int getRotation() const; // Implemented in cpp
 };
 
 class ImageSource : public MediaSource {

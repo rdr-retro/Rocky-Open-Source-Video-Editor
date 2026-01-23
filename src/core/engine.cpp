@@ -64,12 +64,12 @@ py::array_t<uint8_t> RockyEngine::evaluate(double time) {
     // (e.g. from Preview and Export threads) don't collide on a shared buffer.
     std::vector<uint8_t> localCanvas(totalPixelBytes);
     
-    // Fast Clear (Gray Background)
+    // Fast Clear (Black Background)
     uint32_t* pixelPtr = reinterpret_cast<uint32_t*>(localCanvas.data());
     size_t pixelCount = totalPixelBytes / 4;
     
-    // 0xFF2D2D2D in Little Endian (AABBGGRR) -> A=255, R=45, G=45, B=45
-    const uint32_t bgColor = 0xFF2D2D2D; 
+    // 0xFF000000 in Little Endian (AABBGGRR) -> A=255, R=0, G=0, B=0
+    const uint32_t bgColor = 0xFF000000; 
     std::fill_n(pixelPtr, pixelCount, bgColor);
 
     // 2. PARALLEL RENDERING (Latency Optimization)

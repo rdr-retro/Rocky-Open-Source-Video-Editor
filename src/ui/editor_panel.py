@@ -93,6 +93,26 @@ class CustomResolutionDialog(QDialog):
         self.current_ratio = current_w / current_h if current_h else 1.77
         layout.addWidget(self.cb_lock)
 
+        # ---------------------------------------------------------------------
+        # RECOGNITION SYSTEM (Auto-Detect)
+        # ---------------------------------------------------------------------
+        self.btn_detect = QPushButton("Detectar desde medio...")
+        self.btn_detect.setStyleSheet("""
+            QPushButton {
+                background-color: #333;
+                color: #00a3ff;
+                border: 1px solid #00a3ff;
+                border-radius: 4px;
+                padding: 6px;
+                font-size: 10px;
+                font-weight: bold;
+                margin-top: 10px;
+            }
+            QPushButton:hover { background-color: #00a3ff; color: #000; }
+        """)
+        self.btn_detect.clicked.connect(self._on_auto_detect_clicked)
+        layout.addWidget(self.btn_detect)
+
         layout.addStretch()
 
         # Buttons
@@ -107,6 +127,44 @@ class CustomResolutionDialog(QDialog):
         btn_layout.addWidget(cancel_btn)
         btn_layout.addWidget(ok_btn)
         layout.addLayout(btn_layout)
+
+    def _on_auto_detect_clicked(self):
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        from ..infrastructure.ffmpeg_utils import FFmpegUtils
+        import rocky_core
+        
+        file_path, _ = QFileDialog.getOpenFileName(self, "Seleccionar medio para reconocer formato", "", "Video (*.mp4 *.mov *.mkv *.avi)")
+        if file_path:
+            # STAGE 1: Fast Probe (Returns NATIVE params)
+            specs = FFmpegUtils.get_media_specs(file_path)
+            w, h, rot = specs['width'], specs['height'], specs['rotation']
+            
+            # Manual Swap Logic for Stage 1
+            if abs(rot) == 90 or abs(rot) == 270:
+                w, h = h, w
+            
+            # STAGE 2: Engine Fallback (Returns VISUAL params directly)
+            if w <= 0 or h <= 0:
+                try:
+                    temp_src = rocky_core.VideoSource(file_path); 
+                    if temp_src.isValid():
+                        w, h, rot = temp_src.get_width(), temp_src.get_height(), temp_src.get_rotation()
+                except: pass
+            
+            # Application of effective visual resolution
+            if w <= 0 or h <= 0: w, h = 1920, 1080
+            
+            self.w_spin.blockSignals(True)
+            self.h_spin.blockSignals(True)
+            self.w_spin.setValue(w)
+            self.h_spin.setValue(h)
+            self.w_spin.blockSignals(False)
+            self.h_spin.blockSignals(False)
+            
+            self.current_ratio = w / h if h != 0 else 1.0
+            self.preset_combo.setCurrentText("Personalizado")
+            
+            QMessageBox.information(self, "Formato Detectado", f"Se ha detectado {w}x{h}.\n\nRelación de aspecto actualizada.")
 
     def _on_preset_changed(self, index):
         preset_name = self.preset_combo.currentText()

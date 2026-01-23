@@ -203,11 +203,69 @@ class PreferencesDialog(QDialog):
         self.fps_combo.setCurrentIndex(4)
         grid.addWidget(self.fps_combo, 2, 1)
         
+        # ---------------------------------------------------------------------
+        # RECOGNITION SYSTEM (User Request)
+        # ---------------------------------------------------------------------
+        self.btn_detect = QPushButton("Auto-Detectar desde archivo...")
+        self.btn_detect.setStyleSheet("""
+            QPushButton {
+                background-color: #00a3ff;
+                color: white;
+                border-radius: 6px;
+                padding: 10px;
+                font-weight: bold;
+                margin-top: 15px;
+            }
+            QPushButton:hover { background-color: #33b5ff; }
+        """)
+        self.btn_detect.clicked.connect(self._on_auto_detect_clicked)
+        
         sec_layout.addLayout(grid)
+        sec_layout.addWidget(self.btn_detect)
         layout.addWidget(section)
         layout.addStretch()
         
         return page
+
+    def _on_auto_detect_clicked(self):
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        from ..infrastructure.ffmpeg_utils import FFmpegUtils
+        import rocky_core
+        
+        file_path, _ = QFileDialog.getOpenFileName(self, "Seleccionar medio para reconocer formato", "", "Video (*.mp4 *.mov *.mkv *.avi)")
+        if file_path:
+            # STAGE 1: Fast Probe (Returns NATIVE params)
+            specs = FFmpegUtils.get_media_specs(file_path)
+            w, h, rot = specs['width'], specs['height'], specs['rotation']
+            
+            # Manual Swap for Stage 1
+            if abs(rot) == 90 or abs(rot) == 270:
+                w, h = h, w
+            
+            # STAGE 2: Engine Fallback (Returns VISUAL params directly)
+            if w <= 0 or h <= 0:
+                try:
+                    temp_src = rocky_core.VideoSource(file_path)
+                    if temp_src.isValid():
+                        w = temp_src.get_width()
+                        h = temp_src.get_height()
+                        rot = temp_src.get_rotation()
+                except: pass
+            
+            # Application of effective visual resolution (Safety if Stage 2 succeeded but was somehow 0)
+            if w <= 0 or h <= 0:
+                w, h = 1920, 1080 
+            
+            self.w_spin.setValue(w)
+            self.h_spin.setValue(h)
+            
+            # FPS matching
+            fps_val = specs.get('fps', 30.0)
+            fps_str = f"{fps_val:.3f}" if fps_val % 1 != 0 else f"{int(fps_val)}.0"
+            idx = self.fps_combo.findText(fps_str, Qt.MatchFlag.MatchStartsWith)
+            if idx >= 0: self.fps_combo.setCurrentIndex(idx)
+            
+            QMessageBox.information(self, "Formato Detectado", f"Se ha detectado una resolución de {w}x{h} ({'Vertical' if h > w else 'Panorámico'}).\n\nPresiona OK para aplicar a los controles.")
 
     def _create_audio_page(self):
         page, layout = self._create_content_page()

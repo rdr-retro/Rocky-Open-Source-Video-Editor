@@ -220,68 +220,123 @@ class FFmpegUtils:
 
     @staticmethod
     def get_proxy_command(input_path: str, output_path: str) -> List[str]:
-        """Returns the optimal FFmpeg command for proxy generation."""
+        """
+        Returns the optimal FFmpeg command for proxy generation.
+        PRESERVES NATIVE ORIENTATION: Uses -noautorotate and maps metadata
+        to ensure the proxy is a perfect structural clone of the raw media.
+        """
         ffmpeg = FFmpegUtils.get_ffmpeg_path()
         hw = FFmpegUtils.detect_hardware()
+        
+        # 1. Gather input specs
+        specs = FFmpegUtils.get_media_specs(input_path)
+        rot = specs.get('rotation', 0)
+        
+        # 2. Base Command (Disable auto-rotation to keep original tag context)
+        cmd = [ffmpeg, "-y", "-noautorotate", "-i", input_path]
 
-        # Common input args
-        cmd = [ffmpeg, "-y", "-i", input_path]
+        # 3. Scaling Strategy (Scale native dimensions to fit ~540 height)
+        # We always scale native height to 540 and width proportionally.
+        # Since tags are preserved, the engine will handle the visual swap correctly.
+        scale_filter = "scale=-2:540,setsar=1"
 
-        # MAC M4 STRATEGY: ProRes Proxy via VideoToolbox
-        # Decoding ProRes is hardware accelerated on M4 media engine.
-        # It is significantly smoother to scrub than H.264 GOPs.
+        # 4. Hardware Encoding Segments
         if hw == "vt":
+            # MAC Apple Silicon
             if "prores_videotoolbox" in FFmpegUtils._available_encoders:
                  cmd.extend([
-                     "-vf", "scale=-2:540",
+                     "-vf", scale_filter,
                      "-c:v", "prores_videotoolbox", 
-                     "-profile:v", "proxy", # lightest prores
-                     "-c:a", "pcm_s16le",   # Fast audio
-                     "-f", "mov"            # ProRes needs mov container
+                     "-profile:v", "proxy",
+                     "-c:a", "pcm_s16le",
+                     "-f", "mov"
                  ])
             else:
-                # Fallback to H.264 VT
                 cmd.extend([
-                     "-vf", "scale=-2:540",
+                     "-vf", scale_filter,
                      "-c:v", "h264_videotoolbox", 
                      "-b:v", "2M", 
-                     "-c:a", "aac",
-                     "-ac", "2"
+                     "-c:a", "aac", "-ac", "2"
                 ])
-
-        # WINDOWS NVIDIA STRATEGY
         elif hw == "nvenc":
+            # NVIDIA
             cmd.extend([
-                 "-vf", "scale=-2:540",
+                 "-vf", scale_filter,
                  "-c:v", "h264_nvenc",
-                 "-preset", "p1", # Fastest
-                 "-tc", "0",      # Optimize for latency? No, proxy needs throughput
-                 "-kv", "1",      # Keyframe every frame (I-Frame only) for seeking? 
-                                  # No, checking "GOP" size effectively.
-                                  # Let's keep smooth scrubbing in mind.
-                                  # Short GOP is better.
-                 "-g", "15",      # Short GOP (0.5s at 30fps)
+                 "-preset", "p1", 
+                 "-g", "15",
                  "-b:v", "2M",
                  "-c:a", "aac"
             ])
-
-        # QUICK SYNC / AMF / CPU Fallback
         else:
-             codec = "h264_qsv" if hw == "qsv" else ("h264_amf" if hw == "amf" else "libx264")
-             preset = "ultrafast" if hw == "cpu" else "fast"
-             
-             cmd.extend([
-                 "-vf", "scale=-2:540",
-                 "-c:v", codec,
-                 "-g", "30"
-             ])
-             
-             if hw == "cpu":
-                 cmd.extend(["-preset", "ultrafast", "-crf", "28"])
-             else:
-                 cmd.extend(["-b:v", "2M"])
+            # CPU / Other
+            codec = "h264_qsv" if hw == "qsv" else ("h264_amf" if hw == "amf" else "libx264")
+            cmd.extend([
+                "-vf", scale_filter,
+                "-c:v", codec,
+                "-g", "30"
+            ])
+            if hw == "cpu":
+                cmd.extend(["-preset", "ultrafast", "-crf", "28"])
+            else:
+                cmd.extend(["-b:v", "2000k"])
+            cmd.extend(["-c:a", "aac", "-ac", "2"])
 
-             cmd.extend(["-c:a", "aac", "-ac", "2"])
-
+        # 5. CRITICAL: METADATA PERSISTENCE
+        # Map all metadata and explicitly re-apply rotation tag in case it was lost
+        cmd.extend(["-map_metadata", "0", f"-metadata:s:v:0", f"rotate={rot}"])
+        
         cmd.append(output_path)
         return cmd
+    @staticmethod
+    def get_media_specs(file_path: str) -> dict:
+        """
+        ULTRA-ROBUST Prober for all media types.
+        Returns common specs using FFprobe with Apple-specific tag support.
+        If FFprobe fails, returns width=0 to signal Engine Fallback.
+        """
+        specs = {'width': 0, 'height': 0, 'fps': 30.0, 'rotation': 0, 'duration': 10.0}
+        
+        try:
+            ffp = FFmpegUtils.get_ffprobe_path()
+            cmd = [
+                ffp, '-v', 'error', '-select_streams', 'v:0',
+                '-show_entries', 'stream=width,height,r_frame_rate,duration:format=duration:side_data=rotation',
+                '-of', 'json', file_path
+            ]
+            
+            # Robust 10.0s timeout for heavy 4K/iPhone local files
+            output = subprocess.check_output(cmd, timeout=10.0).decode('utf-8')
+            data = json.loads(output)
+            
+            if 'streams' in data and data['streams']:
+                s = data['streams'][0]
+                specs['width'] = s.get('width', 0)
+                specs['height'] = s.get('height', 0)
+                
+                # FPS Robust parsing
+                rfps = s.get('r_frame_rate', '30/1')
+                try:
+                    if '/' in rfps:
+                        num, den = map(int, rfps.split('/'))
+                        specs['fps'] = num / den if den > 0 else 30.0
+                    else:
+                        specs['fps'] = float(rfps or 30.0)
+                except: specs['fps'] = 30.0
+                
+                # Rotation search
+                rot = 0
+                for sd in s.get('side_data', []):
+                    if 'rotation' in sd: rot = int(sd['rotation']); break
+                if rot == 0:
+                    rot = int(s.get('tags', {}).get('rotate', 0))
+                if rot == 0:
+                    rot = int(data.get('format', {}).get('tags', {}).get('rotate', 0))
+                
+                specs['rotation'] = rot
+                specs['duration'] = float(s.get('duration', data.get('format', {}).get('duration', 10.0)))
+                
+        except Exception as e:
+            print(f"INFO: FFprobe stage skipped for {os.path.basename(file_path)}: {e}")
+            
+        return specs

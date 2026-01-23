@@ -165,9 +165,18 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
                 while (avcodec_receive_frame(codec_ctx, av_frame) >= 0) {
                     if (av_frame->pts >= targetPts) {
                         Frame outputFrame(w, h, 4);
+                        // INITIALIZE TO BLACK (Eliminates garbage pixels/stripes)
+                        std::fill(outputFrame.data.begin(), outputFrame.data.end(), 0);
                         
-                        // Smart Scaling: Maintain aspect ratio (Uniform Fit)
-                        float srcAspect = (float)av_frame->width / av_frame->height;
+                        // Smart Scaling: Maintain VISUAL aspect ratio
+                        int rot = getRotation();
+                        float visualW = (float)av_frame->width;
+                        float visualH = (float)av_frame->height;
+                        if (std::abs(rot) == 90 || std::abs(rot) == 270) {
+                            std::swap(visualW, visualH);
+                        }
+                        
+                        float srcAspect = visualW / visualH;
                         float dstAspect = (float)w / h;
                         
                         int outW, outH, outX, outY;
@@ -368,6 +377,71 @@ std::vector<float> VideoSource::getAudioSamples(double startTime, double duratio
 double VideoSource::getDuration() {
     if (!fmt_ctx) return 0.0;
     return (double)fmt_ctx->duration / AV_TIME_BASE;
+}
+
+int VideoSource::getWidth() const {
+    int w = -1;
+    if (codec_ctx && codec_ctx->width > 0) w = codec_ctx->width;
+    else if (video_stream_idx != -1 && fmt_ctx->streams[video_stream_idx]->codecpar->width > 0)
+        w = fmt_ctx->streams[video_stream_idx]->codecpar->width;
+    
+    if (w <= 0) return -1;
+    
+    int rot = getRotation();
+    if (std::abs(rot) == 90 || std::abs(rot) == 270) {
+        // Return VISUAL height as visual width
+        int h = -1;
+        if (codec_ctx && codec_ctx->height > 0) h = codec_ctx->height;
+        else if (video_stream_idx != -1 && fmt_ctx->streams[video_stream_idx]->codecpar->height > 0)
+            h = fmt_ctx->streams[video_stream_idx]->codecpar->height;
+        return h;
+    }
+    return w;
+}
+
+int VideoSource::getHeight() const {
+    int h = -1;
+    if (codec_ctx && codec_ctx->height > 0) h = codec_ctx->height;
+    else if (video_stream_idx != -1 && fmt_ctx->streams[video_stream_idx]->codecpar->height > 0)
+        h = fmt_ctx->streams[video_stream_idx]->codecpar->height;
+        
+    if (h <= 0) return -1;
+
+    int rot = getRotation();
+    if (std::abs(rot) == 90 || std::abs(rot) == 270) {
+        // Return VISUAL width as visual height
+        int w = -1;
+        if (codec_ctx && codec_ctx->width > 0) w = codec_ctx->width;
+        else if (video_stream_idx != -1 && fmt_ctx->streams[video_stream_idx]->codecpar->width > 0)
+            w = fmt_ctx->streams[video_stream_idx]->codecpar->width;
+        return w;
+    }
+    return h;
+}
+
+int VideoSource::getRotation() const {
+    if (video_stream_idx == -1 || !fmt_ctx) return 0;
+    
+    // 1. Check Stream Side Data (Primary method for modern containers like MOV/MP4)
+    // FFmpeg 7.x: Stream side data is now at par->coded_side_data
+    AVCodecParameters* par = fmt_ctx->streams[video_stream_idx]->codecpar;
+    const AVPacketSideData *sd = av_packet_side_data_get(par->coded_side_data, par->nb_coded_side_data, AV_PKT_DATA_DISPLAYMATRIX);
+    if (sd) {
+        double rot = -av_display_rotation_get((const int32_t*)sd->data);
+        while (rot < 0) rot += 360;
+        if (std::abs(rot) < 0.1) return 0;
+        return (int)std::round(rot);
+    }
+    
+    // 2. Check stream tags (Legacy fallback)
+    AVDictionaryEntry *tag = av_dict_get(fmt_ctx->streams[video_stream_idx]->metadata, "rotate", NULL, 0);
+    if (tag) return std::atoi(tag->value);
+    
+    // 3. Fallback: check global tags
+    tag = av_dict_get(fmt_ctx->metadata, "rotate", NULL, 0);
+    if (tag) return std::atoi(tag->value);
+    
+    return 0;
 }
 
 std::vector<float> VideoSource::getWaveform(int points) {

@@ -234,11 +234,17 @@ class VideoEventFXPanel(QWidget):
         global_time = (self.current_clip.start_frame / fps) + time_s
         
         try:
+            # SAFETY CHECK: Verify C++ object existence (Fixes deletion crash)
+            if not self.display_label or not isinstance(self.display_label, QWidget):
+                return
+                
             frame_data = self.rocky_app.engine.evaluate(global_time)
             if frame_data is not None:
                 self.display_frame(frame_data)
-        except Exception as e:
-            print(f"Transformador Preview Error: {e}")
+        except (RuntimeError, Exception) as e:
+            # Silent catch for C++ deletion status
+            if "deleted" not in str(e):
+                print(f"Transformador Preview Logic Error: {e}")
 
     # --- Internal Logic ---
 

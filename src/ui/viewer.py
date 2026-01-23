@@ -17,7 +17,7 @@ class ViewerPanel(QWidget):
         self.setObjectName("ViewerPanel")
         self.setStyleSheet("""
             #ViewerPanel {
-                background-color: #111111;
+                background-color: #000000;
                 border: none;
             }
 

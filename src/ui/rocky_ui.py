@@ -490,6 +490,10 @@ class RockyApp(QMainWindow):
         self.viewer_registry = [] # Track all active viewer panels for frame broadcasting
         self.timeline_registry = [] # Track all active timeline widgets for playhead sync
         self.master_meter_registry = [] # Track all active master meter panels for gain sync
+        
+        # PROJECT DIMENSIONS (Persistent State)
+        self.p_width = 1920
+        self.p_height = 1080
 
         if not self.initialize_engine():
             # Fatal error handled inside initialize_engine
@@ -586,12 +590,18 @@ class RockyApp(QMainWindow):
             print(f"DEBUG: Stopping {len(self._active_workers)} background workers...", flush=True)
             for worker in self._active_workers[:]: # Use slice to avoid modification issues
                 try:
-                    worker.requestInterruption()
-                    if not worker.wait(2000): # Increased timeout
-                        print(f"WARNING: Worker {worker} timed out, terminating...", flush=True)
+                    # Prefer safe STOP method implemented in recent workers
+                    if hasattr(worker, 'stop'):
+                        worker.stop()
+                    else:
+                        worker.requestInterruption()
+                    
+                    if not worker.wait(3000): # Give 3s to join safely
+                        print(f"WARNING: Worker {worker} timed out, forcing termination...", flush=True)
                         worker.terminate()
                         worker.wait(500)
-                except: pass
+                except Exception as e:
+                    print(f"ERROR: Failed to cleanup worker {worker}: {e}")
             self._active_workers.clear()
             
         # 3. Stop Render Worker if active
@@ -986,52 +996,27 @@ class RockyApp(QMainWindow):
             # No, user input is separate. But the PROBE is done.
             msg = QMessageBox()
             msg.setWindowTitle("Configuración de Proyecto")
-            msg.setText(f"El primer medio añadido tiene una resolución de {width}x{height}.")
-            msg.setInformativeText("¿Deseas ajustar la configuración del proyecto para que coincida con este medio?")
-            msg.addButton("Sí (Ajustar)", QMessageBox.YesRole)
-            no_btn = msg.addButton("No (Usar 1080p por defecto)", QMessageBox.NoRole)
-            msg.setDefaultButton(no_btn) # Default to No (Safe Template)
             
-            msg.setWindowIcon(self.windowIcon()) # Use Application Icon (Rocket/Custom) first
+            aspect_str = "VERTICAL" if height > width else "PANORÁMICO"
+            msg.setText(f"El medio detectado es {aspect_str} ({width}x{height}).")
+            msg.setInformativeText(f"¿Deseas ajustar el proyecto a {width}x{height}?")
             
-            # Try to load custom logo.png for the body icon
+            btn_yes = msg.addButton("Sí, Ajustar", QMessageBox.YesRole)
+            no_btn = msg.addButton("No (Usar 1080p estándar)", QMessageBox.NoRole)
+            msg.setDefaultButton(no_btn)
+            
+            # ... Icon Logic ...
+            msg.setWindowIcon(self.windowIcon())
             logo_path = self.get_resource_path(os.path.join("src", "img", "logo.png"))
             if os.path.exists(logo_path):
-                # Load and Scale to 64x64
                 src_pix = QPixmap(logo_path).scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                
-                # Apply Rounded Mask
-                rounded = QPixmap(src_pix.size())
-                rounded.fill(Qt.transparent)
-                
-                painter = QPainter(rounded)
-                painter.setRenderHint(QPainter.Antialiasing)
-                painter.setRenderHint(QPainter.SmoothPixmapTransform)
-                
-                path = QPainterPath()
-                # 12px radius matches modern "Squircle" style for 64px icon
-                path.addRoundedRect(QRectF(src_pix.rect()), 12, 12)
-                
-                painter.setClipPath(path)
-                painter.drawPixmap(0, 0, src_pix)
-                painter.end()
-
-                msg.setIconPixmap(rounded)
-                msg.setWindowIcon(QIcon(logo_path)) # Override window icon with logo if preferred
-            else:
-                msg.setIcon(QMessageBox.Question)
-
+                msg.setIconPixmap(src_pix)
+            
             msg.exec() 
-                
-            # PySide6 exec returns the standard button enum if used StandardButtons. 
-            # With addButton it returns an opaque ID. Let's trace it.
-            # Simplified:
             
             if msg.clickedButton() == no_btn:
-                # Force Default Template 1920x1080
                 self.on_resolution_changed(1920, 1080)
             else:
-                # Adapt to Media
                 self.on_resolution_changed(width, height)
         
         is_audio = ext in ["mp3", "wav", "aac", "m4a", "flac"]
@@ -1080,7 +1065,7 @@ class RockyApp(QMainWindow):
             vis_h = height if rotation % 180 == 0 else width
             
             # Project aspect
-            p_w, p_h = self.width(), self.height()
+            p_w, p_h = self.p_width, self.p_height
             clip_aspect = vis_w / vis_h if vis_h > 0 else 1.77
             proj_aspect = p_w / p_h if p_h > 0 else 1.77
             
@@ -1788,6 +1773,8 @@ class RockyApp(QMainWindow):
             self.toggle_play()
 
         locker = QMutexLocker(self.engine_lock)
+        self.p_width = width
+        self.p_height = height
         self.engine.set_resolution(width, height)
         del locker
 
