@@ -6,22 +6,23 @@ from .styles import SLIDER_STYLE
 class MasterMeterPanel(QWidget):
     def __init__(self):
         super().__init__()
-        self.setFixedWidth(100)
+        self.setFixedWidth(65)
         self.setObjectName("MasterMeterPanel")
         self.setStyleSheet("""
             #MasterMeterPanel { 
                 background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1a0b2e, stop:1 #120820); 
-                border-left: 2px solid #0a0412; 
+                border-left: 1px solid #0a0412; 
             }
         """)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 15, 10, 15)
-        layout.setSpacing(12)
+        layout.setContentsMargins(5, 10, 5, 10)
+        layout.setSpacing(5)
         
         self.fader = QSlider(Qt.Orientation.Vertical)
         self.fader.setRange(0, 100)
         self.fader.setValue(75)
+        self.fader.setFixedWidth(18)
         self.fader.setStyleSheet(SLIDER_STYLE)
         
         layout.addWidget(self.fader)
@@ -31,7 +32,7 @@ class MasterMeterPanel(QWidget):
 class MeterDisplay(QWidget):
     def __init__(self):
         super().__init__()
-        self.setFixedWidth(50)
+        self.setFixedWidth(35)
         self.l_level, self.r_level = 0.0, 0.0
         self.target_l, self.target_r = 0.0, 0.0
         
@@ -65,7 +66,7 @@ class MeterDisplay(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
-        bar_w = 7
+        bar_w = 5
         
         # Background channels
         dark_bg = QColor("#120820")

@@ -1553,9 +1553,38 @@ class RockyApp(QMainWindow):
             ]
         }
         
-        # Create "Edición" workspace with this layout
-        self.toolbar.workspace_bar.add_workspace("Edición", default_layout)
-        self.toolbar.workspace_bar.set_active("Edición")
+        # Create "Genérico" workspace with this layout
+        self.toolbar.workspace_bar.add_workspace("Genérico", default_layout)
+        
+        # New "Shorts" Workspace: Optimized for vertical content
+        shorts_layout = {
+            "type": "splitter",
+            "orientation": 1, # Root is Left-Right Split
+            "sizes": [1000, 400], 
+            "children": [
+                {
+                    "type": "splitter",
+                    "orientation": 2, # Left part is Top-Bottom Split
+                    "sizes": [600, 400], 
+                    "children": [
+                        {
+                            "type": "splitter",
+                            "orientation": 1, # Top-Left is Effects + Meter
+                            "sizes": [400, 65],
+                            "children": [
+                                {"type": "panel", "panel_type": "Effects", "title": "EFECTOS"},
+                                {"type": "panel", "panel_type": "MasterMeter", "title": "VÚMETRO MAESTRO"}
+                            ]
+                        },
+                        {"type": "panel", "panel_type": "Timeline", "title": "LÍNEA DE TIEMPO"}
+                    ]
+                },
+                {"type": "panel", "panel_type": "Viewer", "title": "VISOR DE VIDEO"}
+            ]
+        }
+        self.toolbar.workspace_bar.add_workspace("Shorts", shorts_layout)
+        
+        self.toolbar.workspace_bar.set_active("Genérico")
         
         if self.timeline_widget:
             self.timeline_widget.selection_changed.connect(self.on_timeline_selection_changed)

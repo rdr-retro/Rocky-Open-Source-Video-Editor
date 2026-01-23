@@ -49,24 +49,28 @@ ACCENT_PRIMARY = dt.ACCENT_PRIMARY
 
 TOOLBAR_STYLE = f"""
     QFrame#Toolbar {{
-        background-color: #1a1a1a;
+        background-color: transparent;
         border: none;
-        border-radius: 0px;
     }}
 """
 
 TOOLBAR_MENU_BTN_STYLE = f"""
     QPushButton {{
         background-color: transparent;
-        color: #ffffff;
+        color: {dt.TEXT_SECONDARY};
         border: none;
-        padding: 2px 8px;
+        padding: 0px 8px;
+        min-height: 24px;
+        max-height: 24px;
         font-family: {dt.FONT_FAMILY_UI};
         font-size: 11px;
+        text-align: center;
+        outline: none;
+        border-radius: 6px;
     }}
     QPushButton:hover {{
-        background-color: rgba(255, 255, 255, 0.1);
-        border-radius: 2px;
+        background-color: {dt.BG_ELEVATED};
+        color: {dt.TEXT_PRIMARY};
     }}
     QPushButton::menu-indicator {{
         image: none;
@@ -76,20 +80,26 @@ TOOLBAR_MENU_BTN_STYLE = f"""
 WORKSPACE_BTN_STYLE = f"""
     QPushButton {{
         background-color: transparent;
-        color: #ffffff;
+        color: {dt.TEXT_SECONDARY};
         border: none;
-        padding: 2px 8px;
+        padding: 0px 10px;
+        min-height: 24px;
+        max-height: 24px;
         font-family: {dt.FONT_FAMILY_UI};
         font-size: 11px;
+        text-align: center;
+        outline: none;
+        border-radius: 6px;
     }}
     QPushButton:hover {{
-        background-color: rgba(255, 255, 255, 0.1);
-        border-radius: 2px;
+        background-color: {dt.BG_MEDIUM};
+        color: {dt.TEXT_PRIMARY};
     }}
     QPushButton:checked {{
-        background-color: transparent;
-        color: {dt.ACCENT_PRIMARY};
-        font-weight: bold;
+        background-color: {dt.BG_ELEVATED};
+        color: {dt.TEXT_PRIMARY};
+        font-weight: 500;
+        border: 1px solid {dt.BORDER_SUBTLE};
     }}
 """
 

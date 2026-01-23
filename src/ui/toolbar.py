@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QSpacerItem, QSizePolicy, QMenu, QInputDialog
 )
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtGui import QIcon, QAction, QPixmap
 
 from .styles import (
     PUSH_BUTTON_STYLE, TOOLBAR_STYLE, UI_FONT, 
@@ -26,6 +26,7 @@ class ToolbarMenuButton(QPushButton):
     """
     def __init__(self, title: str, parent=None):
         super().__init__(title, parent)
+        self.setFlat(True)
         self.setStyleSheet(TOOLBAR_MENU_BTN_STYLE)
         
         # Initialize Menu
@@ -50,6 +51,7 @@ class WorkspaceButton(QPushButton):
         super().__init__(name, parent)
         self.layout_data = layout_data
         self.setCheckable(True)
+        self.setFlat(True)
         self.setStyleSheet(WORKSPACE_BTN_STYLE)
 
 # ============================================================================
@@ -87,14 +89,30 @@ class WorkspaceBar(QFrame):
         self.btn_layout.setContentsMargins(0, 0, 0, 0)
         self.btn_layout.setSpacing(0)
         
-        # Add Button (+)
+        # Add Button (+) with centered container
+        self.add_container = QFrame()
+        self.add_container.setFixedSize(24, 24)
+        add_layout = QHBoxLayout(self.add_container)
+        add_layout.setContentsMargins(0, 0, 0, 0)
+        add_layout.setAlignment(Qt.AlignCenter)
+
         self.btn_add = QPushButton("+")
+        self.btn_add.setFlat(True)
         self.btn_add.setFixedSize(24, 24)
-        self.btn_add.setStyleSheet(TOOLBAR_MENU_BTN_STYLE)
+        self.btn_add.setCursor(Qt.PointingHandCursor)
+        self.btn_add.setStyleSheet(TOOLBAR_MENU_BTN_STYLE + """
+            QPushButton { 
+                font-size: 15px; 
+                font-weight: 500; 
+                padding: 0px; 
+                color: white;
+            }
+        """)
         self.btn_add.clicked.connect(self._on_add_clicked)
+        add_layout.addWidget(self.btn_add)
         
         self.main_layout.addWidget(self.btn_container)
-        self.main_layout.addWidget(self.btn_add)
+        self.main_layout.addWidget(self.add_container)
 
     def add_workspace(self, name: str, layout_data: dict):
         """Creates and registers a new workspace button."""
@@ -136,7 +154,7 @@ class RockyToolbar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("Toolbar")
-        self.setFixedHeight(28)
+        self.setFixedHeight(32)
         self.setStyleSheet(TOOLBAR_STYLE)
         
         # Public Action Access (for connectivity in RockyApp)
@@ -145,10 +163,13 @@ class RockyToolbar(QFrame):
         self._initialize_ui()
 
     def _initialize_ui(self):
-        """Constructs the toolbar layout in logical segments."""
+        """Constructs the toolbar layout in logical segments using Golden Ratio proportions."""
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 0, 10, 0)
-        layout.setSpacing(0)
+        
+        # Compact Layout
+        layout.setContentsMargins(10, 2, 10, 2)
+        layout.setSpacing(8) 
+        layout.setAlignment(Qt.AlignVCenter)
         
         self._add_logo_section(layout)
         self._add_menus_section(layout)
@@ -159,20 +180,49 @@ class RockyToolbar(QFrame):
         self._add_proxy_section(layout)
 
     def _add_logo_section(self, layout: QHBoxLayout):
-        """Adds the branding button and its internal menu."""
+        """Adds the branding button in a centered container."""
+        logo_container = QFrame()
+        logo_container.setFixedSize(24, 24)
+        logo_layout = QHBoxLayout(logo_container)
+        logo_layout.setContentsMargins(0, 0, 0, 0)
+        logo_layout.setAlignment(Qt.AlignCenter)
+
         self.btn_logo = QPushButton()
+        self.btn_logo.setFlat(True)
         self.btn_logo.setFixedSize(24, 24)
+        self.btn_logo.setCursor(Qt.PointingHandCursor)
         self.btn_logo.setStyleSheet("""
-            QPushButton { background: transparent; border: none; padding: 2px; } 
-            QPushButton:hover { background: rgba(255,255,255,15); border-radius: 4px; }
+            QPushButton { 
+                background: transparent; 
+                border: none; 
+                padding: 0px; 
+                margin: 0px;
+            } 
+            QPushButton:hover { 
+                background: rgba(255,255,255,0.1); 
+                border-radius: 4px; 
+            }
             QPushButton::menu-indicator { image: none; }
         """)
+
+        # Custom Icon Centering Hack (Native setIcon is often displaced on Windows/Mac)
+        self.btn_logo_layout = QHBoxLayout(self.btn_logo)
+        self.btn_logo_layout.setContentsMargins(0, 0, 0, 0)
+        self.btn_logo_layout.setSpacing(0)
+        self.btn_logo_layout.setAlignment(Qt.AlignCenter)
+
+        self.logo_icon_label = QLabel()
+        self.logo_icon_label.setFixedSize(16, 16) 
+        self.logo_icon_label.setStyleSheet("background: transparent; border: none;")
+        self.logo_icon_label.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         # Icon Path resolution
         icon_path = os.path.join(os.getcwd(), "src", "img", "icon.png")
         if os.path.exists(icon_path):
-            self.btn_logo.setIcon(QIcon(icon_path))
-            self.btn_logo.setIconSize(QSize(18, 18))
+            pix = QPixmap(icon_path).scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.logo_icon_label.setPixmap(pix)
+        
+        self.btn_logo_layout.addWidget(self.logo_icon_label)
 
         # Internal Logo Menu
         menu = QMenu(self)
@@ -181,8 +231,9 @@ class RockyToolbar(QFrame):
         menu.addAction("Acerca de Rocky video editor")
         self.btn_logo.setMenu(menu)
         
-        layout.addWidget(self.btn_logo)
-        layout.addSpacing(4)
+        logo_layout.addWidget(self.btn_logo)
+        layout.addWidget(logo_container)
+        layout.addSpacing(8)
 
     def _add_menus_section(self, layout: QHBoxLayout):
         """Generates the primary application menu buttons."""
@@ -225,13 +276,13 @@ class RockyToolbar(QFrame):
         separator = QLabel("|")
         separator.setStyleSheet(
             f"color: #ffffff; background: transparent; "
-            f"font-family: {UI_FONT}; font-size: 11px; padding: 0 4px 2px 4px;"
+            f"font-family: {UI_FONT}; font-size: 11px; padding: 0 4px 0 4px;"
         )
         
         self.workspace_bar = WorkspaceBar(self)
         
-        layout.addWidget(separator)
-        layout.addWidget(self.workspace_bar)
+        layout.addWidget(separator, 0, Qt.AlignVCenter)
+        layout.addWidget(self.workspace_bar, 0, Qt.AlignVCenter)
 
     def _add_proxy_section(self, layout: QHBoxLayout):
         """Adds the PX (Proxy) toggle button."""

@@ -42,6 +42,7 @@ class PanelTypeGridMenu(QFrame):
             ("🎬", "Transformador", "MediaTransformer"),
             ("📊", "Audio", "MasterMeter"),
             ("📁", "Archivos", "FileBrowser"),
+            ("🐍", "Python", "PythonTerminal"),
         ]
         
         for i, (icon, label, p_type) in enumerate(types):
@@ -91,19 +92,19 @@ class RockyPanelHeader(QFrame):
         layout.setSpacing(6)
         
         # 1. Type Switcher (Now on the LEFT)
-        self.btn_type = QPushButton("📽️") # Default icon
-        self.btn_type.setFixedSize(24, 24)
-        self.btn_type.setStyleSheet("""
-            QPushButton {
-                color: #ff9900; 
+        self.btn_type = QPushButton("📽️ ▾") # Default icon with chevron
+        self.btn_type.setFixedSize(38, 24)
+        self.btn_type.setStyleSheet(f"""
+            QPushButton {{
+                color: {dt.ACCENT_PRIMARY}; 
                 font-size: 14px;
                 background-color: transparent;
                 border: none;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 153, 0, 0.1);
+            }}
+            QPushButton:hover {{
+                background-color: rgba(0, 195, 255, 0.1);
                 border-radius: 4px;
-            }
+            }}
         """)
         self.btn_type.setToolTip("Cambiar Tipo de Panel")
         
@@ -238,10 +239,11 @@ class RockyPanelHeader(QFrame):
             "Effects": "✨",
             "MediaTransformer": "🎬",
             "MasterMeter": "📊",
-            "FileBrowser": "📂"
+            "FileBrowser": "📂",
+            "PythonTerminal": "🐍"
         }
         icon = icons.get(panel_type, "📽️")
-        self.btn_type.setText(icon)
+        self.btn_type.setText(f"{icon} ▾")
 
     def on_split_clicked(self, orientation):
         """Request parent to split."""
@@ -1357,6 +1359,16 @@ class RockyPanel(QFrame):
                 return VideoEventFXPanel()
             except Exception as e:
                 label = QLabel(f"Error cargando Transformador de Medios: {e}")
+                label.setStyleSheet("color: #ff5050; padding: 20px;")
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                return label
+        elif panel_type == "PythonTerminal":
+            # Import and create PythonTerminalPanel
+            try:
+                from .python_terminal import PythonTerminalPanel
+                return PythonTerminalPanel()
+            except Exception as e:
+                label = QLabel(f"Error cargando Terminal Python: {e}")
                 label.setStyleSheet("color: #ff5050; padding: 20px;")
                 label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 return label
