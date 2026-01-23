@@ -73,9 +73,25 @@ Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
     std::fill(outFrame.data.begin(), outFrame.data.end(), 0);
 
     // [VEGAS COMPOSITING MODEL]
-    // Calculate new dimensions
-    int newW = (int)(w * transform.scaleX);
-    int newH = (int)(h * transform.scaleY);
+    // P7: Validate and clamp transform values to prevent extreme allocations
+    const double MAX_SCALE = 100.0;
+    const double MIN_SCALE = 0.01;
+    const int MAX_DIM = 16384;  // Maximum safe dimension
+    
+    // Clamp scale values to safe range
+    double safeScaleX = std::clamp(transform.scaleX, MIN_SCALE, MAX_SCALE);
+    double safeScaleY = std::clamp(transform.scaleY, MIN_SCALE, MAX_SCALE);
+    
+    // Calculate new dimensions with safety checks
+    int newW = std::clamp((int)(w * safeScaleX), 1, MAX_DIM);
+    int newH = std::clamp((int)(h * safeScaleY), 1, MAX_DIM);
+    
+    // Additional safety check for total pixel count
+    const size_t MAX_PIXELS = 67108864;  // 8192x8192 = 64MP
+    if ((size_t)newW * newH > MAX_PIXELS) {
+        std::cerr << "[Clip] Transform dimensions too large: " << newW << "x" << newH << std::endl;
+        return outFrame;  // Return empty frame
+    }
     
     if (newW <= 0 || newH <= 0) return outFrame;
 

@@ -36,9 +36,12 @@ VideoSource::VideoSource(std::string p) : path(p) {
         std::lock_guard<std::mutex> lock(g_ff_mtx);
         if (avformat_open_input(&fmt_ctx, path.c_str(), nullptr, nullptr) < 0) {
             std::cerr << "[VideoSource] Failed to open: " << path << std::endl;
+            is_valid = false;  // P6: Mark as invalid
             return;
         }
         if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
+            std::cerr << "[VideoSource] Failed to find stream info: " << path << std::endl;
+            is_valid = false;  // P6: Mark as invalid
             return;
         }
     }
@@ -101,6 +104,14 @@ VideoSource::VideoSource(std::string p) : path(p) {
 
     av_frame = av_frame_alloc();
     pkt = av_packet_alloc();
+    
+    // P6: Mark as valid only if all initialization succeeded
+    is_valid = (fmt_ctx != nullptr && video_stream_idx != -1);
+    if (is_valid) {
+        std::cout << "[VideoSource] Successfully initialized: " << path << std::endl;
+    } else {
+        std::cerr << "[VideoSource] Initialization incomplete for: " << path << std::endl;
+    }
 }
 
 VideoSource::~VideoSource() {
@@ -121,11 +132,17 @@ VideoSource::~VideoSource() {
  */
 Frame VideoSource::getFrame(double localTime, int w, int h) {
     std::lock_guard<std::mutex> lock(mtx);
-    if (!codec_ctx) return Frame(w, h);
+    
+    // P6: Early exit if source is invalid
+    if (!is_valid || !codec_ctx) {
+        std::cerr << "[VideoSource] Cannot get frame - source invalid" << std::endl;
+        return Frame(w, h);
+    }
     
     // Performance: Early exit if requesting the exact same frame again
-    if (localTime == last_time && w == last_w && h == last_h) {
-        return last_frame;
+    // P5: Use shared_ptr for thread-safe caching
+    if (last_frame && localTime == last_time && w == last_w && h == last_h) {
+        return *last_frame;  // Return copy of cached frame
     }
 
     if (!fmt_ctx || video_stream_idx == -1) return Frame(w, h);
@@ -166,9 +183,22 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
                             outX = (w - outW) / 2;
                         }
 
-                        sws_ctx = sws_getCachedContext(sws_ctx, 
+                        // P1: Safe SwsContext creation with error handling
+                        SwsContext* new_ctx = sws_getCachedContext(sws_ctx, 
                             av_frame->width, av_frame->height, static_cast<AVPixelFormat>(av_frame->format),
                             outW, outH, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+                        
+                        if (!new_ctx) {
+                            std::cerr << "[VideoSource] Failed to create SwsContext" << std::endl;
+                            if (sws_ctx) {
+                                sws_freeContext(sws_ctx);
+                                sws_ctx = nullptr;
+                            }
+                            av_frame_unref(av_frame);
+                            av_packet_unref(pkt);
+                            return Frame(w, h);  // Return empty frame on error
+                        }
+                        sws_ctx = new_ctx;
                         
                         // Draw into the calculated sub-rectangle of the output frame
                         uint8_t* destPointers[4] = { outputFrame.data.data() + (outY * w * 4) + (outX * 4), nullptr, nullptr, nullptr };
@@ -180,8 +210,8 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
                         av_frame_unref(av_frame);
                         av_packet_unref(pkt);
                         
-                        // Update cache
-                        last_frame = outputFrame;
+                        // P5: Update cache with shared_ptr
+                        last_frame = std::make_shared<Frame>(outputFrame);
                         last_time = localTime;
                         last_w = w; last_h = h;
                         
@@ -195,7 +225,11 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
         av_packet_unref(pkt);
     }
     
-    return last_frame; // Return last valid if end of stream or error
+    // Return last valid frame if end of stream or error
+    if (last_frame) {
+        return *last_frame;
+    }
+    return Frame(w, h);
 }
 
 /**
@@ -232,8 +266,14 @@ std::vector<float> VideoSource::getAudioSamples(double startTime, double duratio
         last_audio_time = -1.0; 
     }
 
-    if (!cached_swr) {
+    // P3: Thread-safe SwrContext initialization using std::call_once
+    std::call_once(swr_init_flag, [this, target_channels, target_sample_rate]() {
         cached_swr = swr_alloc();
+        if (!cached_swr) {
+            std::cerr << "[VideoSource] Failed to allocate SwrContext" << std::endl;
+            return;
+        }
+        
         av_opt_set_chlayout(cached_swr, "in_chlayout", &audio_codec_ctx->ch_layout, 0);
         av_opt_set_int(cached_swr, "in_sample_rate", audio_codec_ctx->sample_rate, 0);
         av_opt_set_sample_fmt(cached_swr, "in_sample_fmt", audio_codec_ctx->sample_fmt, 0);
@@ -243,7 +283,20 @@ std::vector<float> VideoSource::getAudioSamples(double startTime, double duratio
         av_opt_set_chlayout(cached_swr, "out_chlayout", &outLayout, 0);
         av_opt_set_int(cached_swr, "out_sample_rate", target_sample_rate, 0);
         av_opt_set_sample_fmt(cached_swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
-        swr_init(cached_swr);
+        
+        if (swr_init(cached_swr) < 0) {
+            std::cerr << "[VideoSource] Failed to initialize SwrContext" << std::endl;
+            swr_free(&cached_swr);
+            cached_swr = nullptr;
+        } else {
+            std::cout << "[VideoSource] SwrContext initialized successfully" << std::endl;
+        }
+    });
+    
+    // Verify SwrContext is available
+    if (!cached_swr) {
+        std::cerr << "[VideoSource] SwrContext not available, cannot decode audio" << std::endl;
+        return {};  // Return empty vector
     }
 
     // Decoding Loop
@@ -514,6 +567,11 @@ void ImageSource::load(int w, int h) {
         if (avcodec_send_packet(imgCodecCtx, tempPkt) >= 0) {
             if (avcodec_receive_frame(imgCodecCtx, tempFrame) >= 0) {
                 cached_frame = Frame(w, h, 4);
+                
+                // P2: CRITICAL FIX - Initialize entire buffer to transparent black
+                // This prevents garbage pixels outside the scaled image area
+                // This was causing the "strange lines" visual artifacts
+                std::fill(cached_frame.data.begin(), cached_frame.data.end(), 0);
                 
                 // Smart Scaling for Static Images
                 float srcAspect = (float)tempFrame->width / tempFrame->height;

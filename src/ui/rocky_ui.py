@@ -765,11 +765,8 @@ class RockyApp(QMainWindow):
         # 3. Audio & Master Synchronization
         self.audio_player.level_updated.connect(self.on_audio_levels_received)
 
-    def on_audio_levels_received(self, levels):
+    def on_audio_levels_received(self, left, right):
         """Dispatches audio levels to ALL active vumeters."""
-        if not levels: return
-        left, right = levels
-        
         for m in self.master_meter_registry:
             if hasattr(m, 'meter'):
                 m.meter.set_levels(left, right)
@@ -1320,7 +1317,10 @@ class RockyApp(QMainWindow):
         engine_timestamp = current_frame / active_fps
         try:
             # Video (GUI Thread)
+            locker = QMutexLocker(self.engine_lock)
             rendered_frame = self.engine.evaluate(engine_timestamp)
+            del locker
+            
             self._broadcast_frame(rendered_frame)
             
             # NOTE: Audio is now handled by AudioWorker thread to ensure ZERO drops
@@ -1531,29 +1531,29 @@ class RockyApp(QMainWindow):
 
     def _init_default_workspace(self):
         """Creates the initial default workspace button with standard layout."""
-        # Standard layout as per requested image:
-        # 1. Main Horizontal Split (Left: Viewer+Timeline, Right: Properties)
-        # 2. Left Vertical Split (Top: Viewer, Bottom: Timeline)
+        # Layout matching the user's image:
+        # - Left side: Viewer (top) + Timeline (bottom) in vertical split
+        # - Right side: Effects/Properties panel
         
         default_layout = {
             "type": "splitter",
-            "orientation": 1, # Horizontal
-            "sizes": [1000, 400],
+            "orientation": 1, # Horizontal (left-right)
+            "sizes": [1000, 400],  # 70% left, 30% right
             "children": [
                 {
                     "type": "splitter",
-                    "orientation": 2, # Vertical
-                    "sizes": [700, 300],
+                    "orientation": 2, # Vertical (top-bottom)
+                    "sizes": [600, 400],  # 60% viewer, 40% timeline
                     "children": [
                         {"type": "panel", "panel_type": "Viewer", "title": "VISOR DE VIDEO"},
                         {"type": "panel", "panel_type": "Timeline", "title": "LÍNEA DE TIEMPO"}
                     ]
                 },
-                {"type": "panel", "panel_type": "Properties", "title": "FORMATO DE PROYECTO"}
+                {"type": "panel", "panel_type": "Effects", "title": "EFECTOS"}
             ]
         }
         
-        # We use "Edición" to match the user request aesthetic
+        # Create "Edición" workspace with this layout
         self.toolbar.workspace_bar.add_workspace("Edición", default_layout)
         self.toolbar.workspace_bar.set_active("Edición")
         

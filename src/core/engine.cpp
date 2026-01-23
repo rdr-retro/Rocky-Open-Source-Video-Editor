@@ -58,19 +58,16 @@ py::array_t<uint8_t> RockyEngine::evaluate(double time) {
 
     const size_t totalPixelBytes = static_cast<size_t>(curW * curH * 4);
     
-    // 1. REUSE BUFFER (Memory Optimization)
-    if (internalCanvas.size() != totalPixelBytes) {
-        internalCanvas.resize(totalPixelBytes);
-    }
+    // 1. LOCAL CANVAS (Thread Safety)
+    // We use a local vector here to ensure that multiple calls to evaluate() 
+    // (e.g. from Preview and Export threads) don't collide on a shared buffer.
+    std::vector<uint8_t> localCanvas(totalPixelBytes);
     
     // Fast Clear (Gray Background)
-    // Optimization: Use memset for faster clearing if strict color isn't required, 
-    // but here we manually fill to match the "Professional Gray" (45, 45, 45)
-    uint32_t* pixelPtr = reinterpret_cast<uint32_t*>(internalCanvas.data());
+    uint32_t* pixelPtr = reinterpret_cast<uint32_t*>(localCanvas.data());
     size_t pixelCount = totalPixelBytes / 4;
     
     // 0xFF2D2D2D in Little Endian (AABBGGRR) -> A=255, R=45, G=45, B=45
-    // Note: Verify endianness if porting to non-x86/ARM64
     const uint32_t bgColor = 0xFF2D2D2D; 
     std::fill_n(pixelPtr, pixelCount, bgColor);
 
@@ -114,23 +111,17 @@ py::array_t<uint8_t> RockyEngine::evaluate(double time) {
             // ---------------------
 
             const uint8_t* src = currentLayer.data.data();
-            uint8_t* dst = internalCanvas.data();
+            uint8_t* dst = localCanvas.data();
             
-            // Optimization: Pointer arithmetic is faster than vector indexing
-            // TODO: SIMD Intrinsics (NEON) could be added here for 4x speedup
             for (size_t k = 0; k < totalPixelBytes; k += 4) {
                 const uint8_t alpha = src[k + 3];
                 if (alpha == 0) continue; // Skip transparent pixels
 
                 if (alpha == 255) {
                     // Opaque: Fast Copy
-                    // Use a 32-bit copy for the whole pixel
                     *reinterpret_cast<uint32_t*>(dst + k) = *reinterpret_cast<const uint32_t*>(src + k);
                 } else {
                     // Blending
-                    // Formula: out = src * alpha + dst * (1 - alpha)
-                    // Approximation using integer math: (src * alpha + dst * (255 - alpha)) >> 8
-                    // This is much faster than float division
                     const uint32_t invAlpha = 255 - alpha;
                     
                     dst[k]     = (src[k]     * alpha + dst[k]     * invAlpha) >> 8;
@@ -144,8 +135,7 @@ py::array_t<uint8_t> RockyEngine::evaluate(double time) {
 
     // CREATE NUMPY ARRAY: Requires GIL
     py::array_t<uint8_t> frameBuffer({curH, curW, 4});
-    // We still copy to Python buffer for safety, but we saved the intermediate allocation
-    std::memcpy(frameBuffer.mutable_data(), internalCanvas.data(), totalPixelBytes);
+    std::memcpy(frameBuffer.mutable_data(), localCanvas.data(), totalPixelBytes);
     return frameBuffer;
 }
 #ifdef ENABLE_ACCELERATE

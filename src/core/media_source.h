@@ -29,11 +29,15 @@ class VideoSource : public MediaSource {
     AVPacket* pkt = nullptr;
     SwsContext* sws_ctx = nullptr;
     
+    // Validation flag to prevent crashes with corrupted files (P6)
+    bool is_valid = false;
+    
     int last_w = -1, last_h = -1;
-    Frame last_frame = Frame(1, 1);
+    std::shared_ptr<Frame> last_frame = nullptr;  // P5: Thread-safe frame caching
     double last_time = -1.0;
     double last_audio_time = -1.0;
     SwrContext* cached_swr = nullptr;
+    std::once_flag swr_init_flag;  // P3: Thread-safe SwrContext initialization
     mutable std::mutex mtx;
 
 public:
@@ -43,6 +47,7 @@ public:
     std::vector<float> getAudioSamples(double startTime, double duration);
     std::vector<float> getWaveform(int points);
     double getDuration() override;
+    bool isValid() const { return is_valid; }  // P6: Expose validation status
 };
 
 class ImageSource : public MediaSource {

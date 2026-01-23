@@ -9,7 +9,6 @@
 class RockyEngine {
     std::vector<int> trackTypes;
     IntervalTree<std::shared_ptr<Clip>> clipTree;
-    std::vector<uint8_t> internalCanvas; // Reusable buffer to avoid re-allocations
     int width = 1280, height = 720;
     double fps = 30.0;
     double masterGain = 1.0;
