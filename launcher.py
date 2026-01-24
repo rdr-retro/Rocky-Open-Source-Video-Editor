@@ -1,6 +1,13 @@
 import sys
 import os
 
+# Helper to assist PyInstaller in finding hidden dependencies
+try:
+    import whisper
+    import faster_whisper
+except ImportError:
+    pass
+
 # Helper to find where we are running from
 if getattr(sys, 'frozen', False):
     # PyInstaller creates a temporary directory and stores path in _MEIPASS

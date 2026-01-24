@@ -81,22 +81,12 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM 5. Plugin Compilation (Optional)
-if not exist "plugins" goto :skip_plugins
-echo [INFO] Checking for MSVC compiler (cl.exe)...
-where cl >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [SKIP] cl.exe not found. Run from 'Developer Command Prompt for VS' to build plugins.
-    goto :skip_plugins
-)
-
+REM 5. Plugin Compilation
 echo [INFO] Compiling Plugins...
-pushd plugins
-if exist "invert.cpp" cl /O2 /LD /I"../src/core/ofx/include" invert.cpp /Fe:invert.ofx
-del *.obj >nul 2>&1
-popd
-
-:skip_plugins
+python scripts/compile_plugins.py
+if %errorlevel% neq 0 (
+    echo [WARN] Plugin compilation encountered errors.
+)
 echo.
 echo ========================================
 echo   COMPILATION FINISHED
