@@ -1,23 +1,27 @@
 #!/bin/bash
-# Rocky Video Editor - Robust Run Script
+# Rocky Video Editor - Robust Multi-Platform Run Script
+# Supports: macOS, Linux
 
 # 1. Verification
-SO_FILE="rocky_core.cpython-312-darwin.so"
-# Generic check for any .so file starting with rocky_core
-if ! ls rocky_core.*.so &> /dev/null; then
-    echo "Engine not found. Running compilation..."
+if [ ! -d "venv" ]; then
+    echo "Virtual environment not found. Compiling first..."
+    chmod +x compile.sh
     ./compile.sh
 fi
 
 # 2. Environment Setup
-if [ ! -d "venv" ]; then
+source venv/bin/activate
+
+# 3. Engine Check
+# Check for any compiled module: rocky_core.so or rocky_core.pyd
+if ! ls rocky_core.*.so &> /dev/null && ! ls rocky_core.*.pyd &> /dev/null; then
+    echo "Compiled engine (rocky_core) not found. Compiling now..."
     ./compile.sh
 fi
-source venv/bin/activate
 
 export PYTHONPATH="$(pwd):$PYTHONPATH"
 export QT_AUTO_SCREEN_SCALE_FACTOR=1
 
-# 3. Launch
+# 4. Launch
 echo "Starting Rocky Video Editor..."
 python -m src.ui.rocky_ui

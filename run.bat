@@ -1,36 +1,52 @@
 @echo off
-REM Rocky Video Editor - Windows Run Script
+setlocal enabledelayedexpansion
 
+REM Rocky Video Editor - Robust Windows Run Script
+
+REM 1. Verification
 if not exist "venv" (
-    echo Engine not found. Running compilation...
+    echo [INFO] Virtual environment not found. Running compilation...
     call compile.bat
 )
 
+REM 2. Environment Activation
+echo [INFO] Activating environment...
 call venv\Scripts\activate.bat
+if !errorlevel! neq 0 (
+    echo [ERROR] Failed to activate venv.
+    pause
+    exit /b 1
+)
 
-REM Check for critical dependencies (PySide6)
+REM 3. Integrity Check
 python -c "import PySide6" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Missing PySide6. Installing requirements...
+if !errorlevel! neq 0 (
+    echo [INFO] Missing dependencies. Installing...
     pip install -r requirements.txt
 )
 
-REM Check for compiled module
-if not exist "rocky_core*.pyd" (
-    if not exist "rocky_core*.so" (
-        echo Compiled engine not found. Compiling now...
-        call compile.bat
-    )
+REM Check for any compiled module: rocky_core.pyd or rocky_core.so
+set FOUND_ENGINE=0
+if exist "rocky_core*.pyd" set FOUND_ENGINE=1
+if exist "rocky_core*.so" set FOUND_ENGINE=1
+
+if !FOUND_ENGINE! equ 0 (
+    echo [INFO] Compiled engine not found. Building...
+    call compile.bat
 )
 
+REM 4. Environment Setup
 set PYTHONPATH=%CD%;%PYTHONPATH%
 
 REM Add FFmpeg DLLs to PATH for runtime
-if exist "external\ffmpeg\bin" (
+if exist "%CD%\external\ffmpeg\bin" (
     set "PATH=%CD%\external\ffmpeg\bin;%PATH%"
 )
 
-
-echo Starting Rocky Video Editor...
+REM 5. Launch
+echo [INFO] Starting Rocky Video Editor...
 python -m src.ui.rocky_ui
-pause
+if %errorlevel% neq 0 (
+    echo [ERROR] Application crashed with exit code %errorlevel%
+    pause
+)
