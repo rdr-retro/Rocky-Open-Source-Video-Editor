@@ -301,12 +301,13 @@ class FFmpegUtils:
             ffp = FFmpegUtils.get_ffprobe_path()
             cmd = [
                 ffp, '-v', 'error', '-select_streams', 'v:0',
+                '-analyzeduration', '20M', '-probesize', '20M',
                 '-show_entries', 'stream=width,height,r_frame_rate,duration:format=duration:side_data=rotation',
                 '-of', 'json', file_path
             ]
             
-            # Robust 10.0s timeout for heavy 4K/iPhone local files
-            output = subprocess.check_output(cmd, timeout=10.0).decode('utf-8')
+            # Robust 4.0s timeout is enough for local SSDs; 10.0s was causing "hang" feel
+            output = subprocess.check_output(cmd, timeout=4.0).decode('utf-8')
             data = json.loads(output)
             
             if 'streams' in data and data['streams']:

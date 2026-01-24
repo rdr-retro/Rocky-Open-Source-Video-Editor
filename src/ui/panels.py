@@ -582,9 +582,9 @@ class RockyPanel(QFrame):
         
         layout.addWidget(self.viewport)
         
-        # 1. Header (Inside Viewport)
+        # 1. Header (Inside Viewport) - Fixed height, no stretch
         self.header = RockyPanelHeader(title, self)
-        viewport_layout.addWidget(self.header)
+        viewport_layout.addWidget(self.header, stretch=0)
         
         # 2. Content (Inside Viewport)
         # We wrap content in a container to handle margins/clipping if needed
@@ -609,7 +609,8 @@ class RockyPanel(QFrame):
         if content_widget:
             content_layout.addWidget(content_widget)
             
-        viewport_layout.addWidget(self.content_area)
+        # CRITICAL FIX: Content area must take ALL remaining space after header
+        viewport_layout.addWidget(self.content_area, stretch=1)
         
         # Sync initial icon
         self.header.update_type_icon(self.current_type)
@@ -1075,6 +1076,21 @@ class RockyPanel(QFrame):
             self._register_master_meter(new_content)
         self._register_timeline_from_widget(new_content)
         
+        # Connect Resolution Change Signal (Critical Fix for Split)
+        try:
+             from PySide6.QtWidgets import QApplication
+             app = QApplication.instance()
+             main_win = None
+             for w in app.topLevelWidgets():
+                 if hasattr(w, 'on_resolution_changed'):
+                     main_win = w
+                     break
+             
+             if main_win and hasattr(new_content, 'resolution_changed'):
+                 new_content.resolution_changed.connect(main_win.on_resolution_changed)
+        except Exception as e:
+            print(f"Error connecting split resolution signal: {e}")
+        
         self.show()
         new_panel.show()
         new_splitter.show()
@@ -1122,6 +1138,21 @@ class RockyPanel(QFrame):
                 self._register_master_meter(new_content)
             # Register timeline if it contains one
             self._register_timeline_from_widget(new_content)
+            
+            # Connect Resolution Change Signal (Critical Fix for Swap)
+            try:
+                 from PySide6.QtWidgets import QApplication
+                 app = QApplication.instance()
+                 main_win = None
+                 for w in app.topLevelWidgets():
+                     if hasattr(w, 'on_resolution_changed'):
+                         main_win = w
+                         break
+                 
+                 if main_win and hasattr(new_content, 'resolution_changed'):
+                     new_content.resolution_changed.connect(main_win.on_resolution_changed)
+            except Exception as e:
+                print(f"Error connecting swapped resolution signal: {e}")
     
     @staticmethod
     def serialize_layout(widget):
@@ -1164,6 +1195,15 @@ class RockyPanel(QFrame):
             # Register with app
             if hasattr(content, 'display_frame'):
                 parent_app.register_viewer(content)
+            
+            # Connect Resolution Change Signal (Critical Fix)
+            if hasattr(content, 'resolution_changed') and hasattr(parent_app, 'on_resolution_changed'):
+                try:
+                    # Disconnect first to avoid duplicates if re-connecting? (New instance so not needed)
+                    content.resolution_changed.connect(parent_app.on_resolution_changed)
+                except Exception as e:
+                    print(f"Error connecting resolution_changed: {e}")
+
             from .master_meter import MasterMeterPanel
             if isinstance(content, MasterMeterPanel):
                 parent_app.register_master_meter(content)

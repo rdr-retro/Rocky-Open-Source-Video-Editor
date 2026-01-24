@@ -91,9 +91,10 @@ class VideoProcessingThread(QThread):
                     except:
                         pass
 
-            vis_w = width if rotation % 180 == 0 else height
-            vis_h = height if rotation % 180 == 0 else width
-            
+            # Final Output Resolution (Match Project if available)
+            vis_w = self.metadata.get('p_width', width)
+            vis_h = self.metadata.get('p_height', height)
+
             engine = rocky_core.RockyEngine()
             engine.set_resolution(vis_w, vis_h) 
             engine.set_fps(fps)
@@ -119,8 +120,13 @@ class VideoProcessingThread(QThread):
             # --- BACKGROUND ---
             vid_src = rocky_core.VideoSource(os.path.abspath(self.v_path))
             v_clip = engine.add_clip(0, "Media", 0, int(duration * fps), 0.0, vid_src)
-            v_clip.transform.rotation = float(rotation)
-            v_clip.transform.scale_x = 1.0; v_clip.transform.scale_y = 1.0; v_clip.opacity = 1.0
+            
+            # THE FIX: Use explicit UI-provided transform properties if available
+            # metadata['target_rotation'] will be correctly calculated by SubtitlePanel
+            v_clip.transform.rotation = float(self.metadata.get('target_rotation', rotation))
+            v_clip.transform.scale_x = float(self.metadata.get('target_scale_x', 1.0))
+            v_clip.transform.scale_y = float(self.metadata.get('target_scale_y', 1.0))
+            v_clip.opacity = 1.0
 
             # --- SUBTITLES ---
             self.progress.emit("Renderizando texto...")
@@ -130,19 +136,22 @@ class VideoProcessingThread(QThread):
             for f_path in font_candidates:
                 try: pil_font = ImageFont.truetype(f_path, font_size); break
                 except: continue
-            if not pil_font: pil_font = ImageFont.load_default()
-            
-            target_y_engine = 0.5 - self.rel_pos[1]
-            
+            if not pil_font: 
+                pil_font = ImageFont.load_default()
+                
             all_words = []
             for s in result.get("segments", []):
-                for w in s.get("words", []): all_words.append(w)
+                for w in s.get("words", []): 
+                    all_words.append(w)
             
             count = len(all_words)
             for i, word in enumerate(all_words):
-                if self._cancelled: break
+                if self._cancelled: 
+                    break
+                    
                 text = word["word"].strip().upper()
-                if not text: continue
+                if not text: 
+                    continue
                 
                 # Dynamic Image Creation
                 draw_calc = ImageDraw.Draw(Image.new('RGBA', (1,1)))
@@ -157,27 +166,31 @@ class VideoProcessingThread(QThread):
                 sw = max(3, int(font_size * 0.1))
                 for ox in range(-sw, sw+1):
                     for oy in range(-sw, sw+1):
-                        if ox*ox+oy*oy <= sw*sw: d.text((tx+ox, ty+oy), text, font=pil_font, fill="black")
+                        if ox*ox+oy*oy <= sw*sw: 
+                            d.text((tx+ox, ty+oy), text, font=pil_font, fill="black")
                 d.text((tx, ty), text, font=pil_font, fill="#FFFF00") # High Visibility yellow
                 
                 fd, ipath = tempfile.mkstemp(suffix=".png")
-                os.close(fd); img.save(ipath); temp_files.append(ipath)
+                os.close(fd)
+                img.save(ipath)
+                temp_files.append(ipath)
                 
                 s_clip = engine.add_clip(1, f"S{i}", int(word["start"]*fps), int(max(0.1, word["end"]-word["start"])*fps), 0.0, rocky_core.ImageSource(ipath))
                 s_clip.opacity = 1.0
                 
-                # CRITICAL: Fix SCALE. Set to 1.0 (Identity) because we drew it at the target resolution.
-                # If we scale it by iw/vis_w we make it near-invisible.
-                # However, if engine is normalized, iw/vis_w is correct. 
-                # Let's ensure it follows the same logic as the main editor.
-                s_clip.transform.scale_x = float(iw / vis_w)
-                s_clip.transform.scale_y = float(ih / vis_h)
+                # CRITICAL: PIXEL ACCURATE POSITIONING & UNIFORM RATIO
+                # We use only vis_w as the reference to maintain the PNG's aspect ratio.
+                # This compensates for the MediaSource's internal 'Aspect Fit' logic.
+                scale_ratio = float(iw / vis_w)
+                s_clip.transform.scale_x = scale_ratio
+                s_clip.transform.scale_y = scale_ratio
                 s_clip.transform.anchor_x = 0.5
                 s_clip.transform.anchor_y = 0.5
-                s_clip.transform.x = 0.0 
-                s_clip.transform.y = float(target_y_engine)
+                s_clip.transform.x = float(self.rel_pos[0]) 
+                s_clip.transform.y = float(self.rel_pos[1])
                 
-                if i % 10 == 0: self.progress_percent.emit(20 + int((i/count)*20))
+                if i % 10 == 0: 
+                    self.progress_percent.emit(20 + int((i/count)*20))
 
             if self._cancelled: return
             self.progress.emit("Procesando video final...")
@@ -227,10 +240,22 @@ class DraggableText(QLabel):
     def mouseMoveEvent(self, e):
         if self._dragging:
             np = self.mapToParent(e.pos()) - self._offset
-            p = self.parentWidget().rect()
-            np.setX(max(0, min(np.x(), p.width() - self.width())))
-            np.setY(max(0, min(np.y(), p.height() - self.height())))
-            self.move(np); self.moved.emit(np)
+            
+            # Constrain to parent stage_rect if available
+            p = self.parentWidget()
+            if hasattr(p, 'stage_rect') and not p.stage_rect.isEmpty():
+                sr = p.stage_rect
+                # Clamp within stage_rect boundaries
+                np.setX(max(int(sr.left()), min(np.x(), int(sr.right() - self.width()))))
+                np.setY(max(int(sr.top()), min(np.y(), int(sr.bottom() - self.height()))))
+            else:
+                # Fallback to full widget
+                rect = p.rect()
+                np.setX(max(0, min(np.x(), rect.width() - self.width())))
+                np.setY(max(0, min(np.y(), rect.height() - self.height())))
+                
+            self.move(np)
+            self.moved.emit(np)
 
     def mouseReleaseEvent(self, e): self._dragging = False
 
@@ -326,7 +351,16 @@ class SubtitlePanel(QWidget):
                         w, h, rot = 1920, 1080, 0
 
             if rot % 180 != 0: w, h = h, w
-            self.viewer.set_aspect(w, h); self.status.setText(f"CLIP: {os.path.basename(clip.file_path).upper()}"); self.stack.setCurrentIndex(1)
+            
+            # PROJECT ASPECT RATIO SYNC: Use project dimensions from main window if available
+            pw, ph = w, h # Fallback to clip if project not found
+            main_window = self.window()
+            if hasattr(main_window, 'p_width') and hasattr(main_window, 'p_height'):
+                pw, ph = main_window.p_width, main_window.p_height
+            
+            self.viewer.set_aspect(pw, ph)
+            self.status.setText(f"CLIP: {os.path.basename(clip.file_path).upper()}")
+            self.stack.setCurrentIndex(1)
         except Exception as e:
             print(f"DEBUG: SubtitlePanel Update Failed: {e}"); self.stack.setCurrentIndex(0)
 
@@ -334,9 +368,30 @@ class SubtitlePanel(QWidget):
         if not self.current_clip: return
         out, _ = QFileDialog.getSaveFileName(self, "Exportar Video con Subtítulos", "video_subtitulado.mp4", "*.mp4")
         if not out: return
+        
+        # --- PIXEL ACCURATE POSITIONING ---
         sr = self.viewer._get_stage_geometry()
-        if sr.height() > 0: rel_y = (self.viewer.text_overlay.y() + (self.viewer.text_overlay.height()/2) - sr.y()) / sr.height()
-        else: rel_y = 0.8
+        main_window = self.window()
+        p_h = getattr(main_window, 'p_height', 1080)
+        
+        # Calculate Y offset in Project Pixels from Center
+        if not sr.isEmpty():
+            # 1. UI Centers
+            ui_widget_center_y = self.viewer.text_overlay.y() + (self.viewer.text_overlay.height() / 2)
+            ui_stage_center_y = sr.top() + (sr.height() / 2)
+            
+            # 2. UI Pixel Offset from Center
+            ui_offset_y = ui_widget_center_y - ui_stage_center_y
+            
+            # 3. Map to Project Pixels
+            # Formula: ui_offset / ui_height = project_offset / project_height
+            project_offset_y = ui_offset_y * (p_h / sr.height())
+            
+            # rel_pos[1] will now store the PIXEL OFFSET from center
+            normalized_y_for_worker = project_offset_y
+        else:
+            normalized_y_for_worker = p_h * 0.3 # Default lower-third fallback
+            
         self.btn_run.setEnabled(False); self.pbar.setVisible(True); self.pbar.setValue(0)
         
         # Build metadata bundle for thread
@@ -344,10 +399,20 @@ class SubtitlePanel(QWidget):
             'width': getattr(self.current_clip, 'source_width', 0),
             'height': getattr(self.current_clip, 'source_height', 0),
             'rotation': getattr(self.current_clip, 'source_rotation', 0),
-            'fps': getattr(self.current_clip, 'source_fps', 30.0)
+            'fps': getattr(self.current_clip, 'source_fps', 30.0),
+            # THE FIX: Export the ACTUAL visual state from the clip
+            'target_rotation': self.current_clip.transform.rotation,
+            'target_scale_x': self.current_clip.transform.scale_x,
+            'target_scale_y': self.current_clip.transform.scale_y
         }
         
-        worker = VideoProcessingThread(self.current_clip.file_path, out, self.s_slider.value(), (0.5, rel_y), self.stroke_color, self.f_combo.currentText(), metadata=meta)
+        # Add project resolution to metadata
+        if hasattr(main_window, 'p_width') and hasattr(main_window, 'p_height'):
+            meta['p_width'] = main_window.p_width
+            meta['p_height'] = main_window.p_height
+        
+        # worker rel_pos[1] is now the PIXEL offset
+        worker = VideoProcessingThread(self.current_clip.file_path, out, self.s_slider.value(), (0.0, normalized_y_for_worker), self.stroke_color, self.f_combo.currentText(), metadata=meta)
         worker.progress.connect(self.status.setText); worker.progress_percent.connect(self.pbar.setValue)
         worker.finished.connect(lambda p: self._on_done(p, worker)); worker.error.connect(lambda e: self._on_error(e, worker))
         self._active_workers.append(worker); worker.start()

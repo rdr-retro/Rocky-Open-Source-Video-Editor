@@ -48,7 +48,7 @@ class PreferencesDialog(QDialog):
         """)
         
         # Add sidebar items
-        categories = ["Vídeo", "Audio", "Proxies", "Visor", "Tema"]
+        categories = ["Vídeo", "Audio", "Proxies", "Visor"]
         for cat in categories:
             item = QListWidgetItem(cat)
             self.sidebar.addItem(item)
@@ -61,12 +61,11 @@ class PreferencesDialog(QDialog):
             }
         """)
         
-        # Create content pages
+        # Create content pages (without theme page)
         self.content_stack.addWidget(self._create_video_page())
         self.content_stack.addWidget(self._create_audio_page())
         self.content_stack.addWidget(self._create_proxy_page())
         self.content_stack.addWidget(self._create_preview_page())
-        self.content_stack.addWidget(self._create_theme_page())
         
         # Connect sidebar selection
         self.sidebar.currentRowChanged.connect(self.content_stack.setCurrentIndex)
@@ -74,7 +73,60 @@ class PreferencesDialog(QDialog):
         
         # Add to main layout
         main_layout.addWidget(self.sidebar)
-        main_layout.addWidget(self.content_stack)
+        
+        # Right side container (Stack + Action Bar)
+        right_container = QWidget()
+        right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        
+        right_layout.addWidget(self.content_stack)
+        
+        # Action Bar
+        action_bar = QFrame()
+        action_bar.setStyleSheet("background-color: #2d2d2d; border-top: 1px solid #1f1f1f;")
+        action_layout = QHBoxLayout(action_bar)
+        action_layout.setContentsMargins(20, 15, 20, 15)
+        
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #b8b8b8;
+                border: 1px solid #4f4f4f;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #3a3a3a;
+                color: white;
+            }
+        """)
+        btn_cancel.clicked.connect(self.reject)
+        
+        btn_save = QPushButton("Guardar Cambios")
+        btn_save.setStyleSheet("""
+            QPushButton {
+                background-color: #00a3ff;
+                color: white;
+                border: none;
+                padding: 8px 20px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #33b5ff;
+            }
+        """)
+        btn_save.clicked.connect(self.accept)
+        
+        action_layout.addStretch()
+        action_layout.addWidget(btn_cancel)
+        action_layout.addWidget(btn_save)
+        
+        right_layout.addWidget(action_bar)
+        
+        main_layout.addWidget(right_container)
         
         # Apply enhanced dark theme
         self.setStyleSheet("""
@@ -238,10 +290,6 @@ class PreferencesDialog(QDialog):
             specs = FFmpegUtils.get_media_specs(file_path)
             w, h, rot = specs['width'], specs['height'], specs['rotation']
             
-            # Manual Swap for Stage 1
-            if abs(rot) == 90 or abs(rot) == 270:
-                w, h = h, w
-            
             # STAGE 2: Engine Fallback (Returns VISUAL params directly)
             if w <= 0 or h <= 0:
                 try:
@@ -255,9 +303,15 @@ class PreferencesDialog(QDialog):
             # Application of effective visual resolution (Safety if Stage 2 succeeded but was somehow 0)
             if w <= 0 or h <= 0:
                 w, h = 1920, 1080 
+
+            # THE FIX: Apply rotation to dimensions for visual check
+            vis_w = w
+            vis_h = h
+            if abs(rot) == 90 or abs(rot) == 270:
+                vis_w, vis_h = h, w
             
-            self.w_spin.setValue(w)
-            self.h_spin.setValue(h)
+            self.w_spin.setValue(vis_w)
+            self.h_spin.setValue(vis_h)
             
             # FPS matching
             fps_val = specs.get('fps', 30.0)
@@ -265,7 +319,24 @@ class PreferencesDialog(QDialog):
             idx = self.fps_combo.findText(fps_str, Qt.MatchFlag.MatchStartsWith)
             if idx >= 0: self.fps_combo.setCurrentIndex(idx)
             
-            QMessageBox.information(self, "Formato Detectado", f"Se ha detectado una resolución de {w}x{h} ({'Vertical' if h > w else 'Panorámico'}).\n\nPresiona OK para aplicar a los controles.")
+            # Calculate aspect ratio
+            from math import gcd
+            divisor = gcd(vis_w, vis_h)
+            aspect_w = vis_w // divisor
+            aspect_h = vis_h // divisor
+            
+            is_vertical = vis_h > vis_w
+            format_type = "Vertical" if is_vertical else "Panorámico"
+            
+            QMessageBox.information(
+                self, 
+                "Formato Detectado", 
+                f"Se ha detectado una resolución de {vis_w}x{vis_h}.\n\n"
+                f"• Aspecto: {aspect_w}:{aspect_h}\n"
+                f"• Formato: {format_type}\n"
+                f"• FPS: {fps_val}\n\n"
+                f"Presiona OK para aplicar a los controles."
+            )
 
     def _create_audio_page(self):
         page, layout = self._create_content_page()
@@ -344,148 +415,26 @@ class PreferencesDialog(QDialog):
         
         return page
 
-    def _create_theme_page(self):
-        page, layout = self._create_content_page()
-        
-        section, sec_layout = self._create_section("Tema de Color")
-        
-        # Theme selection
-        self.theme_group = []
-        themes_layout = QVBoxLayout()
-        themes_layout.setSpacing(8)
-        
-        themes = [
-            ("Midnight Slate", "Cinematográfico profesional"),
-            ("Obsidian Gold", "Cálido y premium"),
-            ("Arctic Night", "Limpio y moderno")
-        ]
-        
-        for name, desc in themes:
-            btn = ThemeButton(name, desc)
-            btn.clicked.connect(lambda n=name: self.apply_theme(n))
-            themes_layout.addWidget(btn)
-            self.theme_group.append(btn)
-        
-        self.theme_group[0].set_selected(True)
-        
-        sec_layout.addLayout(themes_layout)
-        layout.addWidget(section)
-        layout.addStretch()
-        
-        return page
 
-    def apply_theme(self, theme_name):
-        """Apply selected theme."""
-        for btn in self.theme_group:
-            btn.set_selected(btn.name == theme_name)
-        
-        # Update design_tokens.py
-        import os
-        import re
-        tokens_path = os.path.join(os.path.dirname(__file__), 'design_tokens.py')
-        
+
+
+    def get_settings(self):
+        """Returns a dictionary with all current settings."""
+        fps_str = self.fps_combo.currentText()
         try:
-            with open(tokens_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            theme_map = {
-                "Midnight Slate": "MidnightSlate",
-                "Obsidian Gold": "ObsidianGold",
-                "Arctic Night": "ArcticNight"
-            }
-            
-            theme_class = theme_map.get(theme_name, "MidnightSlate")
-            new_content = re.sub(r'ACTIVE_THEME = \w+', f'ACTIVE_THEME = {theme_class}', content)
-            
-            with open(tokens_path, 'w', encoding='utf-8') as f:
-                f.write(new_content)
-            
-            # Ask to restart
-            from PySide6.QtWidgets import QMessageBox
-            reply = QMessageBox.question(
-                self,
-                "Reiniciar Aplicación",
-                f"El tema '{theme_name}' se ha guardado.\n\n¿Deseas reiniciar ahora?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                self.accept()
-                import sys, subprocess
-                from PySide6.QtCore import QCoreApplication
-                python = sys.executable
-                project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-                QCoreApplication.quit()
-                run_script = os.path.join(project_root, 'run.sh')
-                if os.path.exists(run_script):
-                    subprocess.Popen(['bash', run_script], cwd=project_root)
-                else:
-                    subprocess.Popen([python, '-m', 'src.ui.rocky_ui'], cwd=project_root)
-        except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Error", f"Error al aplicar tema: {e}")
+            fps = float(fps_str)
+        except:
+            fps = 30.0
 
-
-class ThemeButton(QPushButton):
-    """Enhanced theme selection button with modern styling."""
-    
-    def __init__(self, name, description, parent=None):
-        super().__init__(parent)
-        self.name = name
-        self.description = description
-        self.is_selected = False
-        
-        self.setCheckable(True)
-        self.setMinimumHeight(60)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        # Layout
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 10, 16, 10)
-        layout.setSpacing(4)
-        
-        name_label = QLabel(name)
-        name_label.setStyleSheet("font-weight: bold; color: #ffffff; font-size: 13px; background: transparent;")
-        
-        desc_label = QLabel(description)
-        desc_label.setStyleSheet("color: #a8a8a8; font-size: 11px; background: transparent;")
-        desc_label.setWordWrap(True)
-        
-        layout.addWidget(name_label)
-        layout.addWidget(desc_label)
-        
-        self._update_style()
-        
-    def set_selected(self, selected):
-        self.is_selected = selected
-        self.setChecked(selected)
-        self._update_style()
-        
-    def _update_style(self):
-        if self.is_selected:
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 #5a9fd4, stop:1 #4a8fc4);
-                    border: 2px solid #4a8fc4;
-                    border-radius: 8px;
-                }
-            """)
-        else:
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: #4f4f4f;
-                    border: 1px solid #3a3a3a;
-                    border-radius: 8px;
-                }
-                QPushButton:hover {
-                    background-color: #5a5a5a;
-                    border-color: #5a9fd4;
-                }
-            """)
-
+        return {
+            "width": self.w_spin.value(),
+            "height": self.h_spin.value(),
+            "fps": fps,
+            # Audio
+            # "sample_rate": ... (Not yet bound to member vars in _create_audio_page, but video is critical right now)
+            # Viewer
+            # "hw_accel": ...
+        }
 
 # Alias for compatibility
 SettingsDialog = PreferencesDialog

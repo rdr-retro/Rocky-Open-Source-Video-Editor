@@ -1,4 +1,5 @@
 #include "media_source.h"
+#include <libavutil/display.h>
 
 static std::mutex g_ff_mtx;
 
@@ -9,9 +10,6 @@ static std::mutex g_ff_mtx;
 ColorSource::ColorSource(uint8_t r, uint8_t g, uint8_t b, uint8_t a) 
     : r(r), g(g), b(b), a(a) {}
 
-/**
- * @brief Generates a solid color frame. Consistent O(N) complexity.
- */
 Frame ColorSource::getFrame(double /*localTime*/, int w, int h) {
     Frame frame(w, h, 4);
     const size_t dataSize = frame.data.size();
@@ -36,17 +34,16 @@ VideoSource::VideoSource(std::string p) : path(p) {
         std::lock_guard<std::mutex> lock(g_ff_mtx);
         if (avformat_open_input(&fmt_ctx, path.c_str(), nullptr, nullptr) < 0) {
             std::cerr << "[VideoSource] Failed to open: " << path << std::endl;
-            is_valid = false;  // P6: Mark as invalid
+            is_valid = false;
             return;
         }
         if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
             std::cerr << "[VideoSource] Failed to find stream info: " << path << std::endl;
-            is_valid = false;  // P6: Mark as invalid
+            is_valid = false;
             return;
         }
     }
 
-    // Find the primary streams
     for (unsigned int i = 0; i < fmt_ctx->nb_streams; i++) {
         if (fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && video_stream_idx == -1) {
             video_stream_idx = i;
@@ -55,45 +52,26 @@ VideoSource::VideoSource(std::string p) : path(p) {
         }
     }
 
-    // Initialize Video Decoder
     if (video_stream_idx != -1) {
-        AVCodecID codec_id = fmt_ctx->streams[video_stream_idx]->codecpar->codec_id;
-        const AVCodec* v_codec = nullptr;
-
-        // DEBUG: Force Software Decoder for stability during initial dev
-        // "h264_videotoolbox" can be unstable with multi-threaded access if not managed strictly
-        v_codec = avcodec_find_decoder(codec_id);
-
+        const AVCodec* v_codec = avcodec_find_decoder(fmt_ctx->streams[video_stream_idx]->codecpar->codec_id);
         if (v_codec) {
-            std::cout << "[VideoSource] Opened Video Codec: " << v_codec->name << " for " << path << std::endl;
             codec_ctx = avcodec_alloc_context3(v_codec);
             avcodec_parameters_to_context(codec_ctx, fmt_ctx->streams[video_stream_idx]->codecpar);
-            
-            // Limit threads to avoid overloading
-            codec_ctx->thread_count = 0; // 0 = Auto-detect based on CPU cores
-
+            codec_ctx->thread_count = 0;
             {
                 std::lock_guard<std::mutex> lock(g_ff_mtx);
-                if (avcodec_open2(codec_ctx, v_codec, nullptr) < 0) {
-                    std::cerr << "[VideoSource] Failed to open codec." << std::endl;
-                }
+                avcodec_open2(codec_ctx, v_codec, nullptr);
             }
-        } else {
-             std::cerr << "[VideoSource] No codec found for ID " << codec_id << std::endl;
         }
     }
 
-    // Initialize Audio Decoder
     if (audio_stream_idx != -1) {
         const AVCodec* a_codec = avcodec_find_decoder(fmt_ctx->streams[audio_stream_idx]->codecpar->codec_id);
         if (a_codec) {
             audio_codec_ctx = avcodec_alloc_context3(a_codec);
             avcodec_parameters_to_context(audio_codec_ctx, fmt_ctx->streams[audio_stream_idx]->codecpar);
-            
-            // Enable Multi-threading for audio if possible
-            audio_codec_ctx->thread_count = 0; 
+            audio_codec_ctx->thread_count = 0;
             audio_codec_ctx->thread_type = FF_THREAD_FRAME;
-            
             {
                 std::lock_guard<std::mutex> lock(g_ff_mtx);
                 avcodec_open2(audio_codec_ctx, a_codec, nullptr);
@@ -104,14 +82,7 @@ VideoSource::VideoSource(std::string p) : path(p) {
 
     av_frame = av_frame_alloc();
     pkt = av_packet_alloc();
-    
-    // P6: Mark as valid only if all initialization succeeded
     is_valid = (fmt_ctx != nullptr && video_stream_idx != -1);
-    if (is_valid) {
-        std::cout << "[VideoSource] Successfully initialized: " << path << std::endl;
-    } else {
-        std::cerr << "[VideoSource] Initialization incomplete for: " << path << std::endl;
-    }
 }
 
 VideoSource::~VideoSource() {
@@ -126,304 +97,8 @@ VideoSource::~VideoSource() {
     if (fmt_ctx)    avformat_close_input(&fmt_ctx);
 }
 
-/**
- * @brief Retrieves a specific video frame using FFmpeg seeking and decoding.
- * Implements a simple cache to avoid redundant decoding of the same frame.
- */
-Frame VideoSource::getFrame(double localTime, int w, int h) {
-    std::lock_guard<std::mutex> lock(mtx);
-    
-    // P6: Early exit if source is invalid
-    if (!is_valid || !codec_ctx) {
-        std::cerr << "[VideoSource] Cannot get frame - source invalid" << std::endl;
-        return Frame(w, h);
-    }
-    
-    // Performance: Early exit if requesting the exact same frame again
-    // P5: Use shared_ptr for thread-safe caching
-    if (last_frame && localTime == last_time && w == last_w && h == last_h) {
-        return *last_frame;  // Return copy of cached frame
-    }
-
-    if (!fmt_ctx || video_stream_idx == -1) return Frame(w, h);
-
-    const AVRational timeBase = fmt_ctx->streams[video_stream_idx]->time_base;
-    const int64_t targetPts = static_cast<int64_t>(localTime / av_q2d(timeBase) + 0.001);
-    
-    // Seeking logic: Only seek if we are going backwards or jumping too far ahead
-    if (localTime < last_time || localTime > last_time + 1.0) {
-        if (avcodec_is_open(codec_ctx)) {
-            avcodec_flush_buffers(codec_ctx);
-        }
-        av_seek_frame(fmt_ctx, video_stream_idx, targetPts, AVSEEK_FLAG_BACKWARD);
-    }
-
-    // Decoding Loop
-    while (av_read_frame(fmt_ctx, pkt) >= 0) {
-        if (pkt->stream_index == video_stream_idx) {
-            if (avcodec_send_packet(codec_ctx, pkt) >= 0) {
-                while (avcodec_receive_frame(codec_ctx, av_frame) >= 0) {
-                    if (av_frame->pts >= targetPts) {
-                        Frame outputFrame(w, h, 4);
-                        // INITIALIZE TO BLACK (Eliminates garbage pixels/stripes)
-                        std::fill(outputFrame.data.begin(), outputFrame.data.end(), 0);
-                        
-                        // Smart Scaling: Maintain VISUAL aspect ratio
-                        int rot = getRotation();
-                        float visualW = (float)av_frame->width;
-                        float visualH = (float)av_frame->height;
-                        if (std::abs(rot) == 90 || std::abs(rot) == 270) {
-                            std::swap(visualW, visualH);
-                        }
-                        
-                        float srcAspect = visualW / visualH;
-                        float dstAspect = (float)w / h;
-                        
-                        int outW, outH, outX, outY;
-                        if (srcAspect > dstAspect) {
-                            outW = w;
-                            outH = (int)(w / srcAspect);
-                            outX = 0;
-                            outY = (h - outH) / 2;
-                        } else {
-                            outH = h;
-                            outW = (int)(h * srcAspect);
-                            outY = 0;
-                            outX = (w - outW) / 2;
-                        }
-
-                        // P1: Safe SwsContext creation with error handling
-                        SwsContext* new_ctx = sws_getCachedContext(sws_ctx, 
-                            av_frame->width, av_frame->height, static_cast<AVPixelFormat>(av_frame->format),
-                            outW, outH, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
-                        
-                        if (!new_ctx) {
-                            std::cerr << "[VideoSource] Failed to create SwsContext" << std::endl;
-                            if (sws_ctx) {
-                                sws_freeContext(sws_ctx);
-                                sws_ctx = nullptr;
-                            }
-                            av_frame_unref(av_frame);
-                            av_packet_unref(pkt);
-                            return Frame(w, h);  // Return empty frame on error
-                        }
-                        sws_ctx = new_ctx;
-                        
-                        // Draw into the calculated sub-rectangle of the output frame
-                        uint8_t* destPointers[4] = { outputFrame.data.data() + (outY * w * 4) + (outX * 4), nullptr, nullptr, nullptr };
-                        int destStrides[4] = { w * 4, 0, 0, 0 };
-                        
-                        sws_scale(sws_ctx, av_frame->data, av_frame->linesize, 0, 
-                                  av_frame->height, destPointers, destStrides);
-                        
-                        av_frame_unref(av_frame);
-                        av_packet_unref(pkt);
-                        
-                        // P5: Update cache with shared_ptr
-                        last_frame = std::make_shared<Frame>(outputFrame);
-                        last_time = localTime;
-                        last_w = w; last_h = h;
-                        
-                        return outputFrame;
-                    }
-                    av_frame_unref(av_frame);
-                }
-            }
-
-        }
-        av_packet_unref(pkt);
-    }
-    
-    // Return last valid frame if end of stream or error
-    if (last_frame) {
-        return *last_frame;
-    }
-    return Frame(w, h);
-}
-
-/**
- * @brief Decodes audio samples for a specific time range.
- * Resamples to 44100Hz Stereo Float.
- */
-std::vector<float> VideoSource::getAudioSamples(double startTime, double duration) {
-    std::lock_guard<std::mutex> lock(mtx);
-    if (!audio_codec_ctx || audio_stream_idx == -1) return {};
-
-    double srcDur = getDuration();
-    if (srcDur > 0.001) { // Evitar fmod por cero o valores insignificantes
-        startTime = std::fmod(startTime, srcDur);
-        if (startTime < 0) startTime += srcDur;
-    }
-
-    const int target_sample_rate = 44100;
-    const int target_channels = 2;
-    const size_t target_sample_count = static_cast<size_t>(duration * target_sample_rate) * target_channels;
-    std::vector<float> samples;
-    samples.reserve(target_sample_count);
-
-    const double timeBase = av_q2d(fmt_ctx->streams[audio_stream_idx]->time_base);
-    const int64_t startPts = static_cast<int64_t>(startTime / timeBase);
-
-    // Optimized sequential reading vs seeking
-    if (startTime < last_audio_time - 0.1 || startTime > last_audio_time + 0.5) {
-        if (avcodec_is_open(audio_codec_ctx)) {
-            avcodec_flush_buffers(audio_codec_ctx);
-        }
-        // Seek slightly before to satisfy keyframe/codec dependencies
-        int64_t seekPts = std::max((int64_t)0, startPts - static_cast<int64_t>(0.2 / timeBase));
-        av_seek_frame(fmt_ctx, audio_stream_idx, seekPts, AVSEEK_FLAG_BACKWARD);
-        last_audio_time = -1.0; 
-    }
-
-    // P3: Thread-safe SwrContext initialization using std::call_once
-    std::call_once(swr_init_flag, [this, target_channels, target_sample_rate]() {
-        cached_swr = swr_alloc();
-        if (!cached_swr) {
-            std::cerr << "[VideoSource] Failed to allocate SwrContext" << std::endl;
-            return;
-        }
-        
-        av_opt_set_chlayout(cached_swr, "in_chlayout", &audio_codec_ctx->ch_layout, 0);
-        av_opt_set_int(cached_swr, "in_sample_rate", audio_codec_ctx->sample_rate, 0);
-        av_opt_set_sample_fmt(cached_swr, "in_sample_fmt", audio_codec_ctx->sample_fmt, 0);
-        
-        AVChannelLayout outLayout;
-        av_channel_layout_default(&outLayout, target_channels);
-        av_opt_set_chlayout(cached_swr, "out_chlayout", &outLayout, 0);
-        av_opt_set_int(cached_swr, "out_sample_rate", target_sample_rate, 0);
-        av_opt_set_sample_fmt(cached_swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
-        
-        if (swr_init(cached_swr) < 0) {
-            std::cerr << "[VideoSource] Failed to initialize SwrContext" << std::endl;
-            swr_free(&cached_swr);
-            cached_swr = nullptr;
-        } else {
-            std::cout << "[VideoSource] SwrContext initialized successfully" << std::endl;
-        }
-    });
-    
-    // Verify SwrContext is available
-    if (!cached_swr) {
-        std::cerr << "[VideoSource] SwrContext not available, cannot decode audio" << std::endl;
-        return {};  // Return empty vector
-    }
-
-    // Decoding Loop
-    int loopSafety = 0;
-    while (samples.size() < target_sample_count && loopSafety < 10) {
-        if (av_read_frame(fmt_ctx, pkt) < 0) {
-            // SOPORTE PARA BUCLE: Si llegamos al final pero necesitamos más muestras, volvemos a empezar
-            if (avcodec_is_open(audio_codec_ctx)) {
-                avcodec_flush_buffers(audio_codec_ctx);
-            }
-            av_seek_frame(fmt_ctx, audio_stream_idx, 0, AVSEEK_FLAG_BACKWARD);
-            last_audio_time = -1.0;
-            loopSafety++;
-            continue;
-        }
-
-        if (pkt->stream_index == audio_stream_idx) {
-            if (avcodec_send_packet(audio_codec_ctx, pkt) >= 0) {
-                while (avcodec_receive_frame(audio_codec_ctx, audio_frame) >= 0) {
-                    double frameTime = audio_frame->pts * timeBase;
-                    double frameDuration = (double)audio_frame->nb_samples / audio_codec_ctx->sample_rate;
-                    double frameEnd = frameTime + frameDuration;
-
-                    if (frameEnd > startTime) {
-                        // Max possible output samples based on input + delay
-                        int outCapacity = av_rescale_rnd(swr_get_delay(cached_swr, audio_codec_ctx->sample_rate) + audio_frame->nb_samples, target_sample_rate, audio_codec_ctx->sample_rate, AV_ROUND_UP);
-                        std::vector<float> resampledBuffer(outCapacity * target_channels);
-                        uint8_t* outPtr[1] = { reinterpret_cast<uint8_t*>(resampledBuffer.data()) };
-                        
-                        int outSamples = swr_convert(cached_swr, outPtr, outCapacity, (const uint8_t**)audio_frame->data, audio_frame->nb_samples);
-                        if (outSamples > 0) {
-                            size_t frameSampleCount = outSamples * target_channels;
-                            size_t copyOffset = 0;
-                            
-                            // Handle if this frame starts BEFORE our desired start time
-                            if (frameTime < startTime) {
-                                double diff = startTime - frameTime;
-                                copyOffset = static_cast<size_t>(diff * target_sample_rate) * target_channels;
-                                copyOffset = (copyOffset / target_channels) * target_channels; // Align
-                            }
-                            
-                            if (copyOffset < frameSampleCount) {
-                                size_t availToCopy = frameSampleCount - copyOffset;
-                                size_t needToCopy = target_sample_count - samples.size();
-                                size_t actualCopy = std::min(availToCopy, needToCopy);
-                                
-                                samples.insert(samples.end(), resampledBuffer.begin() + copyOffset, resampledBuffer.begin() + copyOffset + actualCopy);
-                            }
-                        }
-                    }
-                    last_audio_time = frameEnd;
-                    av_frame_unref(audio_frame);
-                    if (samples.size() >= target_sample_count) break;
-                }
-            }
-        }
-        av_packet_unref(pkt);
-        if (samples.size() >= target_sample_count) break;
-    }
-
-    // Gap Fill: If we didn't get enough samples (EOF or skip), fill with silence
-    if (samples.size() < target_sample_count) {
-        samples.resize(target_sample_count, 0.0f);
-    }
-
-    return samples;
-}
-
-double VideoSource::getDuration() {
-    if (!fmt_ctx) return 0.0;
-    return (double)fmt_ctx->duration / AV_TIME_BASE;
-}
-
-int VideoSource::getWidth() const {
-    int w = -1;
-    if (codec_ctx && codec_ctx->width > 0) w = codec_ctx->width;
-    else if (video_stream_idx != -1 && fmt_ctx->streams[video_stream_idx]->codecpar->width > 0)
-        w = fmt_ctx->streams[video_stream_idx]->codecpar->width;
-    
-    if (w <= 0) return -1;
-    
-    int rot = getRotation();
-    if (std::abs(rot) == 90 || std::abs(rot) == 270) {
-        // Return VISUAL height as visual width
-        int h = -1;
-        if (codec_ctx && codec_ctx->height > 0) h = codec_ctx->height;
-        else if (video_stream_idx != -1 && fmt_ctx->streams[video_stream_idx]->codecpar->height > 0)
-            h = fmt_ctx->streams[video_stream_idx]->codecpar->height;
-        return h;
-    }
-    return w;
-}
-
-int VideoSource::getHeight() const {
-    int h = -1;
-    if (codec_ctx && codec_ctx->height > 0) h = codec_ctx->height;
-    else if (video_stream_idx != -1 && fmt_ctx->streams[video_stream_idx]->codecpar->height > 0)
-        h = fmt_ctx->streams[video_stream_idx]->codecpar->height;
-        
-    if (h <= 0) return -1;
-
-    int rot = getRotation();
-    if (std::abs(rot) == 90 || std::abs(rot) == 270) {
-        // Return VISUAL width as visual height
-        int w = -1;
-        if (codec_ctx && codec_ctx->width > 0) w = codec_ctx->width;
-        else if (video_stream_idx != -1 && fmt_ctx->streams[video_stream_idx]->codecpar->width > 0)
-            w = fmt_ctx->streams[video_stream_idx]->codecpar->width;
-        return w;
-    }
-    return h;
-}
-
 int VideoSource::getRotation() const {
     if (video_stream_idx == -1 || !fmt_ctx) return 0;
-    
-    // 1. Check Stream Side Data (Primary method for modern containers like MOV/MP4)
-    // FFmpeg 7.x: Stream side data is now at par->coded_side_data
     AVCodecParameters* par = fmt_ctx->streams[video_stream_idx]->codecpar;
     const AVPacketSideData *sd = av_packet_side_data_get(par->coded_side_data, par->nb_coded_side_data, AV_PKT_DATA_DISPLAYMATRIX);
     if (sd) {
@@ -432,157 +107,249 @@ int VideoSource::getRotation() const {
         if (std::abs(rot) < 0.1) return 0;
         return (int)std::round(rot);
     }
-    
-    // 2. Check stream tags (Legacy fallback)
     AVDictionaryEntry *tag = av_dict_get(fmt_ctx->streams[video_stream_idx]->metadata, "rotate", NULL, 0);
     if (tag) return std::atoi(tag->value);
-    
-    // 3. Fallback: check global tags
-    tag = av_dict_get(fmt_ctx->metadata, "rotate", NULL, 0);
-    if (tag) return std::atoi(tag->value);
-    
     return 0;
+}
+
+int VideoSource::getNativeWidth() const {
+    if (codec_ctx && codec_ctx->width > 0) return codec_ctx->width;
+    if (video_stream_idx != -1 && fmt_ctx->streams[video_stream_idx]->codecpar->width > 0)
+        return fmt_ctx->streams[video_stream_idx]->codecpar->width;
+    return -1;
+}
+
+int VideoSource::getNativeHeight() const {
+    if (codec_ctx && codec_ctx->height > 0) return codec_ctx->height;
+    if (video_stream_idx != -1 && fmt_ctx->streams[video_stream_idx]->codecpar->height > 0)
+        return fmt_ctx->streams[video_stream_idx]->codecpar->height;
+    return -1;
+}
+
+int VideoSource::getWidth() const {
+    int w = getNativeWidth();
+    int rot = getRotation();
+    if (std::abs(rot) == 90 || std::abs(rot) == 270) return getNativeHeight();
+    return w;
+}
+
+int VideoSource::getHeight() const {
+    int h = getNativeHeight();
+    int rot = getRotation();
+    if (std::abs(rot) == 90 || std::abs(rot) == 270) return getNativeWidth();
+    return h;
+}
+
+Frame VideoSource::getFrame(double localTime, int w, int h) {
+    if (w == -1) w = getWidth();
+    if (h == -1) h = getHeight();
+
+    if (last_frame && std::abs(localTime - last_time) < 0.001 && w == last_w && h == last_h) {
+        return *last_frame;
+    }
+
+    std::lock_guard<std::mutex> lock(mtx);
+    if (!is_valid || !codec_ctx) return Frame(w, h);
+
+    const AVRational timeBase = fmt_ctx->streams[video_stream_idx]->time_base;
+    const int64_t targetPts = static_cast<int64_t>(localTime / av_q2d(timeBase) + 0.001);
+    
+    if (localTime < last_time || localTime > last_time + 1.0) {
+        if (avcodec_is_open(codec_ctx)) avcodec_flush_buffers(codec_ctx);
+        av_seek_frame(fmt_ctx, video_stream_idx, targetPts, AVSEEK_FLAG_BACKWARD);
+    }
+
+    while (av_read_frame(fmt_ctx, pkt) >= 0) {
+        if (pkt->stream_index == video_stream_idx) {
+            if (avcodec_send_packet(codec_ctx, pkt) >= 0) {
+                while (avcodec_receive_frame(codec_ctx, av_frame) >= 0) {
+                    if (av_frame->pts >= targetPts) {
+                        Frame outputFrame(w, h, 4);
+                        std::fill(outputFrame.data.begin(), outputFrame.data.end(), 0);
+                        
+                        int rot = getRotation();
+                        int nativeW = av_frame->width;
+                        int nativeH = av_frame->height;
+                        
+                        float vW = (float)nativeW;
+                        float vH = (float)nativeH;
+                        if (std::abs(rot) == 90 || std::abs(rot) == 270) std::swap(vW, vH);
+                        
+                        float srcAspect = vW / vH;
+                        float dstAspect = (float)w / h;
+
+                        // DEBUG LOGGING
+                        static int log_counter = 0;
+                        if (log_counter++ < 5) {
+                            std::cout << "[VS] getFrame w=" << w << " h=" << h 
+                                      << " native=" << nativeW << "x" << nativeH 
+                                      << " rot=" << rot 
+                                      << " vW=" << vW << " vH=" << vH
+                                      << " srcAsp=" << srcAspect << " dstAsp=" << dstAspect << std::endl;
+                        }
+                        
+                        int outW, outH, outX, outY;
+                        if (srcAspect > dstAspect) {
+                            outW = w; outH = (int)(w / srcAspect);
+                            outX = 0; outY = (h - outH) / 2;
+                        } else {
+                            outH = h; outW = (int)(h * srcAspect);
+                            outY = 0; outX = (w - outW) / 2;
+                        }
+
+                        int scaleTargetW = (std::abs(rot) == 90 || std::abs(rot) == 270) ? outH : outW;
+                        int scaleTargetH = (std::abs(rot) == 90 || std::abs(rot) == 270) ? outW : outH;
+
+                        SwsContext* new_ctx = sws_getCachedContext(sws_ctx, 
+                            nativeW, nativeH, static_cast<AVPixelFormat>(av_frame->format),
+                            scaleTargetW, scaleTargetH, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+                        
+                        if (!new_ctx) {
+                            av_frame_unref(av_frame); av_packet_unref(pkt);
+                            return Frame(w, h);
+                        }
+                        sws_ctx = new_ctx;
+                        
+                        std::vector<uint8_t> scaledData(scaleTargetW * scaleTargetH * 4);
+                        uint8_t* scaledPointers[4] = { scaledData.data(), nullptr, nullptr, nullptr };
+                        int scaledStrides[4] = { scaleTargetW * 4, 0, 0, 0 };
+                        sws_scale(sws_ctx, av_frame->data, av_frame->linesize, 0, av_frame->height, scaledPointers, scaledStrides);
+                        
+                        const uint32_t* srcArr = reinterpret_cast<const uint32_t*>(scaledData.data());
+                        uint32_t* dstArr = reinterpret_cast<uint32_t*>(outputFrame.data.data());
+                        
+                        if (rot == 90 || rot == -270) {
+                            for (int y = 0; y < scaleTargetH; ++y) {
+                                for (int x = 0; x < scaleTargetW; ++x) {
+                                    int dx = (outW - 1 - y) + outX;
+                                    int dy = x + outY;
+                                    if (dx >= 0 && dx < w && dy >= 0 && dy < h)
+                                        dstArr[dy * w + dx] = srcArr[y * scaleTargetW + x];
+                                }
+                            }
+                        } else if (rot == 270 || rot == -90) {
+                            for (int y = 0; y < scaleTargetH; ++y) {
+                                for (int x = 0; x < scaleTargetW; ++x) {
+                                    int dx = y + outX;
+                                    int dy = (outH - 1 - x) + outY;
+                                    if (dx >= 0 && dx < w && dy >= 0 && dy < h)
+                                        dstArr[dy * w + dx] = srcArr[y * scaleTargetW + x];
+                                }
+                            }
+                        } else if (rot == 180 || rot == -180) {
+                            for (int y = 0; y < scaleTargetH; ++y) {
+                                for (int x = 0; x < scaleTargetW; ++x) {
+                                    int dx = (outW - 1 - x) + outX;
+                                    int dy = (outH - 1 - y) + outY;
+                                    if (dx >= 0 && dx < w && dy >= 0 && dy < h)
+                                        dstArr[dy * w + dx] = srcArr[y * scaleTargetW + x];
+                                }
+                            }
+                        } else {
+                            for (int y = 0; y < scaleTargetH; ++y) {
+                                if (y + outY >= 0 && y + outY < h && outX >= 0 && outX + scaleTargetW <= w) {
+                                    std::memcpy(outputFrame.data.data() + ((y + outY) * w + outX) * 4, 
+                                                scaledData.data() + (y * scaleTargetW) * 4, scaleTargetW * 4);
+                                }
+                            }
+                        }
+
+                        av_frame_unref(av_frame); av_packet_unref(pkt);
+                        last_frame = std::make_shared<Frame>(outputFrame);
+                        last_time = localTime; last_w = w; last_h = h;
+                        return outputFrame;
+                    }
+                    av_frame_unref(av_frame);
+                }
+            }
+        }
+        av_packet_unref(pkt);
+    }
+    return last_frame ? *last_frame : Frame(w, h);
+}
+
+std::vector<float> VideoSource::getAudioSamples(double startTime, double duration) {
+    std::lock_guard<std::mutex> lock(mtx);
+    if (!audio_codec_ctx || audio_stream_idx == -1) return {};
+
+    const int target_channels = 2;
+    const int target_sample_rate = 44100;
+    const size_t target_sample_count = static_cast<size_t>(duration * target_sample_rate);
+    std::vector<float> samples;
+    samples.reserve(target_sample_count * target_channels);
+
+    std::call_once(swr_init_flag, [this]() {
+        // FFmpeg 7.x: Use new AVChannelLayout API
+        AVChannelLayout out_ch_layout = AV_CHANNEL_LAYOUT_STEREO;
+        swr_alloc_set_opts2(&cached_swr,
+            &out_ch_layout, AV_SAMPLE_FMT_FLT, target_sample_rate,
+            &audio_codec_ctx->ch_layout, audio_codec_ctx->sample_fmt, audio_codec_ctx->sample_rate,
+            0, NULL);
+        swr_init(cached_swr);
+    });
+
+    const AVRational timeBase = fmt_ctx->streams[audio_stream_idx]->time_base;
+    const int64_t targetPts = static_cast<int64_t>(startTime / av_q2d(timeBase));
+
+    if (std::abs(startTime - last_audio_time) > 0.5) {
+        avcodec_flush_buffers(audio_codec_ctx);
+        av_seek_frame(fmt_ctx, audio_stream_idx, targetPts, AVSEEK_FLAG_BACKWARD);
+    }
+
+    while (av_read_frame(fmt_ctx, pkt) >= 0) {
+        if (pkt->stream_index == audio_stream_idx) {
+            if (avcodec_send_packet(audio_codec_ctx, pkt) >= 0) {
+                while (avcodec_receive_frame(audio_codec_ctx, audio_frame) >= 0) {
+                    double frameStart = audio_frame->pts * av_q2d(timeBase);
+                    double frameEnd = frameStart + (double)audio_frame->nb_samples / audio_codec_ctx->sample_rate;
+
+                    if (frameEnd > startTime) {
+                        int out_samples = swr_get_out_samples(cached_swr, audio_frame->nb_samples);
+                        std::vector<float> resampledBuffer(out_samples * target_channels);
+                        float* out_data[1] = { resampledBuffer.data() };
+                        swr_convert(cached_swr, (uint8_t**)out_data, out_samples, (const uint8_t**)audio_frame->data, audio_frame->nb_samples);
+
+                        double copyStart = std::max(startTime, frameStart);
+                        double copyEnd = std::min(startTime + duration, frameEnd);
+                        if (copyEnd > copyStart) {
+                            size_t copyOffset = static_cast<size_t>((copyStart - frameStart) * target_sample_rate) * target_channels;
+                            size_t availToCopy = static_cast<size_t>((copyEnd - copyStart) * target_sample_rate) * target_channels;
+                            if (samples.size() + availToCopy <= target_sample_count * target_channels) {
+                                samples.insert(samples.end(), resampledBuffer.begin() + copyOffset, resampledBuffer.begin() + copyOffset + availToCopy);
+                            }
+                        }
+                    }
+                    last_audio_time = frameEnd;
+                    av_frame_unref(audio_frame);
+                    if (samples.size() >= target_sample_count * target_channels) break;
+                }
+            }
+        }
+        av_packet_unref(pkt);
+        if (samples.size() >= target_sample_count * target_channels) break;
+    }
+    if (samples.size() < target_sample_count * target_channels) samples.resize(target_sample_count * target_channels, 0.0f);
+    return samples;
 }
 
 std::vector<float> VideoSource::getWaveform(int points) {
     if (points <= 0) return {};
-    
     std::vector<float> peaks(points * 2, 0.0f);
     double duration = getDuration();
-    if (duration <= 0) return {};
-
-    AVFormatContext* temp_fmt_ctx = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(g_ff_mtx);
-        if (avformat_open_input(&temp_fmt_ctx, path.c_str(), nullptr, nullptr) < 0) return {};
-        if (avformat_find_stream_info(temp_fmt_ctx, nullptr) < 0) {
-            avformat_close_input(&temp_fmt_ctx);
-            return {};
-        }
+    if (duration <= 0) return peaks;
+    for (int i = 0; i < points; ++i) {
+        double t = (double)i / points * duration;
+        auto s = getAudioSamples(t, 0.05);
+        float p = 0.0f;
+        for (float val : s) p = std::max(p, std::abs(val));
+        peaks[i*2] = p; peaks[i*2+1] = -p;
     }
-
-    // LOCAL discovery of audio stream inside temp_fmt_ctx
-    int temp_audio_idx = -1;
-    for (unsigned int i = 0; i < temp_fmt_ctx->nb_streams; i++) {
-        if (temp_fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            temp_audio_idx = i;
-            break;
-        }
-    }
-
-    if (temp_audio_idx == -1) {
-        avformat_close_input(&temp_fmt_ctx);
-        return {};
-    }
-
-    const AVCodec* a_codec = avcodec_find_decoder(temp_fmt_ctx->streams[temp_audio_idx]->codecpar->codec_id);
-    if (!a_codec) {
-        avformat_close_input(&temp_fmt_ctx);
-        return {};
-    }
-
-    AVCodecContext* a_ctx = avcodec_alloc_context3(a_codec);
-    if (!a_ctx) {
-        avformat_close_input(&temp_fmt_ctx);
-        return {};
-    }
-
-    avcodec_parameters_to_context(a_ctx, temp_fmt_ctx->streams[temp_audio_idx]->codecpar);
-    {
-        std::lock_guard<std::mutex> lock(g_ff_mtx);
-        if (avcodec_open2(a_ctx, a_codec, nullptr) < 0) {
-            avcodec_free_context(&a_ctx);
-            avformat_close_input(&temp_fmt_ctx);
-            return {};
-        }
-    }
-
-    AVFrame* a_frame = av_frame_alloc();
-    AVPacket* a_pkt = av_packet_alloc();
-    if (!a_frame || !a_pkt) {
-        if (a_frame) av_frame_free(&a_frame);
-        if (a_pkt) av_packet_free(&a_pkt);
-        avcodec_free_context(&a_ctx);
-        avformat_close_input(&temp_fmt_ctx);
-        return {};
-    }
-    
-    int64_t total_samples = (int64_t)(duration * a_ctx->sample_rate);
-    int64_t samples_per_point = total_samples / points;
-    if (samples_per_point < 1) samples_per_point = 1;
-
-    int64_t current_samples = 0;
-    int points_computed = 0;
-    float current_max_l = 0;
-    float current_max_r = 0;
-
-    while (av_read_frame(temp_fmt_ctx, a_pkt) >= 0) {
-        if (a_pkt->stream_index == temp_audio_idx) {
-            if (avcodec_send_packet(a_ctx, a_pkt) >= 0) {
-                while (avcodec_receive_frame(a_ctx, a_frame) >= 0) {
-                    int data_size = av_get_bytes_per_sample(a_ctx->sample_fmt);
-                    int chans = a_ctx->ch_layout.nb_channels;
-                    bool is_planar = av_sample_fmt_is_planar(a_ctx->sample_fmt);
-
-                    for (int s = 0; s < a_frame->nb_samples; ++s) {
-                        // Sample Left (Channel 0)
-                        float val_l = 0;
-                        uint8_t* ptr_l = nullptr;
-                        if (is_planar && 0 < AV_NUM_DATA_POINTERS && a_frame->data[0]) {
-                            ptr_l = a_frame->data[0] + s * data_size;
-                        } else if (!is_planar && a_frame->data[0]) {
-                            ptr_l = a_frame->data[0] + (s * chans + 0) * data_size;
-                        }
-                        if (ptr_l) {
-                            if (a_ctx->sample_fmt == AV_SAMPLE_FMT_FLTP || a_ctx->sample_fmt == AV_SAMPLE_FMT_FLT) 
-                                val_l = std::abs(*(float*)ptr_l);
-                            else if (a_ctx->sample_fmt == AV_SAMPLE_FMT_S16P || a_ctx->sample_fmt == AV_SAMPLE_FMT_S16) 
-                                val_l = std::abs(*(int16_t*)ptr_l) / 32768.0f;
-                        }
-                        if (val_l > current_max_l) current_max_l = val_l;
-
-                        // Sample Right (Channel 1 or fallback to 0)
-                        float val_r = 0;
-                        uint8_t* ptr_r = nullptr;
-                        int r_ch = (chans > 1) ? 1 : 0;
-                        if (is_planar && r_ch < AV_NUM_DATA_POINTERS && a_frame->data[r_ch]) {
-                            ptr_r = a_frame->data[r_ch] + s * data_size;
-                        } else if (!is_planar && a_frame->data[0]) {
-                            ptr_r = a_frame->data[0] + (s * chans + r_ch) * data_size;
-                        }
-                        if (ptr_r) {
-                            if (a_ctx->sample_fmt == AV_SAMPLE_FMT_FLTP || a_ctx->sample_fmt == AV_SAMPLE_FMT_FLT) 
-                                val_r = std::abs(*(float*)ptr_r);
-                            else if (a_ctx->sample_fmt == AV_SAMPLE_FMT_S16P || a_ctx->sample_fmt == AV_SAMPLE_FMT_S16) 
-                                val_r = std::abs(*(int16_t*)ptr_r) / 32768.0f;
-                        }
-                        if (val_r > current_max_r) current_max_r = val_r;
-
-                        current_samples++;
-                        if (current_samples >= samples_per_point) {
-                            if (points_computed < points) {
-                                peaks[points_computed * 2] = std::min(1.0f, current_max_l);
-                                peaks[points_computed * 2 + 1] = std::min(1.0f, current_max_r);
-                                points_computed++;
-                            }
-                            current_max_l = 0;
-                            current_max_r = 0;
-                            current_samples = 0;
-                        }
-                    }
-                    av_frame_unref(a_frame);
-                }
-            }
-        }
-        av_packet_unref(a_pkt);
-    }
-
-    av_frame_free(&a_frame);
-    av_packet_free(&a_pkt);
-    avcodec_free_context(&a_ctx);
-    avformat_close_input(&temp_fmt_ctx);
-    
     return peaks;
+}
+
+double VideoSource::getDuration() {
+    if (!fmt_ctx) return 0.0;
+    return (double)fmt_ctx->duration / AV_TIME_BASE;
 }
 
 // ============================================================================
@@ -591,102 +358,104 @@ std::vector<float> VideoSource::getWaveform(int points) {
 
 ImageSource::ImageSource(std::string p) : path(p) {}
 
-Frame ImageSource::getFrame(double /*localTime*/, int w, int h) {
-    if (!loaded || w != last_w || h != last_h) {
-        load(w, h);
-    }
-    return cached_frame;
-}
-
-/**
- * @brief Decodes a static image using FFmpeg.
- * Unlike VideoSource, this is optimized for single-frame retrieval.
- */
 void ImageSource::load(int w, int h) {
-    AVFormatContext* imgFmtCtx = nullptr;
+    if (loaded && last_w == w && last_h == h) return;
     
-    if (avformat_open_input(&imgFmtCtx, path.c_str(), nullptr, nullptr) < 0) return;
-    if (avformat_find_stream_info(imgFmtCtx, nullptr) < 0) {
-        avformat_close_input(&imgFmtCtx);
+    AVFormatContext* fmt = nullptr;
+    if (avformat_open_input(&fmt, path.c_str(), nullptr, nullptr) < 0) {
+        cached_frame = Frame(w, h);
         return;
     }
-
-    int videoIdx = -1;
-    for (unsigned int i = 0; i < imgFmtCtx->nb_streams; i++) {
-        if (imgFmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            videoIdx = i;
+    
+    if (avformat_find_stream_info(fmt, nullptr) < 0) {
+        avformat_close_input(&fmt);
+        cached_frame = Frame(w, h);
+        return;
+    }
+    
+    int stream_idx = -1;
+    for (unsigned i = 0; i < fmt->nb_streams; i++) {
+        if (fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            stream_idx = i;
             break;
         }
     }
-
-    if (videoIdx == -1) {
-        avformat_close_input(&imgFmtCtx);
-        return;
-    }
-
-    const AVCodec* codec = avcodec_find_decoder(imgFmtCtx->streams[videoIdx]->codecpar->codec_id);
-    AVCodecContext* imgCodecCtx = avcodec_alloc_context3(codec);
-    avcodec_parameters_to_context(imgCodecCtx, imgFmtCtx->streams[videoIdx]->codecpar);
     
-    if (avcodec_open2(imgCodecCtx, codec, nullptr) < 0) {
-        avcodec_free_context(&imgCodecCtx);
-        avformat_close_input(&imgFmtCtx);
+    if (stream_idx == -1) {
+        avformat_close_input(&fmt);
+        cached_frame = Frame(w, h);
         return;
     }
-
-    AVFrame* tempFrame = av_frame_alloc();
-    AVPacket* tempPkt = av_packet_alloc();
-
-    if (av_read_frame(imgFmtCtx, tempPkt) >= 0) {
-        if (avcodec_send_packet(imgCodecCtx, tempPkt) >= 0) {
-            if (avcodec_receive_frame(imgCodecCtx, tempFrame) >= 0) {
-                cached_frame = Frame(w, h, 4);
-                
-                // P2: CRITICAL FIX - Initialize entire buffer to transparent black
-                // This prevents garbage pixels outside the scaled image area
-                // This was causing the "strange lines" visual artifacts
-                std::fill(cached_frame.data.begin(), cached_frame.data.end(), 0);
-                
-                // Smart Scaling for Static Images
-                float srcAspect = (float)tempFrame->width / tempFrame->height;
-                float dstAspect = (float)w / h;
-                
-                int outW, outH, outX, outY;
-                if (srcAspect > dstAspect) {
-                    outW = w;
-                    outH = (int)(w / srcAspect);
-                    outX = 0;
-                    outY = (h - outH) / 2;
-                } else {
-                    outH = h;
-                    outW = (int)(h * srcAspect);
-                    outY = 0;
-                    outX = (w - outW) / 2;
+    
+    const AVCodec* codec = avcodec_find_decoder(fmt->streams[stream_idx]->codecpar->codec_id);
+    if (!codec) {
+        avformat_close_input(&fmt);
+        cached_frame = Frame(w, h);
+        return;
+    }
+    
+    AVCodecContext* ctx = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(ctx, fmt->streams[stream_idx]->codecpar);
+    avcodec_open2(ctx, codec, nullptr);
+    
+    AVPacket* pkt = av_packet_alloc();
+    AVFrame* frame = av_frame_alloc();
+    
+    while (av_read_frame(fmt, pkt) >= 0) {
+        if (pkt->stream_index == stream_idx) {
+            if (avcodec_send_packet(ctx, pkt) >= 0) {
+                if (avcodec_receive_frame(ctx, frame) >= 0) {
+                    Frame out(w, h, 4);
+                    std::fill(out.data.begin(), out.data.end(), 0);
+                    
+                    float src_aspect = (float)frame->width / frame->height;
+                    float dst_aspect = (float)w / h;
+                    
+                    int outW, outH, outX, outY;
+                    if (src_aspect > dst_aspect) {
+                        outW = w;
+                        outH = (int)(w / src_aspect);
+                        outX = 0;
+                        outY = (h - outH) / 2;
+                    } else {
+                        outH = h;
+                        outW = (int)(h * src_aspect);
+                        outY = 0;
+                        outX = (w - outW) / 2;
+                    }
+                    
+                    SwsContext* sws = sws_getContext(
+                        frame->width, frame->height, static_cast<AVPixelFormat>(frame->format),
+                        outW, outH, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+                    
+                    if (sws) {
+                        uint8_t* dest[4] = { out.data.data() + (outY * w * 4) + (outX * 4), nullptr, nullptr, nullptr };
+                        int strides[4] = { w * 4, 0, 0, 0 };
+                        sws_scale(sws, frame->data, frame->linesize, 0, frame->height, dest, strides);
+                        sws_freeContext(sws);
+                    }
+                    
+                    cached_frame = out;
+                    av_frame_unref(frame);
+                    av_packet_unref(pkt);
+                    break;
                 }
-
-                SwsContext* scaler = sws_getContext(
-                    tempFrame->width, tempFrame->height, static_cast<AVPixelFormat>(tempFrame->format),
-                    outW, outH, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
-                
-                uint8_t* dest[4] = { cached_frame.data.data() + (outY * w * 4) + (outX * 4), nullptr, nullptr, nullptr };
-                int destLinesizes[4] = { w * 4, 0, 0, 0 };
-                
-                sws_scale(scaler, tempFrame->data, tempFrame->linesize, 0, 
-                          tempFrame->height, dest, destLinesizes);
-                
-                sws_freeContext(scaler);
-
-                loaded = true;
-                last_w = w; 
-                last_h = h;
             }
         }
-        av_packet_unref(tempPkt);
+        av_packet_unref(pkt);
     }
+    
+    av_frame_free(&frame);
+    av_packet_free(&pkt);
+    avcodec_free_context(&ctx);
+    avformat_close_input(&fmt);
+    
+    loaded = true;
+    last_w = w;
+    last_h = h;
+}
 
-    // Explicit resource cleanup
-    av_packet_free(&tempPkt);
-    av_frame_free(&tempFrame);
-    avcodec_free_context(&imgCodecCtx);
-    avformat_close_input(&imgFmtCtx);
+Frame ImageSource::getFrame(double /*localTime*/, int w, int h) {
+    load(w, h);
+    return cached_frame;
 }

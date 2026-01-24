@@ -52,6 +52,8 @@ public:
     // Resolution and Metadata Getters (Refined for immediate access)
     int getWidth() const;
     int getHeight() const;
+    int getNativeWidth() const;
+    int getNativeHeight() const;
     int getRotation() const; // Implemented in cpp
 };
 

@@ -14,7 +14,12 @@ class ViewerPanel(QWidget):
     def initialize_ui(self):
         """Standardized UI initialization following Clean Code standards."""
         self.setMinimumWidth(500)
+        self.setMinimumHeight(400)  # CRITICAL: Ensure minimum height
         self.setObjectName("ViewerPanel")
+        
+        # CRITICAL FIX: Force the viewer to expand and take all available space
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
         self.setStyleSheet("""
             #ViewerPanel {
                 background-color: #000000;
@@ -30,33 +35,41 @@ class ViewerPanel(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # 1. Rendering Surface (The Screen)
+        # 1. Rendering Surface (The Screen) - MUST take all available space
         self.rendering_surface = self._create_rendering_surface()
-        main_layout.addWidget(self.rendering_surface, stretch=1)
+        main_layout.addWidget(self.rendering_surface, stretch=10)  # High stretch factor
         
-        # 2. Playback Controls
+        # 2. Playback Controls - Fixed height
         self.controls_bar = self._create_controls_bar()
-        main_layout.addWidget(self.controls_bar)
+        main_layout.addWidget(self.controls_bar, stretch=0)
         
-        # 3. Project Information Panel
+        # 3. Project Information Panel - Fixed height
         self.info_panel = self._create_info_panel()
-        main_layout.addWidget(self.info_panel)
+        main_layout.addWidget(self.info_panel, stretch=0)
         
 
 
     def _create_rendering_surface(self) -> QFrame:
         container = QFrame()
         container.setStyleSheet("background-color: #000000; border: none;")
+        
+        # CRITICAL: Container must expand to fill available space
+        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
         self.display_label = QLabel()
         self.display_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.display_label.setStyleSheet("background-color: black;")
-        # Fix: Prevent the label from growing and pushing the timeline down during playback
-        self.display_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        layout.addWidget(self.display_label)
+        # CRITICAL FIX: Allow the label to expand to fill available space
+        # This ensures vertical videos scale properly to fill the viewer
+        self.display_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.display_label.setScaledContents(False)  # We handle scaling manually
+        self.display_label.setMinimumSize(1, 1)  # Allow shrinking
+        
+        layout.addWidget(self.display_label, stretch=1)
         return container
         
     def _create_controls_bar(self) -> QFrame:
@@ -167,22 +180,42 @@ class ViewerPanel(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(15, 10, 15, 10)
         
-        # Performance metadata only
+        # Project format info
+        row1 = QHBoxLayout()
+        self.lbl_format = QLabel("Proyecto: 1920x1080 (16:9 - Horizontal)")
+        self.lbl_format.setStyleSheet("color: #00a3ff; font-family: 'Inter'; font-size: 10px; font-weight: bold;")
+        row1.addWidget(self.lbl_format)
+        row1.addStretch()
+        
+        # Performance metadata
         row2 = QHBoxLayout()
         lbl_engine = QLabel("Engine: Rocky Core C++ (Hardware Accelerated)")
         lbl_engine.setStyleSheet("color: #6272a4; font-family: 'Inter'; font-size: 10px;")
         row2.addWidget(lbl_engine)
         row2.addStretch()
         
+        layout.addLayout(row1)
         layout.addLayout(row2)
         return panel
 
 
 
+    def update_format_label(self, width, height):
+        """Update the format label with current project resolution."""
+        from math import gcd
+        divisor = gcd(width, height)
+        aspect_w = width // divisor
+        aspect_h = height // divisor
+        is_vertical = height > width
+        format_type = "Vertical" if is_vertical else "Horizontal"
+        
+        if hasattr(self, 'lbl_format'):
+            self.lbl_format.setText(f"Proyecto: {width}x{height} ({aspect_w}:{aspect_h} - {format_type})")
+
     def display_frame(self, frame_buffer):
         """
         Efficiently converts project RAW buffers into QPixmap for presentation.
-        Optimizes aspect-ratio scaling to maintain visual integrity.
+        CRITICAL: Vertical videos MUST fill the entire height of the viewer.
         
         :param frame_buffer: A numpy array (Height, Width, 4) in RGBA format.
         """
@@ -198,12 +231,38 @@ class ViewerPanel(QWidget):
             pixmap = QPixmap.fromImage(image)
             
             if not self.display_label.size().isEmpty():
-                # Perform smooth scaling into the view area
+                label_size = self.display_label.size()
+                
+                # CRITICAL FIX: Scale to fill the ENTIRE label size
+                # Qt will maintain aspect ratio and fit it within these bounds
+                # For vertical videos, this means filling the height
+                # For horizontal videos, this means filling the width
                 scaled_pixmap = pixmap.scaled(
-                    self.display_label.size(), 
+                    label_size.width(),
+                    label_size.height(),
                     Qt.AspectRatioMode.KeepAspectRatio, 
                     Qt.TransformationMode.SmoothTransformation
                 )
+                
+                # Debug output with widget hierarchy
+                is_vertical = height > width
+                if is_vertical and not hasattr(self, '_printed_hierarchy'):
+                    print(f"DEBUG Viewer: Vertical video {width}x{height} -> Label {label_size.width()}x{label_size.height()} -> Scaled {scaled_pixmap.width()}x{scaled_pixmap.height()}")
+                    print("=== WIDGET HIERARCHY ===")
+                    widget = self
+                    depth = 0
+                    while widget and depth < 10:
+                        name = widget.objectName() or widget.__class__.__name__
+                        size = widget.size()
+                        policy = widget.sizePolicy()
+                        print(f"{'  ' * depth}{name}: {size.width()}x{size.height()} (H:{policy.horizontalPolicy()}, V:{policy.verticalPolicy()})")
+                        widget = widget.parentWidget()
+                        depth += 1
+                    print("========================")
+                    self._printed_hierarchy = True
+                elif is_vertical:
+                    print(f"DEBUG Viewer: Vertical video {width}x{height} -> Label {label_size.width()}x{label_size.height()} -> Scaled {scaled_pixmap.width()}x{scaled_pixmap.height()}")
+                
                 self.display_label.setPixmap(scaled_pixmap)
         except Exception as e:
             print(f"Viewer Error: Failed to render frame: {e}")

@@ -767,6 +767,11 @@ class RockyApp(QMainWindow):
         self.toolbar.action_preferences.triggered.connect(self.on_settings)
         self.toolbar.btn_proxy.clicked.connect(self.on_proxy_toggle)
         
+        # Rotation Actions
+        self.toolbar.action_rot_cw.triggered.connect(lambda: self.rotate_selection(90))
+        self.toolbar.action_rot_ccw.triggered.connect(lambda: self.rotate_selection(-90))
+        self.toolbar.action_rot_180.triggered.connect(lambda: self.rotate_selection(180))
+        
         # 2. Playback Engine Timer
         self.playback_timer = QTimer(self)
         self.playback_timer.timeout.connect(self.on_playback_tick)
@@ -887,6 +892,40 @@ class RockyApp(QMainWindow):
             self.on_timeline_selection_changed(selected)
 
 
+    def rotate_selection(self, delta_degrees):
+        """
+        Manually rotates the selected clips by delta_degrees (e.g. 90 or -90).
+        This fixes orientation issues when metadata is ambiguous.
+        """
+        selected_clips = [c for c in self.model.clips if c.selected]
+        if not selected_clips:
+            self.status_label.setText("Selecciona un clip para rotar.")
+            return
+
+        for clip in selected_clips:
+            # Accumulate rotation
+            new_rot = (clip.transform.rotation + delta_degrees) % 360
+            clip.transform.rotation = new_rot
+            
+            # Reset/Adjust scale to fit if aspect ratio swaps? 
+            # Or just rotate?
+            # User might want to just rotate 90.
+            # If we switch from landscape to portrait visual, we might want to refit.
+            # But let's keep it simple: Just rotate. The user can scale if needed.
+            
+            # Force Engine Update
+            self.rebuild_engine()
+        
+        self.timeline_widget.update()
+        
+        # Immediate feedback
+        current_frame = self.model.blueline.playhead_frame
+        fps = self.get_fps()
+        timestamp = current_frame / fps
+        self.on_time_changed(timestamp, current_frame, "Rotation Update", True)
+        
+        self.status_label.setText(f"Selección rotada {delta_degrees}°")
+
     def on_clip_proxy_clicked(self, clip):
         """Handler for when a clip's PX button is clicked."""
         from .models import ProxyStatus
@@ -980,6 +1019,7 @@ class RockyApp(QMainWindow):
             
         from .models import TimelineClip, TrackType
         
+        is_forced_vertical = False
         file_name = os.path.basename(file_path)
         ext = file_name.lower().split('.')[-1]
         
@@ -992,20 +1032,72 @@ class RockyApp(QMainWindow):
         
         # SMART PROVISIONING: Ask to match resolution on first import
         if was_empty and width > 0 and height > 0:
-            # Short-circuit long dialogs if we want < 1s? 
-            # No, user input is separate. But the PROBE is done.
             msg = QMessageBox()
             msg.setWindowTitle("Configuración de Proyecto")
             
-            aspect_str = "VERTICAL" if height > width else "PANORÁMICO"
-            msg.setText(f"El medio detectado es {aspect_str} ({width}x{height}).")
-            msg.setInformativeText(f"¿Deseas ajustar el proyecto a {width}x{height}?")
+            # THE FIX: Calculate EFFECTIVE Visual Dimensions
+            vis_w = width
+            vis_h = height
+            rotation_mod = abs(rotation) % 360
             
-            btn_yes = msg.addButton("Sí, Ajustar", QMessageBox.YesRole)
-            no_btn = msg.addButton("No (Usar 1080p estándar)", QMessageBox.NoRole)
-            msg.setDefaultButton(no_btn)
+            if rotation_mod == 90 or rotation_mod == 270:
+                vis_w, vis_h = height, width
             
-            # ... Icon Logic ...
+            # Detect format and calculate aspect ratio
+            is_vertical = vis_h > vis_w
+            aspect_str = "VERTICAL" if is_vertical else "PANORÁMICO"
+            
+            # Calculate aspect ratio
+            from math import gcd
+            divisor = gcd(vis_w, vis_h)
+            aspect_w = vis_w // divisor
+            aspect_h = vis_h // divisor
+            
+            # Suggest common presets for vertical videos
+            suggested_res = (vis_w, vis_h)
+            preset_name = f"{vis_w}x{vis_h}"
+            
+            if is_vertical:
+                # Common vertical presets
+                common_vertical = {
+                    (1080, 1920): "Instagram/TikTok/YouTube Shorts (9:16)",
+                    (1080, 1350): "Instagram Post (4:5)",
+                    (720, 1280): "HD Vertical (9:16)",
+                }
+                # Check if it matches a common preset
+                if (vis_w, vis_h) in common_vertical:
+                    preset_name = common_vertical[(vis_w, vis_h)]
+                # Fuzzy Match for 9:16
+                elif abs(vis_w/vis_h - 9/16) < 0.05:
+                     if abs(vis_w - 1080) < 200:
+                         suggested_res = (1080, 1920)
+                         preset_name = "Instagram/TikTok/YouTube Shorts (1080x1920)"
+            
+            msg.setText(f"El medio detectado es {aspect_str} ({vis_w}x{vis_h}).")
+            
+            # --- USER CHOICE STRATEGY ---
+            # Instead of just Yes/No, we give 3 robust options.
+            # 1. Match Detected
+            # 2. force Vertical (Shorts)
+            # 3. Keep current
+            
+            btn_match = msg.addButton(f"Ajustar a {vis_w}x{vis_h}", QMessageBox.YesRole)
+            
+            # Smart "Force Vertical" button logic
+            # If we detected Horizontal, offer Vertical. If detected Vertical, offer Horizontal?
+            # Usually the problem is False Horizontal (Metadata missing).
+            
+            # Calculate the "Inverted" resolution for the Force button
+            force_w, force_h = vis_w, vis_h
+            if vis_w > vis_h: # If detected landscape, offer portrait
+                force_w, force_h = vis_h, vis_w
+            
+            btn_force_vert = msg.addButton(f"Forzar Video Vertical (Shorts)", QMessageBox.ActionRole)
+            btn_keep = msg.addButton("Mantener Actual", QMessageBox.NoRole)
+            
+            msg.setDefaultButton(btn_match)
+            
+            # Icon Logic
             msg.setWindowIcon(self.windowIcon())
             logo_path = self.get_resource_path(os.path.join("src", "img", "logo.png"))
             if os.path.exists(logo_path):
@@ -1013,11 +1105,21 @@ class RockyApp(QMainWindow):
                 msg.setIconPixmap(src_pix)
             
             msg.exec() 
+            clicked = msg.clickedButton()
             
-            if msg.clickedButton() == no_btn:
-                self.on_resolution_changed(1920, 1080)
+            if clicked == btn_match:
+                # Apply detected
+                self.on_resolution_changed(suggested_res[0], suggested_res[1])
+            elif clicked == btn_force_vert:
+                # Apply FORCED VERTICAL (1080x1920 usually)
+                self.on_resolution_changed(force_w, force_h)
+                # If we detected landscape but user forced vertical, we must rotate the clip content
+                if vis_w > vis_h:
+                    is_forced_vertical = True
             else:
-                self.on_resolution_changed(width, height)
+                # Keep current (do nothing or default 1080p if first time)
+                if was_empty:
+                    self.on_resolution_changed(1920, 1080)
         
         is_audio = ext in ["mp3", "wav", "aac", "m4a", "flac"]
         is_image = ext in ["jpg", "jpeg", "png", "gif", "bmp", "webp"]
@@ -1059,22 +1161,55 @@ class RockyApp(QMainWindow):
                 QTimer.singleShot(0, lambda: self._instantiate_source(file_path))
             
             # --- INITIAL TRANSFORMATION (Aspect Fit) ---
-            v_clip.transform.rotation = float(rotation)
+            # THE FIX: Do NOT swap width/height logic for the calculation of scale.
+            # The engine now handles rotation (w,h) internally correctly.
+            # We just need to fit the "Visual Box" into the "Project Box".
             
-            vis_w = width if rotation % 180 == 0 else height
-            vis_h = height if rotation % 180 == 0 else width
+            # Apply detection or forced override
+            final_rotation = float(rotation)
+            if is_forced_vertical:
+                # Use 270 (-90) as it is often the correct visual rotation for missing metadata
+                final_rotation = (final_rotation + 270) % 360
             
-            # Project aspect
+            v_clip.transform.rotation = final_rotation
+            
+            # Dimensions of the content AS SEEN by the user (after rotation)
+            content_w = width
+            content_h = height
+            
+            # Recalculate visual bounds based on final rotation
+            if abs(final_rotation) % 180 != 0:
+                 content_w, content_h = height, width
+            
+            # Project dimensions
             p_w, p_h = self.p_width, self.p_height
-            clip_aspect = vis_w / vis_h if vis_h > 0 else 1.77
-            proj_aspect = p_w / p_h if p_h > 0 else 1.77
             
-            if clip_aspect > proj_aspect:
+            # Calculate Scale to Fit (Uniform Scale)
+            # content_aspect = content_w / content_h
+            # project_aspect = p_w / p_h
+            
+            scale_x = 1.0
+            scale_y = 1.0
+            
+            # Fitting Logic:
+            # We want the content rectangle to fit inside the project rectangle
+            # scaling uniformly.
+            
+            scale_w = p_w / content_w
+            scale_h = p_h / content_h
+            
+            # Choose the smaller scale to ensure 'Fit Inside' (Letterboxing)
+            final_scale = min(scale_w, scale_h)
+            
+            # If the user wants to FILL (Zoom), they can increase it manually.
+            # For import, 'Fit' is safer.
+            v_clip.transform.scale_x = final_scale
+            v_clip.transform.scale_y = final_scale
+            
+            # Reset scaling if it's very close to 1.0 (avoid floating point fuzz)
+            if abs(final_scale - 1.0) < 0.01:
                 v_clip.transform.scale_x = 1.0
-                v_clip.transform.scale_y = proj_aspect / clip_aspect
-            else:
                 v_clip.transform.scale_y = 1.0
-                v_clip.transform.scale_x = clip_aspect / proj_aspect
             
             # 2. Audio Track
             a_track = -1
@@ -1272,7 +1407,82 @@ class RockyApp(QMainWindow):
     def on_settings(self):
         self.status_label.setText("Abriendo ajustes del proyecto...")
         dlg = SettingsDialog(self)
-        dlg.exec()
+        
+        # Pre-fill current settings
+        if hasattr(dlg, 'w_spin'):
+            dlg.w_spin.setValue(self.p_width)
+            dlg.h_spin.setValue(self.p_height)
+            
+        if dlg.exec():
+            settings = dlg.get_settings()
+            
+            new_w = settings["width"]
+            new_h = settings["height"]
+            new_fps = settings["fps"]
+            
+            print(f"DEBUG: Applying Project Settings: {new_w}x{new_h} @ {new_fps}fps")
+            
+            # 1. Update Persistent State
+            self.p_width = new_w
+            self.p_height = new_h
+            
+            # 2. Update Engine Configuration
+            self.engine.set_resolution(new_w, new_h)
+            self.engine.set_fps(new_fps)
+            
+            # 3. Update Viewer UI
+            for viewer in self.viewer_registry:
+                if hasattr(viewer, 'update_format_label'):
+                    viewer.update_format_label(new_w, new_h)
+            
+            # 4. Refresh Application
+            self.status_label.setText(f"Proyecto configurado a {new_w}x{new_h}")
+            
+            # Force a full engine sync
+            self.rebuild_engine()
+            self.timeline_widget.update()
+            
+            # Re-evaluate current frame to show changes immediately
+            current_frame = self.model.blueline.playhead_frame
+            fps = self.get_fps()
+            timestamp = current_frame / fps
+            self.on_time_changed(timestamp, current_frame, "00:00:00;00", True)
+
+            fps = self.get_fps()
+            timestamp = current_frame / fps
+            self.on_time_changed(timestamp, current_frame, "00:00:00;00", True)
+
+    def on_resolution_changed(self, width, height):
+        """
+        Handles requests to change the project resolution (e.g. from Import auto-detect).
+        Updates state, engine, and UI immediately.
+        """
+        print(f"DEBUG: on_resolution_changed -> {width}x{height}")
+        
+        # 1. Update Persistent State
+        self.p_width = width
+        self.p_height = height
+        
+        # 2. Update Engine Configuration
+        self.engine.set_resolution(width, height)
+        
+        # 3. Update Viewer UI
+        for viewer in self.viewer_registry:
+            if hasattr(viewer, 'update_format_label'):
+                viewer.update_format_label(width, height)
+        
+        # 4. Refresh Application
+        self.status_label.setText(f"Resolución actualizada a {width}x{height}")
+        
+        # Force a full engine sync
+        self.rebuild_engine()
+        self.timeline_widget.update()
+        
+        # Re-evaluate current frame to show changes immediately
+        current_frame = self.model.blueline.playhead_frame
+        fps = self.get_fps()
+        timestamp = current_frame / fps
+        self.on_time_changed(timestamp, current_frame, "Resolution Update", True)
 
     def toggle_play(self):
         """Toggles the playback state. Restores hidden panels if needed."""
@@ -1765,7 +1975,17 @@ class RockyApp(QMainWindow):
         Updates the global project resolution in the engine.
         Affects both preview and final render.
         """
-        print(f"Project Resolution Changed: {width}x{height}")
+        # Calculate aspect ratio for display
+        from math import gcd
+        divisor = gcd(width, height)
+        aspect_w = width // divisor
+        aspect_h = height // divisor
+        
+        # Determine format type
+        is_vertical = height > width
+        format_type = "Vertical" if is_vertical else "Horizontal"
+        
+        print(f"Project Resolution Changed: {width}x{height} ({aspect_w}:{aspect_h} - {format_type})")
         
         # Stop playback to avoid engine contention during resolution swap
         was_playing = self.model.blueline.playing
@@ -1778,7 +1998,13 @@ class RockyApp(QMainWindow):
         self.engine.set_resolution(width, height)
         del locker
 
-        self.status_label.setText(f"Resolución: {width}x{height}")
+        # Enhanced status message with aspect ratio
+        self.status_label.setText(f"Resolución: {width}x{height} ({aspect_w}:{aspect_h} - {format_type})")
+        
+        # Update all viewer panels with new format info
+        for viewer in self.viewer_registry:
+            if hasattr(viewer, 'update_format_label'):
+                viewer.update_format_label(width, height)
         
         # Trigger a re-render of the current frame to show the new aspect ratio
         current_frame = self.model.blueline.playhead_frame
@@ -1999,8 +2225,8 @@ class RockyApp(QMainWindow):
                         cpp_effects_list.append(c_eff)
                 
                 cpp_clip.effects = cpp_effects_list
-            cpp_clip.fade_in_frames = clip.fade_in_frames
-            cpp_clip.fade_out_frames = clip.fade_out_frames
+            cpp_clip.fade_in_frames = int(clip.fade_in_frames)
+            cpp_clip.fade_out_frames = int(clip.fade_out_frames)
             cpp_clip.fade_in_type = rocky_core.FadeType(clip.fade_in_type.value)
             cpp_clip.fade_out_type = rocky_core.FadeType(clip.fade_out_type.value)
             

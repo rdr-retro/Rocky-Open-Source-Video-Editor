@@ -251,6 +251,10 @@ class RockyToolbar(QFrame):
         btn_editar.add_action("Rehacer")
         btn_editar.menu.addSeparator()
         self.action_preferences = btn_editar.add_action("Preferencias...", shortcut="Ctrl+,")
+        btn_editar.menu.addSeparator()
+        self.action_rot_cw = btn_editar.add_action("Rotar 90° Derecha")
+        self.action_rot_ccw = btn_editar.add_action("Rotar 90° Izquierda")
+        self.action_rot_180 = btn_editar.add_action("Girar 180° (Voltear)")
         layout.addWidget(btn_editar)
 
         # 3. PROCESAR
