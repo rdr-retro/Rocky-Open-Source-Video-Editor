@@ -6,120 +6,148 @@
 [![OpenFX](https://img.shields.io/badge/Plugins-OpenFX-purple.svg)](https://openfx.org/)
 [![Performance](https://img.shields.io/badge/Performance-ZeroCopy-red.svg)](#)
 
-Rocky Video Editor is a state-of-the-art, high-performance non-linear video editing (NLE) system designed for professionals who demand both ease of use and extreme computational efficiency. Built on a hybrid architecture, Rocky pairs a modern PySide6 (Qt) frontend with a high-octane C++17 rendering engine.
+Rocky Video Editor is a state-of-the-art, high-performance non-linear video editing (NLE) system designed for professionals who demand both ease of use and extreme computational efficiency. 
 
 ---
 
-## System Architecture: The Hybrid Masterpiece
+## 🏗 System Architecture Deep-Dive
 
-Rocky's unique strength lies in its "Engine-Frontend separation" philosophy.
+Rocky's unique strength lies in its **"Engine-Frontend separation"** philosophy, bridging the gap between high-level GUI flexibility and low-level hardware performance.
 
-### Python Frontend (The Brain)
-- **Framework**: Developed entirely in PySide6, providing a smooth 60Hz UI experience.
-- **Workflow**: Orchestrates project models, handles non-destructive editing logic, and manages background workers for thumbnails, waveforms, and proxies.
-- **Interoperability**: Uses Pybind11 for low-latency communication with the core engine.
+### 🗺 Full System Schema
 
-### Rocky Core C++ Engine (The Muscle)
-- **High-Performance Rendering**: A multi-threaded C++17 library localized in src/core.
-- **Zero-Copy Memory**: Uses direct memory descriptors to pass 4K frames between C++ and Python with almost zero overhead.
-- **Master Clock Sync**: Ensures sub-millisecond synchronization between audio and video tracks, eliminating drift even in long projects.
+```mermaid
+graph TD
+    subgraph "UI LAYER (Python / PySide6)"
+        MainWin[RockyApp] --> DockSystem[Flexible Docking System]
+        DockSystem --> Panels[Panels: Timeline, Viewer, Assets, Subtitles]
+        Panels --> Models[TimelineModel / ClipModel]
+    end
 
----
+    subgraph "INFRASTRUCTURE & WORKERS"
+        Models -.-> Workers[Background Workers]
+        Workers --> ProxyGen[Proxy Generator]
+        Workers --> Waveform[Waveform Processor]
+        Workers --> Thumbnails[Thumbnail Extractor]
+        ProxyGen --> FFmpeg[FFmpeg Utils]
+    end
 
-## Key Features
+    subgraph "NATIVE BRIDGE (pybind11)"
+        Models <==> Bindings[bindings.cpp]
+    end
 
-### Dynamic Panel Architecture (New!)
-- **Blender-Style Flexibility**: The editor has transitioned from a fixed layout to a "Single Flexible Panel" philosophy. Every panel can be split horizontally or vertically to create an infinite variety of workspaces.
-- **Advanced Snap & Docking**: Drag any panel by its header and drop it on the edges of another to "snap" and dock it. Interchanging panel types (Timeline, Viewer, etc.) is instantaneous.
-- **Multi-Instance Synchronization**: Open multiple instances of the Timeline or Video Viewer. All views remain synchronized to the master clock and project model in real-time.
-- **Professional Handling**: Interactive splitters (4px) with orange hover highlights and grip icons for intuitive workspace customization.
+    subgraph "ROCKY CORE (C++17)"
+        Bindings <==> Engine[core::RockyEngine]
+        Engine --> Tracks[core::Track System]
+        Tracks --> Clips[core::Clip Rendering]
+        Clips --> Sources[core::MediaSource]
+        Sources --> VideoSrc[VideoSource - AVCodec/FFmpeg]
+        Sources --> ImageSrc[ImageSource - AVCodec]
+        Sources --> ColorSrc[ColorSource - Procedural]
+        
+        Clips --> Transforms[Affine Transformations: Rotate, Scale, Translate]
+        Engine --> Blending[Multi-threaded Pixel Blending]
+        Engine --> PluginHost[OpenFX Host]
+        PluginHost --> Plugins[OpenFX Plugins: .ofx]
+    end
 
-### Advanced Timeline & Editing
-- **Professional Standard**: Support for Ripple Edits, Rolling Edits, and multi-track snapping.
-- **Dynamic Fades**: Real-time crossfades and opacity/gain handles for every clip.
-- **Multi-Format Support**: Native handling of various aspect ratios (16:9, 9:16, 21:9, 1:1) and variable frame rates.
+    subgraph "HARDWARE ACCELERATION"
+        Blending --> SIMD[SIMD: SSE / AVX-512]
+        Blending --> Accelerate[macOS: Accelerate / AMX]
+        VideoSrc --> HWDec[NVENC / VideoToolbox / QSV]
+    end
 
-### Pro Audio Signal Chain
-- **64-bit Internal Mixing**: Audio is mixed in high-precision 64-bit float space for infinite dynamic range.
-- **Sample-Accurate Sync**: Every audio sample is aligned to the video master clock.
-- **Mastering Suite**: Real-time VU meters and master gain limiters to prevent clipping.
+### 🎞 Frame Rendering Pipeline (Data Flow)
 
-### OpenFX Plugin Ecosystem
-- **Industry Standard**: Full support for the OFX (OpenFX) standard.
-- **Custom Plugins**: Includes high-performance native plugins like "Invert Color".
-- **Extensibility**: Easily add new effects by dropping shared libraries into the plugins/ folder.
-
-### Smart Workflows
-- **Background Proxies**: Automatic generation of lightweight proxies for seamless 4K editing on any hardware.
-- **Localized Waveforms**: High-resolution audio peak analysis computed in the background.
-- **Smart Thumbnailing**: Start, middle, and end keyframe extraction for visual navigation.
-
----
-
-## Technical Performance & Optimization
-
-Rocky is engineered to be hardware-sympathetic:
-
-- **Predictive Seeking**: The engine maps I-frame (keyframe) locations to allow instantaneous seeking across huge video files.
-- **Speculative Decoding**: While you view frame N, the engine is already preparing frame N+1 in a pre-fetch buffer.
-- **SIMD Acceleration**: Core pixel blending loops utilize AVX-512 and SSE instructions for massive throughput.
-- **Apple Silicon Native**: Leveraging Apple’s AMX and Accelerate framework for elite performance on M1/M2/M3 chips.
-
----
-
-## Build Guide
-
-### Prerequisites
-- **Python 3.12+**
-- **FFmpeg 6.0+** (Development libraries: libavcodec, libavformat, libswscale, libswresample)
-- **PySide6** and **Numpy**
-- **Clang/GCC** with C++17 support
-
-### Setup Instructions
-1. Clone the repository and navigate to the project root.
-2. Initialize and activate a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Compile the C++ core:
-   ```bash
-   ./compile.sh
-   ```
-5. Run the editor:
-   ```bash
-   ./run.sh
-   ```
+```mermaid
+sequenceDiagram
+    participant UI as PySide6 (Python)
+    participant ENG as RockyEngine (C++)
+    participant CLIP as Clip::render()
+    participant SRC as MediaSource (FFmpeg/Image)
+    
+    UI->>ENG: evaluate(timestamp, resolution)
+    ENG->>ENG: Find active clips (Interval Tree)
+    loop For each Active Clip
+        ENG->>CLIP: render(localTime, w, h)
+        CLIP->>SRC: getFrame(-1, -1) [Raw Access]
+        SRC-->>CLIP: Raw Pixel Buffer
+        CLIP->>CLIP: Apply Affine Transforms (Rotate/Scale/Translate)
+        CLIP->>CLIP: Apply Opacity Envelope
+        CLIP-->>ENG: Transformed Frame
+    end
+    ENG->>ENG: Multi-track Pixel Blending (Alpha Compositing)
+    ENG-->>UI: Final Rendered Frame (Zero-Copy)
+```
 
 ---
 
-## Versión en Castellano (Manual Extendido)
+## 🛠 Component Breakdown
 
-### El Futuro de la Edición de Vídeo
-Rocky Video Editor no es solo una herramienta, es una plataforma de procesamiento multimedia diseñada para la era del vídeo 8K. Su núcleo C++ permite una manipulación de píxeles a velocidad nativa, mientras que PySide6 ofrece una interfaz flexible y moderna.
+### 1. ⚡️ Rocky Core C++ (The Muscle)
+Located in `src/core/`, this is a multi-threaded C++17 library responsible for the heavy lifting.
+- **Engine**: Orchestrates the global playback head, master clock, and track-to-screen composition.
+- **Interval Tree**: Uses advanced data structures to find active clips at any timestamp in $O(\log n)$ time.
+- **Zero-Copy Performance**: Uses direct memory descriptors to pass high-res frames between C++ and Python with near-zero latency.
+- **Transform Engine**: Handles complex visual math (Rotation, Scaling, Opacity) at the pixel buffer level.
 
-### Características Pro
-1. **Arquitectura de Paneles Dinámicos**: Migración de un diseño estático a un sistema totalmente flexible inspirado en Blender. Divide, acopla y reorganiza paneles mediante arrastrar y soltar con "snap" inteligente.
-2. **Motor Híbrido**: La potencia del C++17 combinada con la agilidad de Python.
-2. **OpenFX Nativo**: Soporte para el estándar de la industria en plugins de efectos.
-3. **Flujo de Trabajo Pro**: Proxies automáticos, edición Ripple/Rolling y gestión de color profesional.
-4. **Audio de 64 bits**: Calidad de audio de estudio para tus producciones de vídeo.
+### 2. 🔌 OpenFX Plugin Ecosystem
+Rocky implements the **OpenFX (OFX)** standard, allowing third-party integration of high-performance effects.
+- Direct host implementation in `src/core/ofx/`.
+- Dynamic loading of `.ofx` or `.so` plugin files.
+- Sample plugins provided in `plugins/` (e.g., Inversion, Color Correction).
 
-### Optimizaciones de Hardware
-Rocky está optimizado para procesadores multinúcleo modernos. En sistemas Mac, aprovechamos al máximo los chips Apple Silicon mediante el framework Accelerate, permitiendo una edición de vídeo 4K HDR fluida y sin interrupciones.
+### 3. 🐍 Python Frontend (The Brain)
+Developed in **PySide6**, the UI provides a smooth, frame-accurate experience.
+- **Dynamic Panels**: A Blender-inspired layout system where every panel can be split, joined, or swapped.
+- **Asynchronous Workflow**: Workers handle heavy processing (FFmpeg) in separate threads to keep the UI at a constant 60Hz.
+
+### 4. 🔤 Professional Subtitle Engine
+- **Direct Transcription**: Integrated with OpenAI's **Whisper** for automatic subtitle generation.
+- **WYSIWYG Positioning**: Drag and drop subtitles in the preview. Position is calculated in project-relative pixels for consistent export.
+- **Anti-Distortion Tech**: Smart scaling logic ensures fonts maintain their native aspect ratio regardless of the project format (YouTube vs Shorts).
 
 ---
 
-## Project Structure
-- `src/core/`: The C++ high-performance engine source code.
-- `src/ui/`: The PySide6 frontend logic and widgets.
-- `src/infrastructure/`: Background workers and resource management.
-- `plugins/`: OpenFX plugin source code and binaries.
-- `venv/`: Local Python environment.
+## 🚀 Build & Deployment
+
+Rocky is now a fully **Multi-Platform** tool with robust automation scripts.
+
+### 💻 Local Build
+
+| OS | Build Command | Run Command |
+| :--- | :--- | :--- |
+| **macOS** | `./compile.sh` (Homebrew auto-setup) | `./run.sh` |
+| **Linux** | `./compile.sh` (APT/DNF/Pacman) | `./run.sh` |
+| **Windows** | `compile.bat` (Python/FFmpeg auto) | `run.bat` |
+
+### 📦 Automated Windows Releases (CI/CD)
+The project is configured with **GitHub Actions** (`.github/workflows/build-windows.yml`). 
+- Simply push code from your Mac/Linux environment.
+- Our cloud servers will compile the C++ core and bundle a standalone **Windows .exe** for you.
+- Download the final binary from the **Actions > Artifacts** tab in GitHub.
+
+---
+
+## 🇪🇸 Versión en Castellano (Guía Técnica)
+
+Rocky Video Editor no es solo un editor; es un motor híbrido diseñado para la eficiencia extrema.
+
+### Características Principales:
+1. **Núcleo de Alto Rendimiento**: Composición multi-hilo en C++17.
+2. **Arquitectura Flexible**: Interfaz modular que se adapta a cualquier flujo de trabajo (de cine a TikTok).
+3. **Subtítulos con IA**: Generación automática con precisión de píxel.
+4. **Optimización de Hardware**: Soporte nativo para **Apple Silicon (M1/M2/M3)** mediante el framework Accelerate y HDR.
+
+---
+
+## 📂 Project Structure
+- `src/core/`: High-performance C++ engine and OFX host.
+- `src/ui/`: UI logic, panels, and custom widgets.
+- `src/infrastructure/`: Background workers and FFmpeg integration tools.
+- `src/platform/`: OS-specific hardware detection logic.
+- `plugins/`: Creative effect libraries.
+- `.github/workflows/`: Automated CI/CD configurations.
 
 ---
 *Engineered with precision. Rendered with excellence.*
