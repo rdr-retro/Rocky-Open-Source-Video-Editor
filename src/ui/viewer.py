@@ -212,12 +212,13 @@ class ViewerPanel(QWidget):
         if hasattr(self, 'lbl_format'):
             self.lbl_format.setText(f"Proyecto: {width}x{height} ({aspect_w}:{aspect_h} - {format_type})")
 
-    def display_frame(self, frame_buffer):
+    def display_frame(self, frame_buffer, fast_mode=False):
         """
         Efficiently converts project RAW buffers into QPixmap for presentation.
         CRITICAL: Vertical videos MUST fill the entire height of the viewer.
         
         :param frame_buffer: A numpy array (Height, Width, 4) in RGBA format.
+        :param fast_mode: If True, uses lower quality but faster scaling for playback.
         """
         if frame_buffer is None:
             return
@@ -228,38 +229,25 @@ class ViewerPanel(QWidget):
             
             # Create QImage directly from buffer memory (No-copy)
             image = QImage(frame_buffer.data, width, height, bytes_per_line, QImage.Format.Format_RGBA8888)
+            
+            # Conversion stage: QImage -> QPixmap is fast on most platforms
             pixmap = QPixmap.fromImage(image)
             
-            if not self.display_label.size().isEmpty():
-                label_size = self.display_label.size()
+            label_size = self.display_label.size()
+            if not label_size.isEmpty():
+                # CHOOSE TRANSFORMATION MODE: 
+                # Smooth is for high-quality static viewing.
+                # Fast is for fluid playback.
+                transform_mode = Qt.TransformationMode.FastTransformation if fast_mode else Qt.TransformationMode.SmoothTransformation
                 
                 # CRITICAL FIX: Scale to fill the ENTIRE label size
                 # Qt will maintain aspect ratio and fit it within these bounds
-                # For vertical videos, this means filling the height
-                # For horizontal videos, this means filling the width
                 scaled_pixmap = pixmap.scaled(
                     label_size.width(),
                     label_size.height(),
                     Qt.AspectRatioMode.KeepAspectRatio, 
-                    Qt.TransformationMode.SmoothTransformation
+                    transform_mode
                 )
-                
-                # Debug output with widget hierarchy
-                is_vertical = height > width
-                if is_vertical and not hasattr(self, '_printed_hierarchy'):
-                    widget = self
-                    depth = 0
-                    while widget and depth < 10:
-                        name = widget.objectName() or widget.__class__.__name__
-                        size = widget.size()
-                        policy = widget.sizePolicy()
-                        print(f"{'  ' * depth}{name}: {size.width()}x{size.height()} (H:{policy.horizontalPolicy()}, V:{policy.verticalPolicy()})")
-                        widget = widget.parentWidget()
-                        depth += 1
-                    print("========================")
-                    self._printed_hierarchy = True
-                elif is_vertical:
-                    pass
                 
                 self.display_label.setPixmap(scaled_pixmap)
         except Exception as e:

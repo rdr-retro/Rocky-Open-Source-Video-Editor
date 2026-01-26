@@ -262,9 +262,9 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
                         }
 
                         av_frame_unref(av_frame); av_packet_unref(pkt);
-                        last_frame = std::make_shared<Frame>(outputFrame);
+                        last_frame = std::make_shared<Frame>(std::move(outputFrame));
                         last_time = localTime; last_w = w; last_h = h;
-                        return outputFrame;
+                        return *last_frame;
                     }
                     av_frame_unref(av_frame);
                 }

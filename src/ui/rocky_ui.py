@@ -227,6 +227,57 @@ class AudioWorker(QThread):
     def stop_playback(self):
         self.player.sink.suspend()
 
+class VideoWorker(QThread):
+    """
+    Handles video frame evaluation in a background thread to prevent UI stutter.
+    Communicates with the UI thread via signals.
+    """
+    frame_ready = Signal(object)
+
+    def __init__(self, engine, engine_lock):
+        super().__init__()
+        self.engine = engine
+        self.engine_lock = engine_lock
+        self.running = False
+        self._target_timestamp = -1.0
+        self._mutex = QMutex()
+        self._has_new_request = False
+
+    def request_frame(self, timestamp):
+        """Asynchronously requests a frame for the given timestamp."""
+        locker = QMutexLocker(self._mutex)
+        self._target_timestamp = timestamp
+        self._has_new_request = True
+
+    def run(self):
+        self.running = True
+        last_processed = -1.0
+        
+        while self.running and not self.isInterruptionRequested():
+            timestamp = -1.0
+            locker = QMutexLocker(self._mutex)
+            if self._has_new_request:
+                timestamp = self._target_timestamp
+                self._has_new_request = False
+            del locker
+
+            if timestamp != -1.0 and timestamp != last_processed:
+                try:
+                    # HEAVY OPERATION: Evaluate project state at this timestamp
+                    # This involves FFmpeg decoding and C++ compositing.
+                    locker = QMutexLocker(self.engine_lock)
+                    frame = self.engine.evaluate(timestamp)
+                    del locker
+                    
+                    self.frame_ready.emit(frame)
+                    last_processed = timestamp
+                except Exception as e:
+                    print(f"VideoWorker Error: {e}")
+            
+            # Tiny sleep to prevent 100% CPU usage in the polling loop
+            # and allow the GIL to be shared.
+            self.msleep(2)
+
 class RenderWorker(QThread):
     progress = Signal(int)
     finished = Signal(str)
@@ -505,6 +556,8 @@ class RockyApp(QMainWindow):
         super().showEvent(event)
         if hasattr(self, 'audio_worker') and not self.audio_worker.isRunning():
             self.audio_worker.start(QThread.HighPriority)
+        if hasattr(self, 'video_worker') and not self.video_worker.isRunning():
+            self.video_worker.start(QThread.HighPriority)
 
     def closeEvent(self, event):
         """Called when the window is closed. Ensure all threads are stopped."""
@@ -521,6 +574,11 @@ class RockyApp(QMainWindow):
             self.engine.set_resolution(1920, 1080) 
             self.audio_player = AudioPlayer()
             self.audio_worker = AudioWorker(self.engine, self.audio_player, self.model)
+            
+            # VIDEO WORKER: Async rendering to maintain 60fps UI
+            self.video_worker = VideoWorker(self.engine, self.engine_lock)
+            self.video_worker.frame_ready.connect(self._broadcast_frame)
+            
             self.audio_player.app_engine_lock = self.engine_lock # Share the lock
             return True
 
@@ -552,6 +610,14 @@ class RockyApp(QMainWindow):
             self.audio_worker.requestInterruption()
             if not self.audio_worker.wait(2000):
                 self.audio_worker.terminate()
+
+        # 1.5 Stop Video Worker
+        if hasattr(self, 'video_worker') and self.video_worker is not None:
+            self.video_worker.running = False
+            self.video_worker.requestInterruption()
+            self.video_worker.wait(1000)
+            if self.video_worker.isRunning():
+                self.video_worker.terminate()
         
         if hasattr(self, 'audio_player') and self.audio_player is not None:
             try: self.audio_player.sink.stop()
@@ -1481,6 +1547,17 @@ class RockyApp(QMainWindow):
         else:
             self.audio_worker.stop_playback()
             
+            # RESTAURAR ALTA CALIDAD al pausar
+            locker = QMutexLocker(self.engine_lock)
+            self.engine.set_resolution(self.p_width, self.p_height)
+            if hasattr(self, '_last_engine_w'):
+                delattr(self, '_last_engine_w')
+            del locker
+            
+            # Forzar un último frame en alta resolución
+            fps = self.get_fps()
+            self.video_worker.request_frame(self.model.blueline.playhead_frame / fps)
+
             # Vegas Style: Return to start position on stop
             if hasattr(self, 'playback_start_frame'):
                 self.model.blueline.set_playhead_frame(self.playback_start_frame)
@@ -1523,7 +1600,6 @@ class RockyApp(QMainWindow):
         self.on_playback_rate_changed(100) # Force 1.0x
 
     def on_playback_tick(self):
-
         """
         Main execution pulse for project playback.
         Uses a Wall-Clock Master Sync to prevent A/V drift.
@@ -1538,23 +1614,19 @@ class RockyApp(QMainWindow):
         try:
             current_audio_time = self.audio_player.get_processed_us()
             elapsed_us = current_audio_time - self.playback_start_audio_time
-            if elapsed_us < 0: elapsed_us = 0 # Prevención de relojes negativos
+            if elapsed_us < 0: elapsed_us = 0 
             elapsed_real_time = elapsed_us / 1_000_000.0
         except:
-             # Fallback si el audio falla
              elapsed_real_time = 0
              
         current_frame = self.playback_start_frame + (elapsed_real_time * active_fps * self.playback_rate)
 
-
-        
         # 1. Synchronize UI (Playhead and Timeline)
-        # Update all registered timelines equally
         playhead_screen_x = None
         for timeline in self.timeline_registry:
             try:
                 x = timeline.update_playhead_position(current_frame, forced=False)
-                if playhead_screen_x is None:  # Use first timeline for scroll reference
+                if playhead_screen_x is None:
                     playhead_screen_x = x
             except:
                 pass
@@ -1564,19 +1636,27 @@ class RockyApp(QMainWindow):
         
         # 2. Synchronize Engine (Atomic Evaluation)
         engine_timestamp = current_frame / active_fps
-        try:
-            # Video (GUI Thread)
-            locker = QMutexLocker(self.engine_lock)
-            rendered_frame = self.engine.evaluate(engine_timestamp)
-            del locker
-            
-            self._broadcast_frame(rendered_frame)
-            
-            # NOTE: Audio is now handled by AudioWorker thread to ensure ZERO drops
-            
-        except Exception as rendering_error:
-            print(f"Playback Error: Render evaluation failed: {rendering_error}")
-            self.toggle_play() # Halt playback on critical failure
+        
+        # OPTIMIZACIÓN DE RESOLUCIÓN DINÁMICA:
+        # Ajustamos el motor para renderizar exactamente lo que se ve en el visor.
+        if self.viewer_registry:
+            v_size = self.viewer_registry[0].display_label.size()
+            if not v_size.isEmpty():
+                # HW Optimization: Strides prefer multiples of 16
+                target_w = (v_size.width() // 16) * 16
+                target_h = (v_size.height() // 16) * 16
+                
+                if target_w > 0 and target_h > 0:
+                    # Debounce resolution changes to avoid overhead
+                    if not hasattr(self, '_last_engine_w') or abs(self._last_engine_w - target_w) > 32:
+                        locker = QMutexLocker(self.engine_lock)
+                        self.engine.set_resolution(target_w, target_h)
+                        self._last_engine_w = target_w
+                        self._last_engine_h = target_h
+                        del locker
+
+        # ASYNC EVALUATION: No bloqueamos el hilo de la UI
+        self.video_worker.request_frame(engine_timestamp)
 
     def on_time_changed(self, timestamp, frame_index, timecode, forced):
         """
@@ -1598,11 +1678,16 @@ class RockyApp(QMainWindow):
              self.playback_start_frame = frame_index
              self.playback_start_audio_time = self.audio_player.get_processed_us()
         
-        locker = QMutexLocker(self.engine_lock)
-        rendered_frame = self.engine.evaluate(timestamp)
-        del locker
-        
-        self._broadcast_frame(rendered_frame)
+        # ASYNC EVALUATION: Usamos el worker para no bloquear el scroll/seek de la línea de tiempo
+        if not self.model.blueline.playing:
+             # Si no estamos reproduciendo, nos aseguramos de estar en alta resolución para el seek manual
+             locker = QMutexLocker(self.engine_lock)
+             if hasattr(self, '_last_engine_w'):
+                 self.engine.set_resolution(self.p_width, self.p_height)
+                 delattr(self, '_last_engine_w')
+             del locker
+
+        self.video_worker.request_frame(timestamp)
 
 
     def on_structure_changed(self):
@@ -1636,9 +1721,10 @@ class RockyApp(QMainWindow):
 
     def _broadcast_frame(self, frame_buffer):
         """Send rendered frame to all registered viewer panels."""
+        is_playing = self.model.blueline.playing
         for viewer in self.viewer_registry:
             try:
-                viewer.display_frame(frame_buffer)
+                viewer.display_frame(frame_buffer, fast_mode=is_playing)
             except:
                 # Remove dead viewers
                 self.viewer_registry.remove(viewer)
