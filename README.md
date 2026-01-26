@@ -1,4 +1,4 @@
-# Rocky Video Editor: The Hybrid NLE Powerhouse 🚀
+# Rocky Video Editor: The Hybrid NLE Powerhouse
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/UI-PySide6-green.svg)](https://www.qt.io/qt-for-python)
@@ -14,13 +14,13 @@
 
 Rocky Video Editor no es solo una aplicación; es una pieza de ingeniería diseñada para ser el editor más rápido y flexible del mercado open source.
 
-### ✨ Características Destacadas
-*   **🚀 Núcleo C++17 Nativo**: Motor de composición multihilo que gestiona miles de clips con latencia cero usando estructuras de datos avanzadas (`Interval Trees`).
-*   **🎨 Interfaz Modular (Estilo Blender)**: Sistema de paneles dinámicos dividibles con soporte para iconografía profesional de 64x64 y estética Matte moderna.
-*   **🧠 IA Integrada (OpenAI Whisper)**: Generación automática de subtítulos con precisión quirúrgica y posicionamiento WYSIWYG en el visor.
-*   **🔈 Audio Pro Nativo**: Mezclador de audio de 64 bits con remuestreo lineal en C++ para transiciones y shuttling sin cortes.
-*   **🔌 Ecosistema OpenFX**: Soporte completo para plugins de efectos profesionales estándar de la industria.
-*   **🍏 Optimización Apple Silicon**: Aceleración por hardware dedicada para chips M1/M2/M3 mediante el framework Accelerate y Metal.
+### Características Destacadas
+*   **Núcleo C++17 Nativo**: Motor de composición multihilo que gestiona miles de clips con latencia cero usando estructuras de datos avanzadas (Interval Trees).
+*   **Interfaz Modular (Estilo Blender)**: Sistema de paneles dinámicos dividibles con soporte para iconografía profesional de 64x64 y estética Matte moderna.
+*   **IA Integrada (OpenAI Whisper)**: Generación automática de subtítulos con precisión quirúrgica y posicionamiento WYSIWYG en el visor.
+*   **Audio Pro Nativo**: Mezclador de audio de 64 bits con remuestreo lineal en C++ para transiciones y shuttling sin cortes.
+*   **Ecosistema OpenFX**: Soporte completo para plugins de efectos profesionales estándar de la industria.
+*   **Optimización Apple Silicon**: Aceleración por hardware dedicada para chips M1/M2/M3 mediante el framework Accelerate y Metal.
 
 ---
 
@@ -62,7 +62,7 @@ graph TD
 
 ### 🎞 High-Performance Rendering Pipeline
 Every frame you see is processed through a zero-copy pipeline between C++ and Python:
-1.  **Interval Tree Query**: Rocky identifies active clips in $O(\log n)$ time.
+1.  **Interval Tree Query**: Rocky identifies active clips in O(log n) time.
 2.  **Multithreaded Decoding**: FFmpeg decodes frames in parallel using hardware acceleration.
 3.  **Affine Transformation Engine**: Rotation, scaling, and positioning are calculated at the pixel level in C++.
 4.  **Audio Sync**: Native C++ resampler ensures audio stays locked to the video clock even during speed changes (Shuttle).
