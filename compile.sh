@@ -63,9 +63,14 @@ echo "Compiling Rocky Core C++..."
 # Using --inplace ensures the .so/.pyd is next to the python files
 python setup.py build_ext --inplace
 
-# 6. Plugin Compilation
-echo "Compiling Plugins..."
-python3 scripts/compile_plugins.py
+# 6. Plugin Compilation (Optional)
+if [ -d "plugins" ]; then
+    echo "Compiling Plugins..."
+    # If a Makefile exists, use it
+    if [ -f "plugins/Makefile" ]; then
+        cd plugins && make clean && make && cd ..
+    fi
+fi
 
 echo ""
 echo "========================================"
