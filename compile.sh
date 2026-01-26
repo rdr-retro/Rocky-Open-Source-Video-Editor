@@ -46,22 +46,33 @@ PYTHON_CMD="python3"
 if ! command -v python3 &> /dev/null; then
     PYTHON_CMD="python"
 fi
+echo "[INFO] Using: $($PYTHON_CMD --version)"
 
 # 4. Environment Setup
 if [ ! -d "venv" ]; then
-    echo "Creating virtual environment..."
+    echo "[INFO] Creating virtual environment..."
     $PYTHON_CMD -m venv venv
 fi
-source venv/bin/activate
 
-echo "Upgrading toolchain..."
+# Multi-platform venv activation
+if [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+elif [ -f "venv/Scripts/activate" ]; then
+    source venv/Scripts/activate
+fi
+
+echo "[INFO] Upgrading toolchain and installing requirements..."
 python -m pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 
 # 5. Core Engine Compilation
-echo "Compiling Rocky Core C++..."
-# Using --inplace ensures the .so/.pyd is next to the python files
+echo "[INFO] Compiling Rocky Core C++..."
+# Force ARFLAGS for Mac consistency if needed (handled in setup.py too)
 python setup.py build_ext --inplace
+if [ $? -ne 0 ]; then
+    echo "[ERROR] Compilation FAILED."
+    exit 1
+fi
 
 # 6. Plugin Compilation (Optional)
 if [ -d "plugins" ]; then

@@ -18,7 +18,16 @@ libraries = ['avformat', 'avcodec', 'swscale', 'avutil', 'swresample']
 
 if platform.system() == "Windows":
     # Windows Setup
-    print("Detected Windows. Configuring for MSVC...")
+    # Check if we are using MinGW (often passed via --compiler=mingw32 or detected by setuptools)
+    import sys
+    is_mingw = any("mingw" in arg.lower() for arg in sys.argv)
+    
+    if is_mingw:
+        print("Detected MinGW. Configuring for GCC/MinGW...")
+        extra_compile_args = ['-std=c++17', '-O2']
+    else:
+        print("Detected Windows. Configuring for MSVC...")
+        extra_compile_args = ['/std:c++17', '/O2']
     
     # Assume FFmpeg is in external/ffmpeg (downloaded by script)
     ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,10 +38,6 @@ if platform.system() == "Windows":
     
     include_dirs.append(os.path.join(FFMPEG_DIR, "include"))
     library_dirs.append(os.path.join(FFMPEG_DIR, "lib"))
-    
-    # MSVC specific flags
-    extra_compile_args = ['/std:c++17', '/O2']
-    # Removed /DENABLE_ACCELERATE for Windows as it requires Mac-specific headers.
 
     
 else:

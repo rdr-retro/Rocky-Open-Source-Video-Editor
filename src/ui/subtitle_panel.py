@@ -100,6 +100,7 @@ class VideoProcessingThread(QThread):
             engine.set_fps(fps)
             
             self.progress.emit("Extrayendo audio...")
+            self.progress_percent.emit(5)
             video_ref = VideoFileClip(self.v_path)
             duration = video_ref.duration
             fd, temp_audio = tempfile.mkstemp(suffix=".wav")
@@ -109,9 +110,11 @@ class VideoProcessingThread(QThread):
             video_ref.close()
             
             if self._cancelled: return
-            self.progress.emit("Transcribiendo...")
+            self.progress.emit("Transcribiendo (Whisper)...")
+            self.progress_percent.emit(15)
             model = whisper.load_model("base")
             result = model.transcribe(temp_audio, fp16=False, word_timestamps=True)
+            self.progress_percent.emit(20)
             
             # --- TRACKS ---
             engine.add_track(rocky_core.VIDEO) # 0: BG
@@ -132,10 +135,19 @@ class VideoProcessingThread(QThread):
             self.progress.emit("Renderizando texto...")
             font_size = int(self.base_size)
             pil_font = None
-            font_candidates = ["/Library/Fonts/Impact.ttf", "/System/Library/Fonts/Supplemental/Impact.ttf", "/Library/Fonts/Arial.ttf", "Arial"]
+            font_candidates = [
+                "C:\\Windows\\Fonts\\impact.ttf", 
+                "C:\\Windows\\Fonts\\arial.ttf",
+                "/Library/Fonts/Impact.ttf", 
+                "/System/Library/Fonts/Supplemental/Impact.ttf", 
+                "Arial"
+            ]
             for f_path in font_candidates:
-                try: pil_font = ImageFont.truetype(f_path, font_size); break
-                except: continue
+                try: 
+                    pil_font = ImageFont.truetype(f_path, font_size)
+                    break
+                except: 
+                    continue
             if not pil_font: 
                 pil_font = ImageFont.load_default()
                 
@@ -204,7 +216,8 @@ class VideoProcessingThread(QThread):
                 '-c:a', 'aac', '-b:a', '192k', '-map', '0:v', '-map', '1:a', self.o_path
             ]
             
-            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            # Use DEVNULL for stderr to prevent pipe-full deadlock
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             total = int(duration * fps)
             for i in range(total):
                 if self._cancelled: proc.terminate(); break
@@ -230,9 +243,17 @@ class DraggableText(QLabel):
     moved = Signal(QPoint)
     def __init__(self, parent=None):
         super().__init__("SUBTÍTULOS", parent)
-        self.setStyleSheet("background: rgba(255, 235, 59, 1.0); color: black; border: 2px solid white; font-weight: 900; font-size: 10px; padding: 4px; text-transform: uppercase;")
-        self.setAlignment(Qt.AlignCenter); self.setCursor(Qt.SizeAllCursor); self.setFixedSize(120, 28)
+        self.setStyleSheet("background: rgba(255, 235, 255, 1.0); color: black; border: 2px solid white; font-weight: 900; font-size: 18px; padding: 4px; text-transform: uppercase;")
+        self.setAlignment(Qt.AlignCenter); self.setCursor(Qt.SizeAllCursor)
+        self.set_preview_size(160) # Initial base size
         self._dragging = False; self._offset = QPoint()
+
+    def set_preview_size(self, size):
+        # Scale UI preview box based on font size (roughly)
+        w = int(100 + (size * 0.5))
+        h = int(30 + (size * 0.15))
+        self.setFixedSize(w, h)
+        self.setStyleSheet(f"background: rgba(255, 235, 255, 1.0); color: black; border: 2px solid white; font-weight: 900; font-size: {max(10, int(size*0.12))}px; padding: 4px; text-transform: uppercase;")
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton: self._dragging, self._offset = True, e.pos()
@@ -281,7 +302,7 @@ class SubtitleViewer(QWidget):
     def _init_pos(self):
         sr = self._get_stage_geometry()
         if sr.width() <= 0: return
-        self.text_overlay.move(int(sr.x() + (sr.width()-120)/2), int(sr.y() + sr.height()*0.8))
+        self.text_overlay.move(int(sr.x() + (sr.width()-180)/2), int(sr.y() + sr.height()*0.8))
 
     def paintEvent(self, event):
         painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing); painter.fillRect(self.rect(), QColor(0, 0, 0))
@@ -311,7 +332,8 @@ class SubtitlePanel(QWidget):
         c_wid = QWidget(); c_lay = QVBoxLayout(c_wid); c_lay.setContentsMargins(15,10,15,15); c_lay.setSpacing(15)
         grp = QGroupBox("DISEÑO DE TEXTO"); grp.setStyleSheet("QGroupBox { color: #aaa; font-weight: bold; font-size: 11px; border: 1px solid #333; margin-top: 15px; padding-top: 10px; border-radius: 6px; } QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; }")
         form = QFormLayout(grp); self.f_combo = QComboBox(); self.f_combo.addItems(["Impact", "Arial", "Verdana"]); self.f_combo.setStyleSheet("background: #111; border: 1px solid #333; padding: 5px;")
-        self.s_slider = QSlider(Qt.Horizontal); self.s_slider.setRange(30, 250); self.s_slider.setValue(110)
+        self.s_slider = QSlider(Qt.Horizontal); self.s_slider.setRange(50, 400); self.s_slider.setValue(200)
+        self.s_slider.valueChanged.connect(lambda v: self.viewer.text_overlay.set_preview_size(v))
         form.addRow("Fuente", self.f_combo); form.addRow("Tamaño", self.s_slider); c_lay.addWidget(grp)
         grp_act = QGroupBox("PROCESAMIENTO"); grp_act.setStyleSheet(grp.styleSheet()); a_lay = QVBoxLayout(grp_act); a_lay.setSpacing(10)
         self.btn_run = QPushButton("GENERAR VIDEO CON SUBTÍTULOS"); self.btn_run.setStyleSheet("background: #00a3ff; color: white; padding: 15px; font-weight: bold; border-radius: 6px; font-size: 12px;"); self.btn_run.clicked.connect(self.start_process)

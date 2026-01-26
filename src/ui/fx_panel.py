@@ -201,8 +201,10 @@ class VideoEventFXPanel(QWidget):
         
         # Sync from Viewer to UI
         try:
+            # We disconnect specifically to avoid double-triggers, 
+            # but wrapping in try/except avoids noise if nothing was connected yet.
             self.display_label.transform_changed.disconnect()
-        except:
+        except (TypeError, RuntimeError):
             pass
         self.display_label.transform_changed.connect(self._update_ui_from_transform)
         

@@ -10,7 +10,11 @@ if [ ! -d "venv" ]; then
 fi
 
 # 2. Environment Setup
-source venv/bin/activate
+if [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+elif [ -f "venv/Scripts/activate" ]; then
+    source venv/Scripts/activate
+fi
 
 # 3. Engine Check
 # Check for any compiled module: rocky_core.so or rocky_core.pyd
