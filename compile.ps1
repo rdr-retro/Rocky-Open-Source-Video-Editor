@@ -132,6 +132,53 @@ $env:INCLUDE = "$FFmpegInclude;" + $env:INCLUDE
 
 # 4. Core Engine Compilation
 Write-Host "[INFO] Compiling Rocky Core C++..." -ForegroundColor Yellow
+
+# Ensure MSVC environment is set for 64-bit if cl is missing or not 64-bit
+function Ensure-Msvc64Env {
+    if (Get-Command cl -ErrorAction SilentlyContinue) {
+        # Check bitness of cl
+        $clVersion = & cl 2>&1 | Select-Object -First 1
+        if ($clVersion -match "x64") {
+            Write-Host "[INFO] 64-bit MSVC detected." -ForegroundColor Green
+            return $true
+        }
+        Write-Host "[WARN] Found cl.exe but it seems to be 32-bit or unexpected version." -ForegroundColor Yellow
+    }
+
+    $vsPaths = @(
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+    )
+
+    foreach ($path in $vsPaths) {
+        if (Test-Path $path) {
+            Write-Host "[INFO] Activating 64-bit MSVC environment via $path" -ForegroundColor Gray
+            # Using a trick to export cmd environment to powershell
+            $cmd = "cmd /c `"`"$path`" && set`""
+            Invoke-Expression $cmd | ForEach-Object {
+                if ($_ -match "^(.*?)=(.*)$") {
+                    $name = $matches[1]
+                    $value = $matches[2]
+                    if ($name -ne "" -and $name -ne "args") {
+                        try {
+                            Set-Item -Path "Env:\$name" -Value $value -ErrorAction SilentlyContinue
+                        }
+                        catch {}
+                    }
+                }
+            }
+            return $true
+        }
+    }
+    return $false
+}
+
+Ensure-Msvc64Env
+
 & $VenvPython setup.py build_ext --inplace
 if ($LASTEXITCODE -ne 0) {
     Write-Error "[ERROR] Compilation FAILED."

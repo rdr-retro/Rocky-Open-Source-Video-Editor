@@ -6,7 +6,7 @@ Write-Host "   Generando RockyInstaller.exe (.onefile)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 # 1. Ensure build dependencies are in the CURRENT environment
-python -m pip install --upgrade pyinstaller pyside6
+python -m pip install --upgrade pyinstaller pyside6 pillow
 
 # 2. Build the Installer Wrapper
 pyinstaller RockyInstaller.spec --clean

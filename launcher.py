@@ -3,25 +3,35 @@ import os
 
 def setup_env():
     """Sets up DLL paths for FFmpeg and ensures root is in sys.path"""
+    # 1. Resolve Project Root
+    exe_dir = os.path.dirname(sys.executable)
     if getattr(sys, 'frozen', False):
-        application_path = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
+        application_path = sys._MEIPASS if hasattr(sys, '_MEIPASS') else exe_dir
     else:
         application_path = os.path.dirname(os.path.abspath(__file__))
     
-    exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else application_path
+    # Use exe_dir if external/ exists there (Installed mode), else application_path (Dev/Onefile mode)
+    root = exe_dir if os.path.isdir(os.path.join(exe_dir, "external")) else application_path
     
-    # 1. Register DLL directory for Python 3.8+
+    # 2. Register DLL directory for Python 3.8+
     if hasattr(os, 'add_dll_directory'):
-        for d in ['external/ffmpeg/bin', 'external/mingw/bin']:
-            full = os.path.join(exe_dir, d)
-            if os.path.exists(full):
-                os.add_dll_directory(full)
+        for d in [os.path.join('external', 'ffmpeg', 'bin'), os.path.join('external', 'mingw', 'bin')]:
+            full = os.path.join(root, d)
+            if os.path.isdir(full):
+                try:
+                    os.add_dll_directory(full)
+                    print(f"Launcher: Added DLL directory {full}")
+                except Exception as e:
+                    print(f"Launcher Warning: {e}")
     
-    # 2. Add to PATH as fallback
-    ff_bin = os.path.join(exe_dir, 'external', 'ffmpeg', 'bin')
-    os.environ['PATH'] = ff_bin + ';' + os.environ['PATH']
+    # 3. Add to PATH as fallback for subprocesses
+    for d in [os.path.join('external', 'ffmpeg', 'bin'), os.path.join('external', 'mingw', 'bin')]:
+        full = os.path.join(root, d)
+        if os.path.isdir(full):
+            if full not in os.environ['PATH']:
+                os.environ['PATH'] = full + os.pathsep + os.environ['PATH']
     
-    # 3. Ensure we can import src from the root
+    # 4. Ensure we can import src from the root
     if application_path not in sys.path:
         sys.path.insert(0, application_path)
     
