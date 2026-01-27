@@ -10,6 +10,19 @@ from win32com.client import Dispatch
 import subprocess
 import sys
 
+import pythoncom  # Added import
+import ctypes
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
 # Embedded content for builder_runner.py
 BUILDER_RUNNER_CONTENT = r'''import subprocess
 import sys
@@ -88,6 +101,7 @@ if ($LASTEXITCODE -eq 0) {
 }
 '''
 
+PYTHON_URL = "https://www.python.org/ftp/python/3.12.1/python-3.12.1-amd64.exe"
 REPO_URL = "https://github.com/rdr-retro/Rocky-Open-Source-Video-Editor/archive/refs/heads/main.zip"
 
 class InstallerApp(tk.Tk):
@@ -96,6 +110,25 @@ class InstallerApp(tk.Tk):
         self.title("Rocky Video Editor Installer")
         self.geometry("500x400")
         self.resizable(False, False)
+        
+        try:
+            # Set AppUserModelID to ensure taskbar icon works independently
+            myappid = 'rocky.video.editor.installer.1.0'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception:
+            pass
+
+        try:
+            self.iconbitmap(resource_path('logo.ico'))
+        except Exception:
+            pass  # Icon might not be available in dev mode if not in correct path
+        
+        try:
+            # Also set the png icon for window/taskbar consistency
+            logo_png = tk.PhotoImage(file=resource_path('logo.png'))
+            self.iconphoto(False, logo_png)
+        except Exception:
+            pass
         
         self.pages = {}
         self.current_page = None
@@ -191,14 +224,59 @@ class ProgressPage(ttk.Frame):
         self.progress.start(10)
         threading.Thread(target=self.run_install, daemon=True).start()
 
+    def check_and_install_python(self, install_path):
+        try:
+            # Check if python is accessible
+            subprocess.run(["python", "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.log("Python is already installed.")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            self.log("Python not found. Downloading installer...")
+            installer_name = "python_installer.exe"
+            installer_path = os.path.join(install_path, installer_name)
+            
+            # Ensure the directory exists for the installer
+            os.makedirs(install_path, exist_ok=True)
+            
+            # Download
+            response = requests.get(PYTHON_URL, stream=True)
+            with open(installer_path, 'wb') as f:
+                shutil.copyfileobj(response.raw, f)
+            
+            self.log("Installing Python (this may take a few minutes)...")
+            
+            # Install silently
+            # InstallAllUsers=1: Installs to Program Files
+            # PrependPath=1: Adds to PATH
+            args = [installer_path, "/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_test=0"]
+            result = subprocess.run(args)
+            
+            if result.returncode == 0:
+                self.log("Python installed successfully.")
+                # We need to manually add Python to the current process PATH because
+                # the environment update only affects new processes started by Explorer/System.
+                # Standard path for All Users install of Python 3.12:
+                python_path = r"C:\Program Files\Python312"
+                scripts_path = r"C:\Program Files\Python312\Scripts"
+                os.environ["PATH"] += os.pathsep + python_path + os.pathsep + scripts_path
+            else:
+                self.log(f"Warning: Python installer exited with code {result.returncode}")
+            
+            # Cleanup installer
+            if os.path.exists(installer_path):
+                os.remove(installer_path)
+
     def run_install(self):
+        pythoncom.CoInitialize()
         install_path = self.controller.install_dir.get()
         
         try:
-            # 1. Create Directory
+            # 1. Create Directory (needed early for python installer download if needed)
             self.log(f"Creating directory: {install_path}")
             os.makedirs(install_path, exist_ok=True)
-            
+
+            # Check and Install Python FIRST
+            self.check_and_install_python(install_path)
+
             # 2. Download Repo
             self.log("Downloading repository...")
             zip_path = os.path.join(install_path, "repo.zip")
@@ -242,12 +320,17 @@ class ProgressPage(ttk.Frame):
             ps_script = os.path.join(install_path, "make_builder_exe.ps1")
             
             # Run the build script
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            
             process = subprocess.Popen(
                 ["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script],
                 cwd=install_path,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                startupinfo=startupinfo
             )
             
             out, err = process.communicate()

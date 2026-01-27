@@ -14,7 +14,7 @@ if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
 # --onefile: Create a single exe
 # --clean: Clean cache
 # --name: Name of the output exe
-pyinstaller --onefile --clean --name "RockyBuilder" builder_runner.py
+pyinstaller RockyBuilder.spec --clean
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Build successful."

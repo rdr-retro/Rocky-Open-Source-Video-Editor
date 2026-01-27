@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['installer\\main.py'],
+    ['installer\\rocky_setup.py'],
     pathex=[],
     binaries=[],
     datas=[('installer/core', 'core'), ('installer/gui', 'gui'), ('logo.png', '.'), ('logo.ico', '.'), ('requirements.txt', '.'), ('setup.py', '.'), ('src', 'src')],
@@ -37,5 +37,5 @@ exe = EXE(
     entitlements_file=None,
     version='version.txt',
     uac_admin=True,
-    icon=['logo.ico'],
+    icon='logo.ico',
 )

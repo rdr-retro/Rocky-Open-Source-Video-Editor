@@ -43,7 +43,7 @@ exe = EXE(
     a.scripts,
     a.binaries,
     a.datas,
-    [],
+    datas=[('logo.ico', '.'), ('logo.png', '.')],
     name='RockyLauncherTest',
     debug=False,
     bootloader_ignore_signals=False,
@@ -57,4 +57,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    uac_admin=True,
+    icon='logo.ico',
 )

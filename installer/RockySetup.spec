@@ -5,7 +5,7 @@ a = Analysis(
     ['rocky_setup.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('../logo.ico', '.'), ('../logo.png', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -36,4 +36,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     uac_admin=True,
+    icon='../logo.ico',
 )
