@@ -67,8 +67,21 @@ def resource_path(relative_path):
         # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
+        # Dev mode: try multiple locations
         base_path = os.path.abspath(".")
-
+        if os.path.exists(os.path.join(base_path, relative_path)):
+            return os.path.join(base_path, relative_path)
+        
+        # Check src/ui/assets
+        asset_path = os.path.join(base_path, "src", "ui", "assets", relative_path)
+        if os.path.exists(asset_path):
+            return asset_path
+            
+        # Check if in installer dir, look one level up
+        asset_path = os.path.join(base_path, "..", "src", "ui", "assets", relative_path)
+        if os.path.exists(asset_path):
+            return asset_path
+            
     return os.path.join(base_path, relative_path)
 
 # Embedded content for builder_runner.py
@@ -230,91 +243,75 @@ class WelcomePage(ttk.Frame):
         super().__init__(parent)
         self.controller = controller
         
-        # Split Welcome Page into two: Image Sidebar (Left) and Content (Right)
-        # This is a classic, professional installer layout.
-        
-        self.sidebar_frame = ttk.Frame(self, width=250)
-        self.sidebar_frame.pack(side="left", fill="y")
-        self.sidebar_frame.pack_propagate(False) # Keep width fixed
-        
-        self.content_frame = ttk.Frame(self)
-        self.content_frame.pack(side="right", fill="both", expand=True)
-        
-        # Sidebar Image
-        self.sidebar_img = None
-        try:
-            img_path = resource_path("welcome.png")
-            if os.path.exists(img_path):
-                if HAS_PIL:
-                    # Scale to fill the sidebar width and window height
-                    pil_img = Image.open(img_path)
-                    w, h = pil_img.size
-                    ratio = max(250/w, 600/h)
-                    new_size = (int(w * ratio), int(h * ratio))
-                    pil_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
-                    # Center Crop
-                    left = (new_size[0] - 250) / 2
-                    top = (new_size[1] - 600) / 2
-                    self.sidebar_img = ImageTk.PhotoImage(pil_img.crop((left, top, left + 250, top + 600)))
-                else:
-                    self.sidebar_img = tk.PhotoImage(file=img_path)
-                
-                img_lbl = ttk.Label(self.sidebar_frame, image=self.sidebar_img, background="#1a1a1a")
-                img_lbl.pack(fill="both", expand=True)
-            else:
-                self.sidebar_frame.configure(style="Footer.TFrame") # Fallback dark background
-        except Exception as e:
-            print(f"Error loading sidebar image: {e}")
-            self.sidebar_frame.configure(style="Footer.TFrame")
+        # Center everything in a vertical stack
+        main_container = ttk.Frame(self)
+        main_container.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Content area
-        inner_content = ttk.Frame(self.content_frame)
-        inner_content.place(relx=0.5, rely=0.5, anchor="center")
-        
-        label = ttk.Label(inner_content, text="Rocky Video Editor", font=("Segoe UI", 24, "bold"))
+        # 1. Text Content
+        label = ttk.Label(main_container, text="Rocky Video Editor", font=("Segoe UI", 36, "bold"))
         label.pack(pady=(0, 10))
         
-        version_lbl = ttk.Label(inner_content, text="Version 0.0.1 ALPHA", font=("Segoe UI", 10), foreground="#888")
-        version_lbl.pack(pady=(0, 30))
+        version_lbl = ttk.Label(main_container, text="v0.0.1 ALPHA", font=("Segoe UI", 12), foreground="#888")
+        version_lbl.pack(pady=(0, 45))
         
-        desc = ttk.Label(inner_content, text="Welcome to the Setup Wizard.\n\nThis will install Rocky Video Editor\non your computer.\n\nClick Next to continue.", 
-                         font=("Segoe UI", 12), justify="center")
+        desc_text = "Welcome to the Installation Wizard.\n\nThis tool will install the editor on your system.\nClick 'Get Started' to continue."
+        desc = ttk.Label(main_container, text=desc_text, 
+                         font=("Segoe UI", 13), justify="center")
         desc.pack(pady=10)
         
-        btn = ttk.Button(inner_content, text="Next", command=lambda: controller.show_page("LicensePage"), width=20)
-        btn.pack(pady=40)
+        # 2. Action
+        btn = ttk.Button(main_container, text="Get Started", command=lambda: controller.show_page("LicensePage"), width=25)
+        btn.pack(pady=60)
 
 class LicensePage(ttk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
         
-        center_frame = ttk.Frame(self)
-        center_frame.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.8)
+        # Professional License Layout
+        container = ttk.Frame(self, padding=(50, 40))
+        container.pack(fill="both", expand=True)
 
-        lbl = ttk.Label(center_frame, text="License Agreement", font=("Segoe UI", 16, "bold"))
-        lbl.pack(pady=20)
+        lbl = ttk.Label(container, text="License Agreement", font=("Segoe UI", 20, "bold"))
+        lbl.pack(anchor="nw", pady=(0, 25))
         
-        disclaimer = (
-            "Descargo de responsabilidad:\n\n"
-            "Este software es Open Source y se distribuye tal cual.\n"
-            "Garantizamos que no contiene virus y es seguro de usar.\n\n"
-            "Al instalar Rocky Video Editor, aceptas estos términos y condiciones."
+        # License Text
+        license_text = (
+            "Disclaimer and Terms of Use:\n\n"
+            "1. This software is Open Source and provided 'as is' without any warranties.\n"
+            "2. We guarantee the software is safe and free of malicious code.\n"
+            "3. By proceeding with the installation, you agree to the MIT License terms.\n"
+            "4. The developers are not responsible for any data loss during use.\n\n"
+            "-----------------------------------------------------------\n\n"
+            "Términos y Condiciones:\n\n"
+            "Este software es de código abierto y se distribuye tal cual.\n"
+            "Garantizamos que el instalador es seguro para su equipo.\n"
+            "Al instalar Rocky Video Editor, aceptas los términos de la licencia MIT."
         )
         
-        # Text background wrapper
-        text_frame = ttk.Frame(center_frame, padding=2, style="TFrame")
-        text_frame.pack(fill="both", expand=True, pady=10)
+        # Text widget for perfect left-alignment and scrolling
+        self.txt = tk.Text(container, bg="#1e1e1e", fg="#ffffff", font=("Segoe UI", 11),
+                           relief="flat", wrap="word", height=12, 
+                           padx=15, pady=15, insertbackground="white")
+        self.txt.insert("1.0", license_text)
+        self.txt.config(state="disabled") # Read only
+        self.txt.pack(fill="both", expand=True)
         
-        msg = ttk.Label(text_frame, text=disclaimer, justify="center", wraplength=600, font=("Segoe UI", 11))
-        msg.pack(fill="both", expand=True, padx=10, pady=10)
-        
+        # Acceptance checkbox aligned left
         self.var_accept = tk.BooleanVar(value=False)
-        chk = ttk.Checkbutton(center_frame, text="I accept the terms and conditions", variable=self.var_accept, command=self.toggle_next)
-        chk.pack(pady=20)
+        chk = ttk.Checkbutton(container, text="I have read and accept the terms and conditions", 
+                              variable=self.var_accept, command=self.toggle_next)
+        chk.pack(anchor="w", pady=(25, 10))
         
-        self.btn_next = ttk.Button(center_frame, text="Next", command=lambda: controller.show_page("InstallDirPage"), state="disabled", width=20)
-        self.btn_next.pack(pady=10)
+        # Navigation
+        nav_frame = ttk.Frame(container)
+        nav_frame.pack(fill="x", side="bottom", pady=(20, 0))
+        
+        self.btn_next = ttk.Button(nav_frame, text="Next", command=lambda: controller.show_page("InstallDirPage"), state="disabled", width=20)
+        self.btn_next.pack(side="right")
+        
+        btn_back = ttk.Button(nav_frame, text="Back", command=lambda: controller.show_page("WelcomePage"), width=15)
+        btn_back.pack(side="left")
 
     def toggle_next(self):
         if self.var_accept.get():
@@ -385,36 +382,54 @@ class ProgressPage(ttk.Frame):
         self.img_frame = ttk.Frame(self)
         self.img_frame.pack(fill="both", expand=True, side="top")
         
+        # Use Canvas for robust centering and backgrounds
+        self.img_canvas = tk.Canvas(self.img_frame, bg="#2b2b2b", highlightthickness=0, bd=0)
+        self.img_canvas.pack(fill="both", expand=True)
+        
         self.splash_img = None
+        self.img_path = resource_path("welcome.png")
+
+        # Defer image scaling until frame size is known
+        self.img_frame.bind("<Configure>", self.resize_image)
+
+    def resize_image(self, event=None):
+        if not os.path.exists(self.img_path):
+            self.img_canvas.delete("all")
+            self.img_canvas.create_text(400, 200, text="Installing...", fill="white", font=("Segoe UI", 24))
+            return
+
+        # Ensure we have the latest window dimensions
+        self.update_idletasks()
+        tw = self.img_frame.winfo_width()
+        th = self.img_frame.winfo_height()
+        
+        if tw < 10 or th < 10: return
+
         try:
-            img_path = resource_path("welcome.png")
-            if os.path.exists(img_path):
-                if HAS_PIL:
-                    # Calculate available space: Window is 800x600
-                    # Progress bar + Footer is roughly 50+15+15+4 = 84px
-                    # So roughly 800x510
-                    pil_img = Image.open(img_path)
-                    w, h = pil_img.size
-                    
-                    # Target size (dynamic would be better but geometry is fixed at 800x600)
-                    target_w, target_h = 800, 510
-                    
-                    # Scale to fit (contain) or fill? 
-                    # "Vea bien completa" suggests seeing the whole thing, so "fit" (contain)
-                    ratio = min(target_w/w, target_h/h)
-                    new_size = (int(w * ratio), int(h * ratio))
-                    pil_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
-                    self.splash_img = ImageTk.PhotoImage(pil_img)
-                else:
-                    self.splash_img = tk.PhotoImage(file=img_path)
+            if HAS_PIL:
+                pil_img = Image.open(self.img_path)
+                w, h = pil_img.size
+                ratio = min(tw / w, th / h)
+                new_size = (int(w * ratio), int(h * ratio))
                 
-                # Display image centered
-                self.img_lbl = ttk.Label(self.img_frame, image=self.splash_img, anchor="center")
-                self.img_lbl.pack(fill="both", expand=True)
+                # Robust resampling check
+                resample = getattr(Image, 'Resampling', Image).LANCZOS if hasattr(Image, 'Resampling') else getattr(Image, 'ANTIALIAS', 1)
+                pil_img = pil_img.resize(new_size, resample)
+                self.splash_img = ImageTk.PhotoImage(pil_img)
             else:
-                ttk.Label(self.img_frame, text="Installing...", font=("Segoe UI", 24)).pack(pady=50)
+                # NATIVE TK FALLBACK (No Pillow)
+                # Subsample factors are integers, but this is better than cropping!
+                native_img = tk.PhotoImage(file=self.img_path)
+                nw, nh = native_img.width(), native_img.height()
+                fact = max(1, max(nw // tw, nh // th))
+                self.splash_img = native_img.subsample(fact, fact) if fact > 1 else native_img
+            
+            # Center and draw
+            self.img_canvas.delete("all")
+            self.img_canvas.create_image(tw // 2, th // 2, anchor="center", image=self.splash_img)
+            
         except Exception as e:
-            ttk.Label(self.img_frame, text=f"Error loading image: {e}").pack(pady=20)
+            print(f"Resize error: {e}")
 
 
         # Hidden Log text logic
