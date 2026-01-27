@@ -34,14 +34,17 @@ def main():
         }
         QPushButton#primary:hover { background-color: #005a9e; }
         QProgressBar { 
-            border: 1px solid #333; 
-            border-radius: 2px; 
+            border: 2px solid #2d2d2d; 
+            border-radius: 6px; 
             text-align: center; 
-            height: 25px; 
-            background: #1e1e1e;
-            color: #ffffff;
+            height: 18px; 
+            background: #1a1a1a;
+            color: transparent; /* Clean look without text */
         }
-        QProgressBar::chunk { background-color: #06b025; }
+        QProgressBar::chunk { 
+            background: qlineargradient(spread:reflect, x1:0, y1:0.5, x2:1, y2:0.5, stop:0.1 #06b025, stop:0.5 #52ff7d, stop:0.9 #06b025);
+            border-radius: 4px;
+        }
         QCheckBox { color: #ffffff; }
     """)
     

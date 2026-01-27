@@ -24,7 +24,9 @@ if platform.system() == "Windows":
     
     if is_mingw:
         print("Detected MinGW. Configuring for GCC/MinGW...")
-        extra_compile_args = ['-std=c++17', '-O2']
+        # Added -U__STRICT_ANSI__ and -D_POSIX_C_SOURCE to fix 'strdup' issues in MinGW
+        extra_compile_args = ['-std=c++17', '-O2', '-U__STRICT_ANSI__', '-D_POSIX_C_SOURCE=200809L']
+        extra_link_args = ['-static-libgcc', '-static-libstdc++']
     else:
         print("Detected Windows. Configuring for MSVC...")
         extra_compile_args = ['/std:c++17', '/O2']

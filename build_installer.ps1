@@ -16,7 +16,14 @@ python -m pip install --upgrade pyinstaller pyside6
     --add-data "installer/core;core" `
     --add-data "installer/gui;gui" `
     --add-data "logo.png;." `
+    --add-data "logo.ico;." `
     --add-data "src;src" `
+    --hidden-import "urllib.request" `
+    --hidden-import "urllib.error" `
+    --hidden-import "xml.etree.ElementTree" `
+    --hidden-import "ctypes" `
+    --hidden-import "platform" `
+    --hidden-import "socket" `
     --clean `
     installer/main.py
 
