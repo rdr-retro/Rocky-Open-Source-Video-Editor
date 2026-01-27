@@ -10,9 +10,12 @@ def run_powershell_script(script_name):
     
     print(f"--- Executing {script_name} ---")
     try:
-        # Use powershell -ExecutionPolicy Bypass -File <script>
+        # Use the exact string command line for true terminal-like execution
+        cmd = f"powershell -ExecutionPolicy Bypass -File .\\{script_name}"
+        
         result = subprocess.run(
-            ["powershell", "-ExecutionPolicy", "Bypass", "-File", script_name],
+            cmd,
+            shell=True,
             check=False 
         )
         if result.returncode != 0:
