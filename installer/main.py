@@ -1,5 +1,7 @@
 import sys
+import os
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
 from gui.wizard import InstallerWizard
 
 def main():
@@ -43,8 +45,14 @@ def main():
         QCheckBox { color: #ffffff; }
     """)
     
-    wizard = InstallerWizard()
-    wizard.show()
+    window = InstallerWizard()
+    
+    # Taskbar Icon
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logo.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+        
+    window.show()
     sys.exit(app.exec())
 
 if __name__ == "__main__":

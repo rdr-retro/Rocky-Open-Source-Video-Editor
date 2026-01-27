@@ -146,9 +146,9 @@ if (Test-Path "plugins") {
     if ($ClPath) {
         Write-Host "[INFO] Compiling Plugins..." -ForegroundColor Yellow
         Push-Location plugins
-        if (Test-Path "invert.cpp") {
+        if (Test-Path "src/plugins/invert/invert.cpp") {
             # Note: We assume the user is in a Developer Command Prompt/PowerShell if cl exists
-            & cl /O2 /LD /I"../src/core/ofx/include" /I"../external/ffmpeg/include" invert.cpp /Fe:invert.ofx
+            & cl /O2 /LD /I"../src/core/ofx/include" /I"../external/ffmpeg/include" src/plugins/invert/invert.cpp /Fe:invert.ofx
         }
         Get-ChildItem -Filter *.obj | Remove-Item -Force
         Pop-Location

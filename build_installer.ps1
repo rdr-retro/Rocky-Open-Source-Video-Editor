@@ -15,6 +15,8 @@ python -m pip install --upgrade pyinstaller pyside6
 & pyinstaller --noconsole --onefile --uac-admin --icon="logo.ico" --version-file="version.txt" --name "RockyInstaller" `
     --add-data "installer/core;core" `
     --add-data "installer/gui;gui" `
+    --add-data "logo.png;." `
+    --add-data "src;src" `
     --clean `
     installer/main.py
 

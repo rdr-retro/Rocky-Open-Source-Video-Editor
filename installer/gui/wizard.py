@@ -10,10 +10,9 @@ class InstallWorker(QThread):
     log = Signal(str)
     finished = Signal(bool, str)
 
-    def __init__(self, target_path, create_shortcut=True):
+    def __init__(self, target_path):
         super().__init__()
         self.target_path = target_path
-        self.create_shortcut = create_shortcut
 
     def run(self):
         try:
@@ -21,10 +20,11 @@ class InstallWorker(QThread):
             self.progress.emit("Iniciando instalación...")
             self.log.emit("Preparando entorno aislado (Python Embebido)...")
 
-            # 2. Download Repo
-            REPO_URL = "https://github.com/rdr-retro/Rocky-Open-Source-Video-Editor"
-            RepositoryManager.download_repo(REPO_URL, self.target_path, lambda msg: self.progress.emit(msg))
-            self.log.emit(f"Repositorio descargado en: {self.target_path}")
+            # 2. Extract Bundled Source (Offline / Local Fixes)
+            # REPO_URL = "https://github.com/rdr-retro/Rocky-Open-Source-Video-Editor"
+            # RepositoryManager.download_repo(REPO_URL, self.target_path, lambda msg: self.progress.emit(msg))
+            RepositoryManager.extract_bundled_repo(self.target_path, lambda msg: self.progress.emit(msg))
+            self.log.emit(f"Código fuente instalado en: {self.target_path}")
 
             # 3. Setup Env & Compile
             EnvironmentManager.setup_app(self.target_path, lambda msg: self.progress.emit(msg))
@@ -33,10 +33,7 @@ class InstallWorker(QThread):
             # 4. Create Launcher
             EnvironmentManager.generate_app_exe(self.target_path, lambda msg: self.progress.emit(msg))
             
-            # 5. Desktop Shortcut
-            if self.create_shortcut:
-                self.progress.emit("Creando acceso directo...")
-                EnvironmentManager.create_desktop_shortcut(self.target_path)
+            # 5. (Shortcut creation moved to Finish button)
             
             self.finished.emit(True, "Instalación completada.")
         except Exception as e:
@@ -84,6 +81,11 @@ class InstallerWizard(QMainWindow):
         if idx == 3: # In progress
             self.btn_back.hide()
             self.btn_next.hide()
+            self.btn_cancel.hide()
+        elif idx == 4: # Success
+            self.btn_cancel.hide()
+            self.btn_back.hide()
+            self.btn_next.show()
 
     def _back(self):
         self.stack.setCurrentIndex(self.stack.currentIndex() - 1)
@@ -94,6 +96,10 @@ class InstallerWizard(QMainWindow):
         if idx == 2: # Start Installation
             self._start_install()
         elif idx == 4: # Finish
+            # Create shortcut if requested
+            if self.pages[2].check_shortcut.isChecked():
+                 path = self.pages[2].path_edit.text()
+                 EnvironmentManager.create_desktop_shortcut(path)
             self.close()
         else:
             self.stack.setCurrentIndex(idx + 1)
@@ -103,8 +109,7 @@ class InstallerWizard(QMainWindow):
         self.stack.setCurrentIndex(3)
         self._update_nav()
         path = self.pages[2].path_edit.text()
-        shortcut = self.pages[2].check_shortcut.isChecked()
-        self.worker = InstallWorker(path, create_shortcut=shortcut)
+        self.worker = InstallWorker(path)
         self.worker.progress.connect(self.pages[3].status.setText)
         self.worker.log.connect(self.pages[3].log.append)
         self.worker.finished.connect(self._on_finished)

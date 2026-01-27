@@ -1,6 +1,9 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, 
                              QTextEdit, QLineEdit, QHBoxLayout, QFileDialog, QProgressBar, QCheckBox)
+from PySide6.QtGui import QPixmap, Qt 
 from PySide6.QtCore import Qt, Signal
+import sys
+import os
 
 class WelcomePage(QWidget):
     def __init__(self):
@@ -12,6 +15,28 @@ class WelcomePage(QWidget):
                       "Se requiere conexión a Internet.")
         desc.setWordWrap(True)
         layout.addWidget(title)
+        
+        # Logo
+        logo_label = QLabel()
+        logo_label.setAlignment(Qt.AlignCenter)
+        
+        # Try to find logo in multiple possible locations
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        # 1. Running from source (installer/gui/../../logo.png)
+        logo_path = os.path.join(base_path, "..", "..", "logo.png")
+        if not os.path.exists(logo_path):
+             # 2. Frozen/Installed (root/logo.png because we added it to datas)
+            if getattr(sys, 'frozen', False):
+                logo_path = os.path.join(sys._MEIPASS, "logo.png")
+            else:
+                 logo_path = "logo.png"
+
+        if os.path.exists(logo_path):
+            pix = QPixmap(logo_path)
+            logo_label.setPixmap(pix.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        
+        layout.addWidget(logo_label)
+        
         layout.addWidget(desc)
         layout.addStretch()
 
