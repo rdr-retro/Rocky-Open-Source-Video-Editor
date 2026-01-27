@@ -17,12 +17,18 @@ from PySide6.QtWidgets import (QLabel, QVBoxLayout, QWidget, QPushButton,
 from PySide6.QtCore import Qt, QThread, Signal, QPoint, QSize, QTimer, QRectF
 from PySide6.QtGui import QImage, QPixmap, QColor, QResizeEvent, QPainter, QPen, QFont
 
-# Try to import external dependencies
+# --- DEEP DIAGNOSTICS FOR WHISPER ---
+whisper_error_msg = None
 try:
     import whisper
+except Exception as e:
+    import traceback
+    whisper = None
+    whisper_error_msg = f"Whisper Import Error: {str(e)}\n{traceback.format_exc()}"
+
+try:
     from moviepy import VideoFileClip
 except ImportError:
-    whisper = None
     VideoFileClip = None
 
 try:
@@ -60,7 +66,8 @@ class VideoProcessingThread(QThread):
             return
         
         if not whisper:
-            self.error.emit("Falta biblioteca whisper.")
+            error_details = whisper_error_msg if whisper_error_msg else "Unknown Import Error"
+            self.error.emit(f"Falta biblioteca whisper o fallo en dependencias.\nDetalles:\n{error_details}")
             return
 
         temp_files = []

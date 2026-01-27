@@ -455,16 +455,29 @@ class RockyApp(QMainWindow):
     """
 
     @staticmethod
-    def get_resource_path(relative_path):
-        """Get absolute path to resource, works for dev and for PyInstaller"""
+    @staticmethod
+    def get_resource_path(filename):
+        """Get absolute path to resource in src/ui/assets, works for dev and for PyInstaller"""
         if getattr(sys, 'frozen', False):
-            # PyInstaller creates a temp folder and stores path in _MEIPASS
-            base_path = sys._MEIPASS
+            # PyInstaller mode: Resources are at root level (because we will add them there) 
+            # OR under src/ui/assets if we kept structure.
+            # Best practice: Check mapped location first.
+            base = sys._MEIPASS
         else:
             # Dev mode: src/ui/rocky_ui.py -> ../.. -> root
-            base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            base = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-        return os.path.join(base_path, relative_path)
+        # Try specific assets folder
+        asset_path = os.path.join(base, "src", "ui", "assets", filename)
+        if os.path.exists(asset_path):
+            return asset_path
+            
+        # Try root fallback
+        root_path = os.path.join(base, filename)
+        if os.path.exists(root_path):
+            return root_path
+            
+        return asset_path # Return expected path even if missing
 
     def _get_rounded_icon(self, path):
         """On macOS, applies a squircle-style rounding to the icon for better integration."""
@@ -537,15 +550,14 @@ class RockyApp(QMainWindow):
         self.setup_event_connections()
         
         # Set Window Icon
-        # Use proper resource path resolution for Frozen/Dev modes
-        icon_path = self.get_resource_path(os.path.join("src", "img", "icon.png"))
+        # Set Window Icon
+        icon_path = self.get_resource_path("icon.png")
         
         if os.path.exists(icon_path):
             self.setWindowIcon(self._get_rounded_icon(icon_path))
         else:
-            print(f"WARNING: Icon not found at {icon_path}. Trying logo.png...", flush=True)
-            # Fallback to logo.png if icon.png is missing for some reason
-            logo_path = self.get_resource_path(os.path.join("src", "img", "logo.png"))
+            # Fallback
+            logo_path = self.get_resource_path("logo.png")
             if os.path.exists(logo_path):
                 self.setWindowIcon(self._get_rounded_icon(logo_path))
         

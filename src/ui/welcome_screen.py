@@ -55,8 +55,8 @@ class WelcomeScreen(QDialog):
         self.img_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         # Resolve welcome.png path
-        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        img_path = os.path.join(base_path, "src", "img", "welcome.png")
+        from .rocky_ui import RockyApp
+        img_path = RockyApp.get_resource_path("welcome.png")
         
         if os.path.exists(img_path):
             pixmap = QPixmap(img_path)
