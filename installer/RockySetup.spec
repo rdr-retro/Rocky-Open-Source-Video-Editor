@@ -5,7 +5,7 @@ a = Analysis(
     ['rocky_setup.py'],
     pathex=[],
     binaries=[],
-    datas=[('../logo.ico', '.'), ('../logo.png', '.')],
+    datas=[('../logo.ico', '.'), ('../logo.png', '.'), ('../src/ui/assets/welcome.png', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

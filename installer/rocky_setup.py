@@ -12,6 +12,54 @@ import sys
 
 import pythoncom  # Added import
 import ctypes
+try:
+    from PIL import Image, ImageTk
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
+# Embedded content for RockyBuilder.spec
+ROCKY_BUILDER_SPEC_CONTENT = r'''# -*- mode: python ; coding: utf-8 -*-
+
+
+a = Analysis(
+    ['builder_runner.py'],
+    pathex=[],
+    binaries=[],
+    datas=[('logo.ico', '.')],
+    hiddenimports=[],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name='RockyBuilder',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    uac_admin=True,
+    icon='logo.ico',
+)
+'''
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -87,7 +135,7 @@ if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
     }
 }
 
-pyinstaller --onefile --clean --name "RockyBuilder" builder_runner.py
+pyinstaller RockyBuilder.spec --clean
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Build successful."
@@ -108,7 +156,7 @@ class InstallerApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Rocky Video Editor Installer")
-        self.geometry("500x400")
+        self.geometry("800x600")
         self.resizable(False, False)
         
         try:
@@ -133,15 +181,41 @@ class InstallerApp(tk.Tk):
         self.pages = {}
         self.current_page = None
         self.install_dir = tk.StringVar(value=r"C:\Program Files\RockyEditor")
-        
+
+        self.configure_dark_theme()
         self.create_pages()
         self.show_page("WelcomePage")
+
+    def configure_dark_theme(self):
+        style = ttk.Style(self)
+        style.theme_use('clam')  # 'clam' allows for more color customization
+
+        bg_color = "#2b2b2b"
+        fg_color = "#ffffff"
+        accent_color = "#007acc"
+        button_bg = "#3c3c3c"
+        green_bar = "#00ff00" # Bright Green
+        
+        self.configure(bg=bg_color)
+        
+        style.configure("TFrame", background=bg_color)
+        style.configure("TLabel", background=bg_color, foreground=fg_color)
+        style.configure("TButton", background=button_bg, foreground=fg_color, borderwidth=1, focuscolor=accent_color)
+        style.map("TButton", background=[("active", "#505050")])
+        
+        style.configure("TEntry", fieldbackground="#404040", foreground=fg_color, insertcolor=fg_color)
+        style.configure("TProgressbar", background=green_bar, troughcolor="#2b2b2b", bordercolor=bg_color, thickness=4)
+        style.configure("TCheckbutton", background=bg_color, foreground=fg_color, focuscolor=bg_color)
+
 
     def create_pages(self):
         container = ttk.Frame(self)
         container.pack(fill="both", expand=True)
         
-        for PageClass in (WelcomePage, InstallDirPage, ProgressPage, FinishPage):
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
+
+        for PageClass in (WelcomePage, LicensePage, InstallDirPage, ProgressPage, FinishPage):
             page_name = PageClass.__name__
             page = PageClass(container, self)
             self.pages[page_name] = page
@@ -156,34 +230,120 @@ class WelcomePage(ttk.Frame):
         super().__init__(parent)
         self.controller = controller
         
-        label = ttk.Label(self, text="Welcome to Rocky Video Editor Installer", font=("Helvetica", 16))
-        label.pack(pady=40)
+        # Split Welcome Page into two: Image Sidebar (Left) and Content (Right)
+        # This is a classic, professional installer layout.
         
-        desc = ttk.Label(self, text="This wizard will download and install\nRocky Video Editor on your computer.")
+        self.sidebar_frame = ttk.Frame(self, width=250)
+        self.sidebar_frame.pack(side="left", fill="y")
+        self.sidebar_frame.pack_propagate(False) # Keep width fixed
+        
+        self.content_frame = ttk.Frame(self)
+        self.content_frame.pack(side="right", fill="both", expand=True)
+        
+        # Sidebar Image
+        self.sidebar_img = None
+        try:
+            img_path = resource_path("welcome.png")
+            if os.path.exists(img_path):
+                if HAS_PIL:
+                    # Scale to fill the sidebar width and window height
+                    pil_img = Image.open(img_path)
+                    w, h = pil_img.size
+                    ratio = max(250/w, 600/h)
+                    new_size = (int(w * ratio), int(h * ratio))
+                    pil_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
+                    # Center Crop
+                    left = (new_size[0] - 250) / 2
+                    top = (new_size[1] - 600) / 2
+                    self.sidebar_img = ImageTk.PhotoImage(pil_img.crop((left, top, left + 250, top + 600)))
+                else:
+                    self.sidebar_img = tk.PhotoImage(file=img_path)
+                
+                img_lbl = ttk.Label(self.sidebar_frame, image=self.sidebar_img, background="#1a1a1a")
+                img_lbl.pack(fill="both", expand=True)
+            else:
+                self.sidebar_frame.configure(style="Footer.TFrame") # Fallback dark background
+        except Exception as e:
+            print(f"Error loading sidebar image: {e}")
+            self.sidebar_frame.configure(style="Footer.TFrame")
+
+        # Content area
+        inner_content = ttk.Frame(self.content_frame)
+        inner_content.place(relx=0.5, rely=0.5, anchor="center")
+        
+        label = ttk.Label(inner_content, text="Rocky Video Editor", font=("Segoe UI", 24, "bold"))
+        label.pack(pady=(0, 10))
+        
+        version_lbl = ttk.Label(inner_content, text="Version 0.0.1 ALPHA", font=("Segoe UI", 10), foreground="#888")
+        version_lbl.pack(pady=(0, 30))
+        
+        desc = ttk.Label(inner_content, text="Welcome to the Setup Wizard.\n\nThis will install Rocky Video Editor\non your computer.\n\nClick Next to continue.", 
+                         font=("Segoe UI", 12), justify="center")
         desc.pack(pady=10)
         
-        btn = ttk.Button(self, text="Next", command=lambda: controller.show_page("InstallDirPage"))
-        btn.pack(side="bottom", pady=20)
+        btn = ttk.Button(inner_content, text="Next", command=lambda: controller.show_page("LicensePage"), width=20)
+        btn.pack(pady=40)
+
+class LicensePage(ttk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+        
+        center_frame = ttk.Frame(self)
+        center_frame.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.8)
+
+        lbl = ttk.Label(center_frame, text="License Agreement", font=("Segoe UI", 16, "bold"))
+        lbl.pack(pady=20)
+        
+        disclaimer = (
+            "Descargo de responsabilidad:\n\n"
+            "Este software es Open Source y se distribuye tal cual.\n"
+            "Garantizamos que no contiene virus y es seguro de usar.\n\n"
+            "Al instalar Rocky Video Editor, aceptas estos términos y condiciones."
+        )
+        
+        # Text background wrapper
+        text_frame = ttk.Frame(center_frame, padding=2, style="TFrame")
+        text_frame.pack(fill="both", expand=True, pady=10)
+        
+        msg = ttk.Label(text_frame, text=disclaimer, justify="center", wraplength=600, font=("Segoe UI", 11))
+        msg.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.var_accept = tk.BooleanVar(value=False)
+        chk = ttk.Checkbutton(center_frame, text="I accept the terms and conditions", variable=self.var_accept, command=self.toggle_next)
+        chk.pack(pady=20)
+        
+        self.btn_next = ttk.Button(center_frame, text="Next", command=lambda: controller.show_page("InstallDirPage"), state="disabled", width=20)
+        self.btn_next.pack(pady=10)
+
+    def toggle_next(self):
+        if self.var_accept.get():
+            self.btn_next.config(state="normal")
+        else:
+            self.btn_next.config(state="disabled")
 
 class InstallDirPage(ttk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
         
-        lbl = ttk.Label(self, text="Select Installation Directory", font=("Helvetica", 14))
+        center_frame = ttk.Frame(self)
+        center_frame.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.8)
+        
+        lbl = ttk.Label(center_frame, text="Select Installation Directory", font=("Segoe UI", 16))
         lbl.pack(pady=20)
         
-        frame = ttk.Frame(self)
-        frame.pack(pady=10, padx=20, fill="x")
+        input_frame = ttk.Frame(center_frame)
+        input_frame.pack(pady=20, fill="x")
         
-        self.entry = ttk.Entry(frame, textvariable=controller.install_dir)
-        self.entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.entry = ttk.Entry(input_frame, textvariable=controller.install_dir, font=("Segoe UI", 10))
+        self.entry.pack(side="left", fill="x", expand=True, padx=(0, 10), ipady=3)
         
-        btn_browse = ttk.Button(frame, text="Browse...", command=self.browse)
+        btn_browse = ttk.Button(input_frame, text="Browse...", command=self.browse)
         btn_browse.pack(side="right")
         
-        btn_next = ttk.Button(self, text="Install", command=lambda: controller.show_page("ProgressPage"))
-        btn_next.pack(side="bottom", pady=20)
+        btn_next = ttk.Button(center_frame, text="Install", command=lambda: controller.show_page("ProgressPage"), width=20)
+        btn_next.pack(pady=30)
 
     def browse(self):
         directory = filedialog.askdirectory()
@@ -195,33 +355,86 @@ class ProgressPage(ttk.Frame):
         super().__init__(parent)
         self.controller = controller
         
-        self.lbl = ttk.Label(self, text="Installing...", font=("Helvetica", 14))
-        self.lbl.pack(pady=20)
+        # --- AMD Style Layout (Robust Packing) ---
         
-        self.progress = ttk.Progressbar(self, orient="horizontal", length=400, mode="indeterminate")
-        self.progress.pack(pady=20)
+        # 3. Footer Area (Packed FIRST at Bottom to ensure visibility)
+        footer_style = ttk.Style()
+        footer_style.configure("Footer.TFrame", background="#1a1a1a")
         
-        self.status = tk.StringVar(value="Starting...")
-        self.status_lbl = ttk.Label(self, textvariable=self.status)
-        self.status_lbl.pack(pady=5)
+        self.footer = ttk.Frame(self, style="Footer.TFrame", padding=(20, 15))
+        self.footer.pack(fill="x", side="bottom")
         
-        self.log_text = tk.Text(self, height=10, width=50, state="disabled", font=("Consolas", 8))
-        self.log_text.pack(pady=10, padx=10)
+        # Status Text (Left)
+        self.status = tk.StringVar(value="Checking system requirements...")
+        self.status_lbl = ttk.Label(self.footer, textvariable=self.status, 
+                                    font=("Segoe UI", 10), background="#1a1a1a", foreground="#cccccc")
+        self.status_lbl.pack(side="left", anchor="center")
+        
+        # Cancel Button (Right)
+        self.btn_cancel = ttk.Button(self.footer, text="Cancel", command=self.cancel_install)
+        self.btn_cancel.pack(side="right", anchor="center")
+        
+        # 2. Progress Line (Packed SECOND at Bottom, sitting above footer)
+        prog_frame = ttk.Frame(self, height=4) 
+        prog_frame.pack(fill="x", side="bottom")
+        
+        self.progress = ttk.Progressbar(prog_frame, orient="horizontal", mode="indeterminate", style="TProgressbar")
+        self.progress.pack(fill="x", expand=True)
+
+        # 1. Hero Image Area (Packed LAST, taking remaining space)
+        self.img_frame = ttk.Frame(self)
+        self.img_frame.pack(fill="both", expand=True, side="top")
+        
+        self.splash_img = None
+        try:
+            img_path = resource_path("welcome.png")
+            if os.path.exists(img_path):
+                if HAS_PIL:
+                    # Calculate available space: Window is 800x600
+                    # Progress bar + Footer is roughly 50+15+15+4 = 84px
+                    # So roughly 800x510
+                    pil_img = Image.open(img_path)
+                    w, h = pil_img.size
+                    
+                    # Target size (dynamic would be better but geometry is fixed at 800x600)
+                    target_w, target_h = 800, 510
+                    
+                    # Scale to fit (contain) or fill? 
+                    # "Vea bien completa" suggests seeing the whole thing, so "fit" (contain)
+                    ratio = min(target_w/w, target_h/h)
+                    new_size = (int(w * ratio), int(h * ratio))
+                    pil_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
+                    self.splash_img = ImageTk.PhotoImage(pil_img)
+                else:
+                    self.splash_img = tk.PhotoImage(file=img_path)
+                
+                # Display image centered
+                self.img_lbl = ttk.Label(self.img_frame, image=self.splash_img, anchor="center")
+                self.img_lbl.pack(fill="both", expand=True)
+            else:
+                ttk.Label(self.img_frame, text="Installing...", font=("Segoe UI", 24)).pack(pady=50)
+        except Exception as e:
+            ttk.Label(self.img_frame, text=f"Error loading image: {e}").pack(pady=20)
+
+
+        # Hidden Log text logic
+        self.log_text = tk.Text(self, height=1, width=1, state="disabled") 
 
         # Start installation on show
         self.bind("<Visibility>", self.start_installation)
 
     def log(self, message):
-        self.log_text.config(state="normal")
-        self.log_text.insert("end", message + "\n")
-        self.log_text.see("end")
-        self.log_text.config(state="disabled")
         self.status.set(message)
+        print(message) 
+
+    def cancel_install(self):
+        if messagebox.askyesno("Cancel Installation", "Are you sure you want to cancel?"):
+            self.controller.quit()
 
     def start_installation(self, event):
         if hasattr(self, 'started'): return
         self.started = True
-        self.progress.start(10)
+        self.progress.start(10) # Slower, smoother pulse
         threading.Thread(target=self.run_install, daemon=True).start()
 
     def check_and_install_python(self, install_path):
@@ -305,13 +518,23 @@ class ProgressPage(ttk.Frame):
             
             os.remove(zip_path)
             
-            # 4. Inject Scripts
-            self.log("Injecting builder scripts...")
+            # 4. Inject Scripts & Configs
+            self.log("Injecting builder scripts and configs...")
             with open(os.path.join(install_path, "builder_runner.py"), "w", encoding="utf-8") as f:
                 f.write(BUILDER_RUNNER_CONTENT)
             
+            with open(os.path.join(install_path, "RockyBuilder.spec"), "w", encoding="utf-8") as f:
+                f.write(ROCKY_BUILDER_SPEC_CONTENT)
+            
             with open(os.path.join(install_path, "make_builder_exe.ps1"), "w", encoding="utf-8") as f:
                 f.write(MAKE_BUILDER_EXE_CONTENT)
+                
+            # Copy logo.ico from installer to install_path for the builder to use
+            try:
+                if os.path.exists(resource_path('logo.ico')):
+                    shutil.copy2(resource_path('logo.ico'), os.path.join(install_path, 'logo.ico'))
+            except Exception as e:
+                self.log(f"Warning: Could not copy logo.ico: {e}")
 
             # 5. Build Launcher
             self.log("Building launcher (this may take a while)...")
@@ -367,14 +590,18 @@ class FinishPage(ttk.Frame):
         super().__init__(parent)
         self.controller = controller
         
-        lbl = ttk.Label(self, text="Installation Setup Completed!", font=("Helvetica", 16))
-        lbl.pack(pady=40)
+        center_frame = ttk.Frame(self)
+        center_frame.place(relx=0.5, rely=0.5, anchor="center")
         
-        desc = ttk.Label(self, text="Rocky Video Editor has been successfully installed.\nA shortcut has been created on your desktop.")
+        lbl = ttk.Label(center_frame, text="Installation Setup Completed!", font=("Segoe UI", 18, "bold"))
+        lbl.pack(pady=30)
+        
+        desc = ttk.Label(center_frame, text="Rocky Video Editor has been successfully installed.\nA shortcut has been created on your desktop.", 
+                         font=("Segoe UI", 11), justify="center")
         desc.pack(pady=10)
         
-        btn = ttk.Button(self, text="Finish", command=controller.quit)
-        btn.pack(side="bottom", pady=20)
+        btn = ttk.Button(center_frame, text="Finish", command=controller.quit, width=20)
+        btn.pack(pady=40)
 
 if __name__ == "__main__":
     app = InstallerApp()
