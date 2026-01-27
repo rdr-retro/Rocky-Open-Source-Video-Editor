@@ -17,6 +17,8 @@ python -m pip install --upgrade pyinstaller pyside6
     --add-data "installer/gui;gui" `
     --add-data "logo.png;." `
     --add-data "logo.ico;." `
+    --add-data "requirements.txt;." `
+    --add-data "setup.py;." `
     --add-data "src;src" `
     --hidden-import "urllib.request" `
     --hidden-import "urllib.error" `
