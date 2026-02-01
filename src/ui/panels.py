@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGraphicsOpacityEffect, 
-                               QPushButton, QFrame, QMenu, QGraphicsDropShadowEffect, QGridLayout)
+                               QPushButton, QFrame, QMenu, QGraphicsDropShadowEffect, QGridLayout, QSizePolicy)
 from PySide6.QtCore import Qt, Signal, QSize, QRect, QPoint, QTimer, QVariantAnimation, QEasingCurve
 from PySide6.QtGui import QPainter, QColor, QPen, QCursor, QPainterPath, QRegion, QPixmap, QIcon
 import os
@@ -91,6 +91,7 @@ class PanelTypeGridMenu(QWidget):
                 ("visor.png", "Visor de Video", "Viewer", "Shift F5"),
                 ("timeline.png", "Línea de tiempo", "Timeline", "Shift F12"),
                 ("transformador.png", "Transformador", "MediaTransformer", "Shift F8"),
+                ("herramientas.png", "Herramientas", "Tools", "Shift T"),
             ]),
             ("Scripts", [
                 ("terminal.png", "Consola de Python", "PythonTerminal", "Shift F4"),
@@ -101,7 +102,6 @@ class PanelTypeGridMenu(QWidget):
                 ("efectos.png", "Efectos", "Effects", "Shift F3"),
                 ("Master.png", "Audio Master", "MasterMeter", "Shift F9"),
                 ("folder.png", "Explorador", "FileBrowser", "Shift F1"),
-                ("terminal.png", "Monitor Recursos", "ResourceMonitor", "Shift F2"),
             ]),
             ("IA Tools", [
                 ("subtitulos.png", "Subtítulos", "SubtitleGenerator", "Shift F6"),
@@ -200,14 +200,14 @@ class RockyPanelHeader(QFrame):
         
         # 1. Type Switcher (Now on the LEFT)
         self.btn_type = QPushButton(" ▾") # Professional icon placeholder with chevron
-        self.btn_type.setFixedSize(38, 24)
+        self.btn_type.setFixedSize(44, 18)
         self.btn_type.setStyleSheet(f"""
             QPushButton {{
                 color: {dt.ACCENT_PRIMARY}; 
-                font-size: 14px;
+                font-size: 11px;
                 background-color: rgba(255, 255, 255, 0.05);
                 border: 1px solid #444;
-                border-radius: 6px;
+                border-radius: 9px;
                 padding-bottom: 2px;
             }}
             QPushButton:hover {{
@@ -221,35 +221,50 @@ class RockyPanelHeader(QFrame):
         self.lbl_title = QLabel(title)
         self.lbl_title.setStyleSheet("margin-left: 2px; font-weight: 600; color: #888;")
         
+        # CRITICAL FIX 3: "Ignored" allows shrinking to 0 (no blocking). 
+        # But we act as the spacer (stretch=1) so we don't vanish unless forced.
+        self.lbl_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.lbl_title.setMinimumWidth(0)
+        
         layout.addWidget(self.btn_type)
-        layout.addWidget(self.lbl_title)
+        layout.addWidget(self.lbl_title, 1) # Stretch factor 1 = Pushes buttons to right
         
         # 3. Minimal Expansion Button (Built-in '+' button)
         self.btn_expand = QPushButton("+")
-        self.btn_expand.setFixedSize(20, 20)
+        self.btn_expand.setFixedSize(18, 18)
         self.btn_expand.setStyleSheet(f"""
             QPushButton {{
                 color: {dt.ACCENT_PRIMARY};
-                font-size: 14px;
+                font-size: 12px;
                 font-weight: bold;
                 background-color: transparent;
                 border: none;
+                border-radius: 9px;
             }}
             QPushButton:hover {{
                 background-color: rgba(255, 153, 0, 0.2);
-                border-radius: 8px;
             }}
         """)
         self.btn_expand.clicked.connect(self.toggle_collapse)
         self.btn_expand.hide() # Hidden by default
         layout.addWidget(self.btn_expand)
         
-        layout.addStretch()
+        # layout.addStretch() -> REMOVED (Title is now the stretch)
 
         # Connect events
         self.btn_type.clicked.connect(self.show_grid_menu)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_header_context_menu)
+
+    def add_custom_widget(self, widget):
+        """Insert a custom widget into the header layout (before the spacer)."""
+        # Index -2 to place before the stretch and expand button
+        # But we added addStretch() at the end. 
+        # Layout items: [TypeBtn] [Title] [Stretch]
+        # We want: [TypeBtn] [Title] [Widget] [Stretch]
+        
+        # Insert at index 2 (after title)
+        self.layout().insertWidget(2, widget)
 
     def mouseDoubleClickEvent(self, event):
         """Header collapse on double click."""
@@ -267,7 +282,7 @@ class RockyPanelHeader(QFrame):
             self.btn_expand.setStyleSheet(f"""
                 QPushButton {{
                     color: white;
-                    font-size: 12px;
+                    font-size: 10px;
                     font-weight: bold;
                     background-color: rgba(0, 0, 0, 0.4);
                     border-radius: 8px;
@@ -354,16 +369,17 @@ class RockyPanelHeader(QFrame):
             "PythonTerminal": "terminal.png",
             "SubtitleGenerator": "subtitulos.png",
             "TextEditor": "texteditor.png",
-            "ResourceMonitor": "terminal.png"
+            "TextEditor": "texteditor.png",
+            "Tools": "herramientas.png"
         }
         
         icon_name = icons.get(panel_type, "visor.png")
         icon_path = os.path.join(os.getcwd(), "src", "img", icon_name)
         
         if os.path.exists(icon_path):
-            pix = QPixmap(icon_path).scaled(14, 14, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pix = QPixmap(icon_path).scaled(12, 12, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.btn_type.setIcon(QIcon(pix))
-            self.btn_type.setIconSize(QSize(14, 14))
+            self.btn_type.setIconSize(QSize(12, 12))
             self.btn_type.setText(" ▾") # Keep the chevron
         else:
             # Fallback to technical indicator if PNG not found (Clean UI)
@@ -640,6 +656,9 @@ class RockyPanel(QFrame):
         
         layout.addWidget(self.viewport)
         
+        if "HERRAMIENTAS" in title.upper() or "TOOLS" in title.upper():
+            self.current_type = "Tools"
+
         # 1. Header (Inside Viewport) - Fixed height, no stretch
         self.header = RockyPanelHeader(title, self)
         viewport_layout.addWidget(self.header, stretch=0)
@@ -664,11 +683,17 @@ class RockyPanel(QFrame):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
         
-        if content_widget:
-            content_layout.addWidget(content_widget)
-            
-        # CRITICAL FIX: Content area must take ALL remaining space after header
-        viewport_layout.addWidget(self.content_area, stretch=1)
+        # SPECIAL CASE: Tools Panel lives IN THE HEADER
+        if self.current_type == "Tools" and content_widget:
+            self.header.add_custom_widget(content_widget)
+            self.content_area.hide()
+            # Force minimal height for the whole panel container
+            self.setFixedHeight(30) # Header (28) + Borders (2)
+        else:
+            if content_widget:
+                content_layout.addWidget(content_widget)
+            # CRITICAL FIX: Content area must take ALL remaining space after header
+            viewport_layout.addWidget(self.content_area, stretch=1)
         
         # Sync initial icon
         self.header.update_type_icon(self.current_type)
@@ -988,23 +1013,9 @@ class RockyPanel(QFrame):
         # Split preview is now handled by the top-level global_split_overlay
 
     def _show_pie_menu(self):
-        """Generate and show the radial pie menu."""
-        from .radial_menu import RadialMenu
-        from PySide6.QtGui import QCursor
-        
-        menu_items = [
-            ("Viewer", "•", lambda: self.change_panel_type("Viewer")),
-            ("Timeline", "•", lambda: self.change_panel_type("Timeline")),
-            ("Properties", "•", lambda: self.change_panel_type("Properties")),
-            ("Effects", "•", lambda: self.change_panel_type("Effects")),
-            ("MediaTransformer", "•", lambda: self.change_panel_type("MediaTransformer")),
-            ("MasterMeter", "•", lambda: self.change_panel_type("MasterMeter")),
-            ("FileBrowser", "•", lambda: self.change_panel_type("FileBrowser")),
-            ("PythonTerminal", "•", lambda: self.change_panel_type("PythonTerminal")),
-        ]
-        
-        menu = RadialMenu(self.window(), menu_items)
-        menu.show_at(QCursor.pos())
+        """DEPRECATED: Radial menu removed as per user request."""
+        # Use standard grid menu instead if needed, but for now this is disabled.
+        pass
 
     def close_panel(self):
         """Logic to close and join panels."""
@@ -1549,13 +1560,13 @@ class RockyPanel(QFrame):
                 label.setStyleSheet("color: #ff5050; padding: 20px;")
                 label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 return label
-        elif panel_type == "ResourceMonitor":
-            # Import and create ResourceMonitorPanel
+        elif panel_type == "Tools":
+            # Import and create ToolsPanel
             try:
-                from .resource_monitor import ResourceMonitorPanel
-                return ResourceMonitorPanel()
+                from .tools_panel import ToolsPanel
+                return ToolsPanel()
             except Exception as e:
-                label = QLabel(f"Error cargando Monitor de Recursos: {e}")
+                label = QLabel(f"Error cargando Panel de Herramientas: {e}")
                 label.setStyleSheet("color: #ff5050; padding: 20px;")
                 label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 return label

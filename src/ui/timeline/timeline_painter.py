@@ -14,29 +14,37 @@ class TimelinePainter:
     Handles drawing logic for the SimpleTimeline.
     """
     
-    # Class-level Constants for Optimization
-    COLOR_BG = QColor(30, 30, 30)
-    COLOR_GRID_MAJOR = QColor(80, 80, 80, 150)
-    COLOR_GRID_MINOR = QColor(60, 60, 60, 80)
-    COLOR_TRACK_DIVIDER = QColor(40, 40, 40)
-    
-    COLOR_VIDEO_BODY = QColor("#763436")
-    COLOR_VIDEO_HEADER = QColor("#9E4347")
-    COLOR_AUDIO_BODY = QColor("#3a9b8f")
-    COLOR_AUDIO_HEADER = QColor("#49c2b3")
-    COLOR_TEXT = QColor(230, 230, 230)
-    COLOR_SELECTION = QColor("#FFFF00")
-    COLOR_PLAYHEAD = QColor(0, 0, 0)
-    COLOR_PLAYHEAD_LINE = QColor(255, 255, 255)
-    
-    # Button Colors
-    COLOR_BTN_FX = QColor("#000000")
-    COLOR_BTN_PROXY_GEN = QColor("#FF8800")
-    COLOR_BTN_PROXY_READY = QColor("#00FF00")
-    COLOR_BTN_PROXY_OFF = QColor("#000000")
-    COLOR_BTN_SUB = QColor("#673AB7") # Purple for Subs
-    COLOR_BTN_TEXT = QColor("#FFFFFF")
-    COLOR_BTN_TEXT_BLACK = QColor("#000000")
+    # --- CONFIGURATION (CONSTANTS) ---
+    class Palette:
+        """Centralized Color Scheme for Timeline Elements."""
+        BG = QColor(30, 30, 30)
+        GRID_MAJOR = QColor(80, 80, 80, 150)
+        GRID_MINOR = QColor(60, 60, 60, 80)
+        TRACK_DIVIDER = QColor(40, 40, 40)
+        
+        VIDEO_BODY = QColor("#763436")
+        VIDEO_HEADER = QColor("#9E4347")
+        AUDIO_BODY = QColor("#3a9b8f")
+        AUDIO_HEADER = QColor("#49c2b3")
+        
+        TEXT_PRIMARY = QColor(230, 230, 230)
+        SELECTION_BORDER = QColor("#FFFF00")
+        PLAYHEAD_BODY = QColor(0, 0, 0)
+        PLAYHEAD_LINE = QColor(255, 255, 255)
+        
+        # UI Elements
+        BTN_TEXT_ACTIVE = QColor("#00FF00")
+        BTN_TEXT_INACTIVE = QColor("#FFFFFF")
+        FADE_HANDLE = QColor(255, 255, 255)
+
+    class Dimensions:
+        """Layout Measurements (Pixels)."""
+        HEADER_HEIGHT = 28
+        BUTTON_SIZE = 24
+        BUTTON_SPACING = 8
+        CHAMFER_SIZE = 10.0   # Corner cut size
+        FADE_TRIANGLE = 5.0   # Size of fade handles
+        FADE_GAP = 1.5        # Padding from edge
     
     def __init__(self, timeline):
         """
@@ -62,10 +70,11 @@ class TimelinePainter:
         # Visible region for culling
         visible_rect = event.rect()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         
         try:
             # 1. BACKGROUND
-            painter.fillRect(visible_rect, self.COLOR_BG)
+            painter.fillRect(visible_rect, self.Palette.BG)
             
             # 2. GRID
             self._draw_grid(painter, visible_rect)
@@ -98,8 +107,8 @@ class TimelinePainter:
         # Align to major step
         t_major = math.floor(start_time / major_step) * major_step
         
-        pen_major = QPen(self.COLOR_GRID_MAJOR, 1, Qt.PenStyle.DotLine)
-        pen_minor = QPen(self.COLOR_GRID_MINOR, 1, Qt.PenStyle.DotLine)
+        pen_major = QPen(self.Palette.GRID_MAJOR, 1, Qt.PenStyle.DotLine)
+        pen_minor = QPen(self.Palette.GRID_MINOR, 1, Qt.PenStyle.DotLine)
         
         height = self.timeline.height()
         
@@ -122,7 +131,7 @@ class TimelinePainter:
 
     def _draw_tracks(self, painter):
         """Draw horizontal track dividers based on actual model tracks."""
-        painter.setPen(QPen(self.COLOR_TRACK_DIVIDER, 1))
+        painter.setPen(QPen(self.Palette.TRACK_DIVIDER, 1))
         
         current_y = 0
         width = self.timeline.width()
@@ -163,18 +172,18 @@ class TimelinePainter:
             is_video = (clip.track_index < len(self.model.track_types) and self.model.track_types[clip.track_index] == TrackType.VIDEO)
             
             if is_video:
-                body_col = self.COLOR_VIDEO_BODY
-                header_col = self.COLOR_VIDEO_HEADER
+                body_col = self.Palette.VIDEO_BODY
+                header_col = self.Palette.VIDEO_HEADER
             else:
-                body_col = self.COLOR_AUDIO_BODY
-                header_col = self.COLOR_AUDIO_HEADER
+                body_col = self.Palette.AUDIO_BODY
+                header_col = self.Palette.AUDIO_HEADER
                 
             if clip.selected:
                  body_col = body_col.lighter(130)
                  header_col = header_col.lighter(130)
             
-            # 1. Body & Header Path (Chamfered Top Corners)
-            cut_size = 10.0
+            # 1. Body & Header Path (Proprietary Chamfer Shape)
+            cut_size = self.Dimensions.CHAMFER_SIZE
             clip_path = QPainterPath()
             clip_path.moveTo(clip_x, track_y + 1 + clip_h) # Bottom-left
             clip_path.lineTo(clip_x + clip_w, track_y + 1 + clip_h) # Bottom-right
@@ -192,7 +201,7 @@ class TimelinePainter:
             painter.drawPath(clip_path)
             
             # --- WAVEFORM / THUMBNAILS ---
-            header_h = 22 # Increased from 14 for larger buttons
+            header_h = self.Dimensions.HEADER_HEIGHT 
             content_y = track_y + header_h + 1
             content_h = clip_h - header_h
             
@@ -212,7 +221,7 @@ class TimelinePainter:
                     painter.drawText(int(clip_x) + 5, int(track_y) + 30, "Computing peaks...")
             
             # 3. Text
-            painter.setPen(self.COLOR_TEXT)
+            painter.setPen(self.Palette.TEXT_PRIMARY)
             font = painter.font()
             font.setPointSize(9) 
             font.setBold(False)
@@ -233,7 +242,7 @@ class TimelinePainter:
             
             # 6. Selection Border
             if clip.selected:
-                painter.setPen(QPen(self.COLOR_SELECTION, 1.5))
+                painter.setPen(QPen(self.Palette.SELECTION_BORDER, 1.5))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawPath(clip_path)
 
@@ -306,12 +315,12 @@ class TimelinePainter:
         painter.drawRect(QRectF(center_x - bar_w/2, target_y - 1.5, bar_w, 3))
         
         # Fade Handles (Top Triangles - positioned inside chamfer with gap)
-        COLOR_FADE_HANDLE = QColor(255, 255, 255)
-        cut_size = 10.0
+        COLOR_FADE_HANDLE = self.Palette.FADE_HANDLE
+        cut_size = self.Dimensions.CHAMFER_SIZE
         
         # Triangle positioned inside the chamfer area
-        triangle_size = 5.0
-        gap = 1.5  # Gap between triangle and the clip body edge
+        triangle_size = self.Dimensions.FADE_TRIANGLE
+        gap = self.Dimensions.FADE_GAP  # Gap between triangle and the clip body edge
         
         # Top-Left Fade Handle (inside the chamfer, separated from body)
         path_tl = QPainterPath()
@@ -334,9 +343,9 @@ class TimelinePainter:
 
     def _draw_clip_buttons(self, painter, clip, clip_x, clip_w, track_y, cut_size):
         """Draws FX and PX buttons using images on the clip header."""
-        button_w = 18
-        button_h = 18
-        spacing = 8
+        button_w = self.Dimensions.BUTTON_SIZE
+        button_h = self.Dimensions.BUTTON_SIZE
+        spacing = self.Dimensions.BUTTON_SPACING
         
         # 1. Determine State for PX
         p_status = getattr(clip, 'proxy_status', ProxyStatus.NONE)
@@ -351,7 +360,7 @@ class TimelinePainter:
         
         # 2. Draw PX Button (Rightmost)
         px_x = clip_x + clip_w - button_w - cut_size - 4
-        px_y = track_y + 1 + (22 - button_h) / 2
+        px_y = track_y + 1 + (self.Dimensions.HEADER_HEIGHT - button_h) / 2
         rect_px = QRectF(px_x, px_y, button_w, button_h)
         
         if not self.img_px.isNull():
@@ -368,7 +377,7 @@ class TimelinePainter:
                 # Normal state: White image as is
                 painter.drawImage(rect_px, self.img_px)
         else:
-            painter.setPen(QColor(0, 255, 0) if px_active else self.COLOR_BTN_TEXT)
+            painter.setPen(QColor(0, 255, 0) if px_active else self.Palette.BTN_TEXT_INACTIVE)
             painter.drawText(rect_px, Qt.AlignmentFlag.AlignCenter, "PX")
 
         # 3. Draw FX Button (Left of PX)
@@ -390,7 +399,7 @@ class TimelinePainter:
             else:
                 painter.drawImage(rect_fx, self.img_inf)
         else:
-            painter.setPen(QColor(0, 180, 255) if is_fx_target else self.COLOR_BTN_TEXT)
+            painter.setPen(QColor(0, 180, 255) if is_fx_target else self.Palette.BTN_TEXT_INACTIVE)
             painter.drawText(rect_fx, Qt.AlignmentFlag.AlignCenter, "...")
         
         # SUB Button removed as per simplified design
@@ -473,8 +482,8 @@ class TimelinePainter:
         # Consistent Precision Drawing
         line = QLineF(ph_x, 0, ph_x, self.timeline.height())
         
-        painter.setPen(QPen(self.COLOR_PLAYHEAD, 3))
+        painter.setPen(QPen(self.Palette.PLAYHEAD_BODY, 3))
         painter.drawLine(line)
         
-        painter.setPen(QPen(self.COLOR_PLAYHEAD_LINE, 1))
+        painter.setPen(QPen(self.Palette.PLAYHEAD_LINE, 1))
         painter.drawLine(line)

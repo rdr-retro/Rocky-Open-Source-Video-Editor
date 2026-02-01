@@ -696,6 +696,11 @@ class RockyApp(QMainWindow):
         # 1. Toolbar
         self.toolbar = RockyToolbar(self)
         main_layout.addWidget(self.toolbar)
+
+        # 1.5 Tools Panel (Removed from here, now part of flexible layout)
+        # from .tools_panel import ToolsPanel
+        # self.tools_panel = ToolsPanel(self)
+        # main_layout.addWidget(self.tools_panel)
         
         # Setup Workspace callbacks
         self.toolbar.workspace_bar.on_save_requested = self.save_current_layout_to_workspace
@@ -1813,41 +1818,14 @@ class RockyApp(QMainWindow):
             self.timeline_registry.append(timeline_widget)
             
             # 1. Sync Playhead & Structure
-            # Avoid duplicate connections if already connected
-            try:
-                timeline_widget.time_updated.disconnect(self.on_time_changed)
-            except: pass
             timeline_widget.time_updated.connect(self.on_time_changed)
-            
-            try:
-                timeline_widget.structure_changed.disconnect(self.on_structure_changed)
-            except: pass
             timeline_widget.structure_changed.connect(self.on_structure_changed)
             
             # 2. UI Action Signals
-            try:
-                timeline_widget.play_pause_requested.disconnect(self.toggle_play)
-            except: pass
             timeline_widget.play_pause_requested.connect(self.toggle_play)
-            
-            try:
-                timeline_widget.view_updated.disconnect(self.sync_scroll_to_view)
-            except: pass
             timeline_widget.view_updated.connect(self.sync_scroll_to_view)
-            
-            try:
-                timeline_widget.hover_x_changed.disconnect(self.sync_hover_to_ruler)
-            except: pass
             timeline_widget.hover_x_changed.connect(self.sync_hover_to_ruler)
-            
-            try:
-                timeline_widget.clip_proxy_toggled.disconnect(self.on_clip_proxy_clicked)
-            except: pass
             timeline_widget.clip_proxy_toggled.connect(self.on_clip_proxy_clicked)
-            
-            try:
-                timeline_widget.clip_fx_toggled.disconnect(self.on_clip_fx_clicked)
-            except: pass
             timeline_widget.clip_fx_toggled.connect(self.on_clip_fx_clicked)
 
     def sync_timeline_registration(self, widget):
@@ -1911,9 +1889,10 @@ class RockyApp(QMainWindow):
                 {
                     "type": "splitter",
                     "orientation": 2, # Vertical (top-bottom)
-                    "sizes": [600, 400],  # 60% viewer, 40% timeline
+                    "sizes": [600, 32, 400],  # Viewer, Tools (Collapsed), Timeline
                     "children": [
                         {"type": "panel", "panel_type": "Viewer", "title": "VISOR DE VIDEO"},
+                        {"type": "panel", "panel_type": "Tools", "title": "TOOLS"},
                         {"type": "panel", "panel_type": "Timeline", "title": "LÍNEA DE TIEMPO"}
                     ]
                 },

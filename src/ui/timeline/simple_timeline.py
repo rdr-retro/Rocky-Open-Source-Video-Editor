@@ -190,10 +190,11 @@ class SimpleTimeline(QWidget):
         clip_h = track_h - 2
         
         # SHARED DIMENSIONS WITH PAINTER
-        cut_size = 10.0
+        Dim = TimelinePainter.Dimensions
+        cut_size = Dim.CHAMFER_SIZE
         header_y = track_y + 1
-        triangle_size = 5.0
-        gap = 1.5
+        triangle_size = Dim.FADE_TRIANGLE
+        gap = Dim.FADE_GAP
         
         # 1. Fade Handles (Top Triangles - inside chamfer with gap)
         if (clip_x + gap <= event.x() <= clip_x + gap + triangle_size and 
@@ -242,17 +243,19 @@ class SimpleTimeline(QWidget):
         track_y = self._get_track_y_positions()[clip.track_index]
         
         # Match dimensions in TimelinePainter
-        button_w, button_h, spacing = 28, 16, 4
-        cut_size = 10.0
+        Dim = TimelinePainter.Dimensions
+        button_w, button_h, spacing = Dim.BUTTON_SIZE, Dim.BUTTON_SIZE, Dim.BUTTON_SPACING
+        cut_size = Dim.CHAMFER_SIZE
         
         # Hit regions (Right to Left)
         # PX
         px_x = clip_x + clip_w - button_w - cut_size - 4
-        rect_px = QRectF(px_x, track_y + 2, button_w, button_h)
+        px_y = track_y + 1 + (Dim.HEADER_HEIGHT - button_h) / 2 # Center Vertically
+        rect_px = QRectF(px_x, px_y, button_w, button_h)
         
         # FX
         fx_x = px_x - button_w - spacing
-        rect_fx = QRectF(fx_x, track_y + 2, button_w, button_h)
+        rect_fx = QRectF(fx_x, px_y, button_w, button_h)
         
         if rect_fx.contains(event.position().toPoint()):
             # INDICATOR LOGIC: This signal tells the app/panels that THIS clip
@@ -314,10 +317,11 @@ class SimpleTimeline(QWidget):
                     clip_x = self.frameToProjectedX(clip.start_frame)
                     clip_w = self.frameToProjectedX(clip.duration_frames)
                     # SHARED DIMENSIONS
-                    cut_size = 10.0
+                    Dim = TimelinePainter.Dimensions
+                    cut_size = Dim.CHAMFER_SIZE
                     header_y = hover_track_y + 1
-                    triangle_size = 5.0
-                    gap = 1.5
+                    triangle_size = Dim.FADE_TRIANGLE
+                    gap = Dim.FADE_GAP
                     
                     # Check fade handles
                     if ((clip_x + gap <= event.x() <= clip_x + gap + triangle_size and 
@@ -708,8 +712,9 @@ class SimpleTimeline(QWidget):
 
     def show_context_menu(self, pos):
         """Show context menu for clips (Right Click)."""
-        from ..models import FadeType, TrackType
-        
+        from .timeline_painter import TimelinePainter
+        from ..models import FadeType, TrackType, ProxyStatus
+        from .. import design_tokens as dt
         if hasattr(pos, 'toPoint'): pos = pos.toPoint()
         clip = self.find_clip_at(pos.x(), pos.y())
         

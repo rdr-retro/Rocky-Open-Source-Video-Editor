@@ -90,7 +90,7 @@ class ViewerPanel(QWidget):
                 border: none; 
                 border-radius: 4px;
                 font-size: 20px;
-                font-family: "Segoe UI Symbol", "Apple Symbols", sans-serif;
+                font-family: "Apple Symbols", sans-serif;
             } 
             QPushButton:hover { 
                 background-color: #333333; 
