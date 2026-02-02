@@ -89,19 +89,25 @@ VideoSource::VideoSource(std::string p) : path(p) {
   }
 
   if (audio_stream_idx != -1) {
-    const AVCodec *a_codec = avcodec_find_decoder(
-        fmt_ctx->streams[audio_stream_idx]->codecpar->codec_id);
-    if (a_codec) {
-      audio_codec_ctx = avcodec_alloc_context3(a_codec);
-      avcodec_parameters_to_context(
-          audio_codec_ctx, fmt_ctx->streams[audio_stream_idx]->codecpar);
-      audio_codec_ctx->thread_count = 0;
-      audio_codec_ctx->thread_type = FF_THREAD_FRAME;
-      {
-        std::lock_guard<std::mutex> lock(g_ff_mtx);
-        avcodec_open2(audio_codec_ctx, a_codec, nullptr);
+    std::lock_guard<std::mutex> lock(g_ff_mtx);
+    // Open a second context for audio-only to decouple from video decoding
+    if (avformat_open_input(&audio_fmt_ctx, path.c_str(), nullptr, nullptr) >= 0) {
+      if (avformat_find_stream_info(audio_fmt_ctx, nullptr) >= 0) {
+        const AVCodec *a_codec = avcodec_find_decoder(
+            audio_fmt_ctx->streams[audio_stream_idx]->codecpar->codec_id);
+        if (a_codec) {
+          audio_codec_ctx = avcodec_alloc_context3(a_codec);
+          avcodec_parameters_to_context(
+              audio_codec_ctx, audio_fmt_ctx->streams[audio_stream_idx]->codecpar);
+          
+          audio_codec_ctx->thread_count = 0;
+          audio_codec_ctx->thread_type = FF_THREAD_FRAME;
+          avcodec_open2(audio_codec_ctx, a_codec, nullptr);
+          
+          audio_frame = av_frame_alloc();
+          audio_pkt = av_packet_alloc();
+        }
       }
-      audio_frame = av_frame_alloc();
     }
   }
 
@@ -120,6 +126,8 @@ VideoSource::~VideoSource() {
     av_frame_free(&audio_frame);
   if (pkt)
     av_packet_free(&pkt);
+  if (audio_pkt)
+    av_packet_free(&audio_pkt);
   if (codec_ctx)
     avcodec_free_context(&codec_ctx);
   if (audio_codec_ctx)
@@ -128,6 +136,8 @@ VideoSource::~VideoSource() {
     swr_free(&cached_swr);
   if (fmt_ctx)
     avformat_close_input(&fmt_ctx);
+  if (audio_fmt_ctx)
+    avformat_close_input(&audio_fmt_ctx);
 }
 
 int VideoSource::getRotation() const {
@@ -247,8 +257,8 @@ Frame VideoSource::getFrame(double localTime, int w, int h) {
 
 std::vector<float> VideoSource::getAudioSamples(double startTime,
                                                 double duration) {
-  std::lock_guard<std::mutex> lock(mtx);
-  if (!audio_codec_ctx || audio_stream_idx == -1)
+  std::lock_guard<std::mutex> lock(audio_mtx);
+  if (!audio_codec_ctx || audio_stream_idx == -1 || !audio_fmt_ctx)
     return {};
 
   const int target_channels = 2;
@@ -268,17 +278,20 @@ std::vector<float> VideoSource::getAudioSamples(double startTime,
     swr_init(cached_swr);
   }
 
-  const AVRational timeBase = fmt_ctx->streams[audio_stream_idx]->time_base;
+  const AVRational timeBase = audio_fmt_ctx->streams[audio_stream_idx]->time_base;
   const int64_t targetPts = static_cast<int64_t>(startTime / av_q2d(timeBase));
 
-  if (std::abs(startTime - last_audio_time) > 0.5) {
+  // Precision Seek: Trigger seek if we jump backwards OR if the jump forward is significant.
+  // For MP3/AAC, even small backward jumps require a flush/seek to maintain frame alignment.
+  if (startTime < last_audio_time || std::abs(startTime - last_audio_time) > 0.1) {
     avcodec_flush_buffers(audio_codec_ctx);
-    av_seek_frame(fmt_ctx, audio_stream_idx, targetPts, AVSEEK_FLAG_BACKWARD);
+    av_seek_frame(audio_fmt_ctx, audio_stream_idx, targetPts, AVSEEK_FLAG_BACKWARD);
+    last_audio_time = -1.0; // Force full re-sync
   }
 
-  while (av_read_frame(fmt_ctx, pkt) >= 0) {
-    if (pkt->stream_index == audio_stream_idx) {
-      if (avcodec_send_packet(audio_codec_ctx, pkt) >= 0) {
+  while (av_read_frame(audio_fmt_ctx, audio_pkt) >= 0) {
+    if (audio_pkt->stream_index == audio_stream_idx) {
+      if (avcodec_send_packet(audio_codec_ctx, audio_pkt) >= 0) {
         while (avcodec_receive_frame(audio_codec_ctx, audio_frame) >= 0) {
           double frameStart = audio_frame->pts * av_q2d(timeBase);
           double frameEnd = frameStart + (double)audio_frame->nb_samples /
@@ -317,7 +330,7 @@ std::vector<float> VideoSource::getAudioSamples(double startTime,
         }
       }
     }
-    av_packet_unref(pkt);
+    av_packet_unref(audio_pkt);
     if (samples.size() >= target_sample_count * target_channels)
       break;
   }
@@ -326,24 +339,6 @@ std::vector<float> VideoSource::getAudioSamples(double startTime,
   return samples;
 }
 
-std::vector<float> VideoSource::getWaveform(int points) {
-  if (points <= 0)
-    return {};
-  std::vector<float> peaks(points * 2, 0.0f);
-  double duration = getDuration();
-  if (duration <= 0)
-    return peaks;
-  for (int i = 0; i < points; ++i) {
-    double t = (double)i / points * duration;
-    auto s = getAudioSamples(t, 0.05);
-    float p = 0.0f;
-    for (float val : s)
-      p = std::max(p, std::abs(val));
-    peaks[i * 2] = p;
-    peaks[i * 2 + 1] = -p;
-  }
-  return peaks;
-}
 
 double VideoSource::getDuration() {
   if (!fmt_ctx)
@@ -438,8 +433,6 @@ void ImageSource::load(int w, int h) {
           Frame out(w, h, 4);
           std::fill(out.data.begin(), out.data.end(), 0);
 
-          float src_aspect = (float)frame->width / (float)frame->height;
-          float dst_aspect = (float)w / (float)h;
 
           // SIMPLIFIED: Just return the raw image scaled to (w, h)
           // Fitting is now handled by the Clip layer.

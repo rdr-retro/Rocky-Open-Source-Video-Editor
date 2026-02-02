@@ -15,16 +15,22 @@ class RockyEngine {
     std::mutex mtx;
 
 public:
+    static const long long TICKS_PER_SECOND = 60000;
+
     void setResolution(int w, int h);
     void setFPS(double f);
     void addTrack(int type);
     void setMasterGain(double gain);
-    std::shared_ptr<Clip> addClip(int trackIdx, std::string name, long start, long dur, double offset, std::shared_ptr<MediaSource> src);
+    std::shared_ptr<Clip> addClip(int trackIdx, std::string name, long long startTick, long long durTicks, long long offsetTicks, std::shared_ptr<MediaSource> src);
     void clear();
-    py::array_t<uint8_t> evaluate(double time);
-    py::array_t<float> render_audio(double startTime, double duration);
+    py::array_t<uint8_t> evaluate(long long tick);
+    py::array_t<float> render_audio(long long startTick, long long durationTicks);
+    
+    // Optimized playback pump (Moves Python loop logic to C++)
+    // Returns: (AudioData, TimelineSamplesConsumed)
+    std::pair<py::array_t<float>, long> getPlaybackBatch(long currentSamplesRendered, double missingPhysDuration, double rate);
     
     // UTILS (Migración desde Python para rendimiento extremo)
-    static std::string formatTimecode(double frame, double fps);
+    static std::string formatTimecode(long long tick, double fps);
     static py::array_t<float> resampleAudio(py::array_t<float> input, int targetLen);
 };

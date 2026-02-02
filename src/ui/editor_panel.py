@@ -400,7 +400,7 @@ class EditorPanel(QWidget):
         """Populates the form with clip data."""
         self.inp_name.setText(clip.name)
         self.slider_opacity.setValue(int(clip.opacity_level * 100))
-        self.lbl_info.setText(f"Frame: {clip.start_frame} | Duración: {clip.duration_frames}")
+        self.lbl_info.setText(f"Tick: {clip.start_tick} | Duración: {clip.duration_ticks}")
         
         # Disconnect previous to avoid loops (simple pattern)
         try: self.inp_name.textChanged.disconnect()

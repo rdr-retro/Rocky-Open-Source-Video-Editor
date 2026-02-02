@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, QPoint, QRect, QPointF, QLineF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygon
 from .styles import MENU_STYLE
+from .models import TICKS_PER_FRAME, TICKS_PER_SECOND, TimeFormat
 
 class TimelineRuler(QWidget):
     """
@@ -38,7 +39,6 @@ class TimelineRuler(QWidget):
         painter.drawLine(int(x), 15, int(x), 38) # Bottom aligned
         
         # Text based on format
-        from .models import TimeFormat
         fmt = self.timeline.model.time_format
         
         label = ""
@@ -51,15 +51,18 @@ class TimelineRuler(QWidget):
             label = str(int(round(time * fps)))
             
         painter.setPen(QPen(QColor("#bbbbbb")))
-        painter.drawText(int(x) + 4, 34, label)
+        # Center the text on the tick for perfect balance
+        metrics = painter.fontMetrics()
+        w = metrics.horizontalAdvance(label)
+        painter.drawText(int(x - w/2), 34, label)
 
     def _draw_markers_and_regions(self, painter, scroll_x, fps):
         painter.setFont(QFont("Arial", 8, QFont.Bold))
         
         # 1. Regions (ranges)
         for region in self.timeline.model.regions:
-            start_x = self.timeline.timeToScreen(region.start_frame / fps) - scroll_x
-            width = self.timeline.timeToScreen(region.duration_frames / fps)
+            start_x = self.timeline.tickToProjectedX(region.start_tick) - scroll_x
+            width = self.timeline.tickToProjectedX(region.duration_ticks)
             
             # Draw semi-transparent background
             col = QColor(region.color)
@@ -79,7 +82,7 @@ class TimelineRuler(QWidget):
             
         # 2. Markers (points)
         for marker in self.timeline.model.markers:
-            mx = self.timeline.timeToScreen(marker.frame / fps) - scroll_x
+            mx = self.timeline.tickToProjectedX(marker.tick) - scroll_x
             
             col = QColor(marker.color)
             painter.setPen(QPen(col, 1))
@@ -121,9 +124,17 @@ class TimelineRuler(QWidget):
         painter.setPen(QPen(self.COLOR_TICK, 1))
         painter.setFont(self.FONT_MAIN)
         
+        time_limit = (scroll_x + self.width()) / float(pixels_per_second)
+        
+        # SAFETY CAP: Never try to render more than 1 hour past the end of the project.
+        # This prevents UI hangs when PPS is ultra-small (0.0001) but scroll_x is still large.
+        max_project_time = (self.timeline.model.get_max_tick() / TICKS_PER_SECOND) + 3600
+        time_limit = min(time_limit, max_project_time)
+        
         time_cursor = math.floor(visible_start_time / step) * step
-        while time_cursor < (scroll_x + self.width()) / float(pixels_per_second) + step:
-            screen_x = self.timeline.timeToProjectedX(time_cursor) - scroll_x
+        while time_cursor < time_limit + step:
+            tick_cursor = int(time_cursor * TICKS_PER_SECOND)
+            screen_x = self.timeline.tickToProjectedX(tick_cursor) - scroll_x
             
             if -100 <= screen_x <= self.width() + 100:
                 self._draw_tick_label(painter, screen_x, time_cursor, fps)
@@ -137,7 +148,6 @@ class TimelineRuler(QWidget):
 
     def contextMenuEvent(self, event):
         from PySide6.QtWidgets import QMenu
-        from .models import TimeFormat
         
         menu = QMenu(self)
         menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -169,8 +179,8 @@ class TimelineRuler(QWidget):
         
     def _add_marker_at_cursor(self):
         from .models import TimelineMarker
-        frame = int(self.timeline.model.blueline.playhead_frame)
-        self.timeline.model.markers.append(TimelineMarker(frame, str(len(self.timeline.model.markers)+1)))
+        tick = int(self.timeline.model.blueline.playhead_tick)
+        self.timeline.model.markers.append(TimelineMarker(tick, str(len(self.timeline.model.markers)+1)))
         self.update()
 
     def keyPressEvent(self, event):
@@ -190,7 +200,8 @@ class TimelineRuler(QWidget):
         
         for i in range(1, divisions):
             st_time = time + (sub_step * i)
-            st_x = self.timeline.timeToProjectedX(st_time) - scroll_x
+            st_tick = int(st_time * TICKS_PER_SECOND)
+            st_x = self.timeline.tickToProjectedX(st_tick) - scroll_x
             
             # Draw a dot at the middle of the lower half of the ruler
             painter.drawPoint(QPointF(st_x, 35))
@@ -202,8 +213,8 @@ class TimelineRuler(QWidget):
         from PySide6.QtCore import QPointF, QRectF
         from PySide6.QtGui import QPolygonF, QLinearGradient, QColor, QBrush
         
-        # Sub-pixel precision
-        ph_x = self.timeline.timeToScreen(self.timeline.model.blueline.playhead_frame / fps) - scroll_x
+        # 1. Playhead Tick Projection
+        ph_x = self.timeline.tickToProjectedX(self.timeline.model.blueline.playhead_tick) - scroll_x
         
         # 1. Shadow/Glow (Subtle elevation)
         painter.setBrush(QColor(0, 0, 0, 80))
@@ -254,12 +265,14 @@ class TimelineRuler(QWidget):
         painter.setPen(QPen(QColor(255, 255, 255, 180), 1.5))
         painter.drawPoint(QPointF(ph_x, 18))
 
-        # 6. Playhead Line (Double-line style)
-        line_ruler = QLineF(ph_x, 18, ph_x, self.height())
+        # 6. Playhead Line (Exact Center)
+        line_ruler = QLineF(int(ph_x), 18, int(ph_x), self.height())
         
-        painter.setPen(QPen(QColor(0, 0, 0), 3))
+        # Glow / Soft Border
+        painter.setPen(QPen(QColor(0, 0, 0, 150), 3))
         painter.drawLine(line_ruler)
         
+        # High-precision white center
         painter.setPen(QPen(QColor(255, 255, 255), 1))
         painter.drawLine(line_ruler)
 

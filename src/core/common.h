@@ -26,6 +26,10 @@ extern "C" {
 #define M_PI 3.14159265358979323846
 #endif
 
+// SYSTEM CONSTANTS
+static const long long TICKS_PER_SECOND = 60000;
+static const long long TICKS_PER_FRAME_DEFAULT = 1000; // For 60fps base reference
+
 namespace py = pybind11;
 
 struct Frame {

@@ -300,7 +300,7 @@ class FFmpegUtils:
         try:
             ffp = FFmpegUtils.get_ffprobe_path()
             cmd = [
-                ffp, '-v', 'error', '-select_streams', 'v:0',
+                ffp, '-v', 'error',
                 '-analyzeduration', '20M', '-probesize', '20M',
                 '-show_entries', 'stream=width,height,r_frame_rate,duration:format=duration:side_data=rotation',
                 '-of', 'json', file_path
@@ -310,10 +310,36 @@ class FFmpegUtils:
             output = subprocess.check_output(cmd, timeout=4.0).decode('utf-8')
             data = json.loads(output)
             
+            # 1. Get GLOBAL duration from format (most reliable for mixed media)
+            specs['duration'] = float(data.get('format', {}).get('duration', 0.0))
+            
+            # 2. Extract specific stream info if available
             if 'streams' in data and data['streams']:
-                s = data['streams'][0]
+                # Find maximum stream duration as safety fallback
+                max_s_dur = 0.0
+                for s in data['streams']:
+                    try:
+                        sdur = float(s.get('duration', 0.0))
+                        if sdur > max_s_dur: max_s_dur = sdur
+                    except: pass
+                
+                if specs['duration'] <= 0:
+                    specs['duration'] = max_s_dur
+                
+                # Prefer video stream for dimensions
+                target_stream = data['streams'][0]
+                for s in data['streams']:
+                    if s.get('codec_type') == 'video':
+                        target_stream = s
+                        break
+                
+                s = target_stream
                 specs['width'] = s.get('width', 0)
                 specs['height'] = s.get('height', 0)
+                
+                # If duration was 0 in format, check stream
+                if specs['duration'] <= 0:
+                    specs['duration'] = float(s.get('duration', 0.0))
                 
                 # FPS Robust parsing
                 rfps = s.get('r_frame_rate', '30/1')
@@ -335,7 +361,7 @@ class FFmpegUtils:
                     rot = int(data.get('format', {}).get('tags', {}).get('rotate', 0))
                 
                 specs['rotation'] = rot
-                specs['duration'] = float(s.get('duration', data.get('format', {}).get('duration', 10.0)))
+                # Duration is now pre-handled at the top of the stream block
                 
         except Exception as e:
             print(f"INFO: FFprobe stage skipped for {os.path.basename(file_path)}: {e}")

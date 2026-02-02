@@ -26,7 +26,7 @@ class MediaImportWorker(QThread):
 
     def run(self):
         # Result placeholders
-        w, h, rot, fps, dur_frames = 1920, 1080, 0, self.fps, 300
+        w, h, rot, fps, dur_ticks = 1920, 1080, 0, self.fps, 300 * 1000
         
         try:
             ext = os.path.basename(self.file_path).lower().split('.')[-1]
@@ -42,7 +42,8 @@ class MediaImportWorker(QThread):
                     w, h = h, w
                     
                 dur_sec = specs['duration']
-                dur_frames = int(dur_sec * fps)
+                # TEMPORAL NORMALIZATION: Precise 60000 Ticks Per Second (Project Standard)
+                dur_ticks = int(dur_sec * 60000)
                 
                 # STAGE 2: Emergency Fallback using Engine (Returns VISUAL dimensions)
                 if w <= 0 or h <= 0:
@@ -55,8 +56,8 @@ class MediaImportWorker(QThread):
                     except:
                         pass
             
-            # Sub-second emission
-            self.finished.emit(self.file_path, float(dur_frames), None, w, h, rot, float(fps))
+            # Sub-second emission (Using duration_ticks)
+            self.finished.emit(self.file_path, float(dur_ticks), None, w, h, rot, float(fps))
             
         except Exception as e:
             # Absolute last resort for worker survival

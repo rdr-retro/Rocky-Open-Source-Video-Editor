@@ -1,10 +1,14 @@
 #include "engine.h"
+#include "media_source.h"
+#include "native_audio.h"
+#include "audio_ring_buffer.h"
 #include "../platform/common/platform_detector.h"
 #include "../hardware/optimizer.h"
 #include "../infrastructure/config/runtime_config.h"
 #include "../infrastructure/logging/logger.h"
 #include "../core/ofx/host.h"
 #include <pybind11/stl.h>
+#include <pybind11/numpy.h>
 
 PYBIND11_MODULE(rocky_core, m) {
     // Exception Handler
@@ -121,17 +125,19 @@ PYBIND11_MODULE(rocky_core, m) {
         .def(py::init<std::string>())
         .def("get_width", &VideoSource::getWidth)
         .def("get_height", &VideoSource::getHeight)
-        .def("get_rotation", &VideoSource::getRotation)
-        .def("get_waveform", &VideoSource::getWaveform, py::call_guard<py::gil_scoped_release>());
+        .def("get_rotation", &VideoSource::getRotation);
 
     py::class_<ImageSource, MediaSource, std::shared_ptr<ImageSource>>(m, "ImageSource")
         .def(py::init<std::string>());
 
     py::class_<Clip, std::shared_ptr<Clip>>(m, "Clip")
         .def(py::init<>())
+        .def_readwrite("start_tick", &Clip::startTick)
+        .def_readwrite("duration_ticks", &Clip::durationTicks)
+        .def_readwrite("source_offset_ticks", &Clip::sourceOffsetTicks)
         .def_readwrite("opacity", &Clip::opacity)
-        .def_readwrite("fade_in_frames", &Clip::fadeInFrames)
-        .def_readwrite("fade_out_frames", &Clip::fadeOutFrames)
+        .def_readwrite("fade_in_ticks", &Clip::fadeInTicks)
+        .def_readwrite("fade_out_ticks", &Clip::fadeOutTicks)
         .def_readwrite("fade_in_type", &Clip::fadeInType)
         .def_readwrite("fade_out_type", &Clip::fadeOutType)
         .def_readwrite("transform", &Clip::transform)
@@ -146,14 +152,45 @@ PYBIND11_MODULE(rocky_core, m) {
         .def("set_master_gain", &RockyEngine::setMasterGain)
         .def("evaluate", &RockyEngine::evaluate)
         .def("render_audio", &RockyEngine::render_audio)
+        .def("get_playback_batch", &RockyEngine::getPlaybackBatch)
         .def("clear", &RockyEngine::clear)
+        .def_readonly_static("TICKS_PER_SECOND", &RockyEngine::TICKS_PER_SECOND)
         .def_static("format_timecode", &RockyEngine::formatTimecode)
         .def_static("resample_audio", &RockyEngine::resampleAudio);
     
+    py::class_<NativeAudioSource, MediaSource, std::shared_ptr<NativeAudioSource>>(m, "NativeAudioSource")
+        .def(py::init<std::string>())
+        .def("get_duration", &NativeAudioSource::getDuration)
+        .def("is_valid", &NativeAudioSource::isValid);
+
+    m.def("get_hw_info", []() {
+        return rocky::PlatformDetector::detect();
+    });
+
     // OpenFX Bindings
     m.def("load_ofx_plugin", [](std::string path) {
         return RockyOfxHost::getInstance().loadPlugin(path);
     });
+
+    // Audio Ring Buffer
+    py::class_<AudioRingBuffer>(m, "AudioRingBuffer")
+        .def(py::init<size_t>())
+        .def("write", [](AudioRingBuffer& self, py::array_t<float> data) {
+            auto r = data.unchecked<1>();
+            return self.write(r.data(0), r.size());
+        })
+        .def("read_bytes", [](AudioRingBuffer& self, size_t max_bytes) {
+            // max_bytes is in bytes, so we need max_bytes / 4 floats
+            size_t count = max_bytes / sizeof(float);
+            std::vector<float> tmp(count);
+            size_t readCount = self.read(tmp.data(), count);
+            
+            // Return as bytes directly for fastest PySide6 integration
+            return py::bytes(reinterpret_cast<const char*>(tmp.data()), readCount * sizeof(float));
+        })
+        .def("get_available_read", &AudioRingBuffer::getAvailableRead)
+        .def("get_available_write", &AudioRingBuffer::getAvailableWrite)
+        .def("clear", &AudioRingBuffer::clear);
 
     m.attr("VIDEO") = 1;
     m.attr("AUDIO") = 2;

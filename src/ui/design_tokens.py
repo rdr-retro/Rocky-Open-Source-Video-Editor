@@ -194,14 +194,6 @@ STATUS_PROXY_INACTIVE = hsl_to_hex(0, 0, 15)  # Near black
 PLAYHEAD_COLOR = hsl_to_hex(0, 0, 100)  # Pure white
 SELECTION_BORDER = hsl_to_hex(55, 100, 60)  # Bright yellow
 
-# Waveform Colors
-def create_waveform_color():
-    """Create semi-transparent waveform color from accent."""
-    color = QColor(ACTIVE_THEME.ACCENT_PRIMARY)
-    color.setAlpha(180)
-    return color
-
-WAVEFORM_COLOR = create_waveform_color()
 
 
 # ============================================================================

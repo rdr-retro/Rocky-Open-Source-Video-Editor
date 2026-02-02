@@ -6,6 +6,7 @@ class MediaSource {
 public:
   virtual ~MediaSource() = default;
   virtual Frame getFrame(double localTime, int w, int h) = 0;
+  virtual std::vector<float> getAudioSamples(double startTime, double duration) { return {}; }
   virtual double getDuration() { return -1.0; } // Default: Infinite/Static
   virtual int getWidth() const { return 1920; } // Default fallback
   virtual int getHeight() const { return 1080; }
@@ -24,14 +25,22 @@ public:
 
 class VideoSource : public MediaSource {
   std::string path;
+  // Video Path
   AVFormatContext *fmt_ctx = nullptr;
   AVCodecContext *codec_ctx = nullptr;
+  AVFrame *av_frame = nullptr;
+  AVPacket *pkt = nullptr;
+  mutable std::mutex mtx;
+
+  // Audio Path (Decoupled for Real-Time Safety)
+  AVFormatContext *audio_fmt_ctx = nullptr;
   AVCodecContext *audio_codec_ctx = nullptr;
+  AVFrame *audio_frame = nullptr;
+  AVPacket *audio_pkt = nullptr;
+  mutable std::mutex audio_mtx;
+
   int video_stream_idx = -1;
   int audio_stream_idx = -1;
-  AVFrame *av_frame = nullptr;
-  AVFrame *audio_frame = nullptr;
-  AVPacket *pkt = nullptr;
   SwsContext *sws_ctx = nullptr;
 
   // Validation flag to prevent crashes with corrupted files (P6)
@@ -43,14 +52,12 @@ class VideoSource : public MediaSource {
   double last_audio_time = -1.0;
   SwrContext *cached_swr = nullptr;
   std::once_flag swr_init_flag; // P3: Thread-safe SwrContext initialization
-  mutable std::mutex mtx;
 
 public:
   VideoSource(std::string p);
   ~VideoSource();
   Frame getFrame(double localTime, int w, int h) override;
-  std::vector<float> getAudioSamples(double startTime, double duration);
-  std::vector<float> getWaveform(int points);
+  std::vector<float> getAudioSamples(double startTime, double duration) override;
   double getDuration() override;
   bool isValid() const { return is_valid; } // P6: Expose validation status
 

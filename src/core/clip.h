@@ -31,25 +31,25 @@ struct ClipTransform {
 
 struct Clip {
     std::string name;
-    long startFrame, durationFrames;
-    double sourceOffset;
+    long long startTick, durationTicks;
+    long long sourceOffsetTicks;
     std::shared_ptr<MediaSource> source;
     int trackIndex;
     
     // Atributos extendidos del nucleo Java
     float opacity = 1.0f;
-    long fadeInFrames = 0;
-    long fadeOutFrames = 0;
+    long long fadeInTicks = 0;
+    long long fadeOutTicks = 0;
     FadeType fadeInType = FadeType::LINEAR;
     FadeType fadeOutType = FadeType::LINEAR;
     ClipTransform transform;
     
     std::vector<Effect> effects;
     
-    Clip() : startFrame(0), durationFrames(0), sourceOffset(0.0), trackIndex(0), opacity(1.0f) {}
-    Clip(std::string n, long s, long d, double o, std::shared_ptr<MediaSource> src, int ti);
+    Clip() : startTick(0), durationTicks(0), sourceOffsetTicks(0), trackIndex(0), opacity(1.0f) {}
+    Clip(std::string n, long long s, long long d, long long o, std::shared_ptr<MediaSource> src, int ti);
 
     float getFadeValue(FadeType type, double t, bool isFadeIn);
-    float getOpacityAt(long absoluteFrame);
-    Frame render(double time, int w, int h, double fps, long absoluteFrame);
+    float getOpacityAt(long long absoluteTick);
+    Frame render(long long tick, int w, int h, double fps);
 };

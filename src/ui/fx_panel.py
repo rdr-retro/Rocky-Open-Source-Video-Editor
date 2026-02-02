@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
                                 QScrollArea, QGroupBox, QFormLayout, QCheckBox)
 from PySide6.QtCore import Qt, Signal, QTimer
 from .effects_dialog import OverlayViewer
+from .models import TICKS_PER_FRAME
 from . import design_tokens as dt
 
 class VideoEventFXPanel(QWidget):
@@ -231,7 +232,7 @@ class VideoEventFXPanel(QWidget):
         if self.rocky_app and hasattr(self.rocky_app, 'get_fps'):
             fps = self.rocky_app.get_fps()
             
-        global_time = (self.current_clip.start_frame / fps) + time_s
+        global_time = (self.current_clip.start_tick / (fps * TICKS_PER_FRAME)) + time_s
         
         try:
             # SAFETY CHECK: Verify C++ object existence (Fixes deletion crash)

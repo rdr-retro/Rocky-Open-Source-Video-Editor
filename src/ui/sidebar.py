@@ -14,12 +14,11 @@ class TimecodeHeader(QFrame):
         
         # Use a layout with a standard QLabel for robust rendering
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 20, 0) # 20px right padding
+        layout.setContentsMargins(0, 0, 0, 0) 
         layout.setSpacing(0)
         
-        self.label = QLabel("00:00:00;00")
-        # Allow label to expand naturally based on text size (no fixed width)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.label = QLabel("00:00:00:00")
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Robust Font Stack - Reduced to 16pt for safety
         font = QFont("Menlo", 16, QFont.Bold)

@@ -9,6 +9,7 @@ from PySide6.QtGui import QPainter, QColor
 from functools import partial
 from ..styles import MENU_STYLE
 from .timeline_painter import TimelinePainter
+from ..models import TICKS_PER_SECOND, TICKS_PER_FRAME
 
 class SimpleTimeline(QWidget):
     """
@@ -123,9 +124,9 @@ class SimpleTimeline(QWidget):
     
     def sizeHint(self):
         """Provide size based on timeline content."""
-        max_frame = self.model.get_max_frame()
-        if max_frame > 0:
-            width = int((max_frame / self.get_fps()) * self.pixels_per_second) + 500  # Add padding
+        max_tick = self.model.get_max_tick()
+        if max_tick > 0:
+            width = int((max_tick / TICKS_PER_SECOND) * self.pixels_per_second) + 500  # Add padding
         else:
             width = 3000
         
@@ -185,8 +186,8 @@ class SimpleTimeline(QWidget):
 
     def _check_clip_interactions(self, event, clip, track_y, track_h):
         """Detailed check for clip interaction points matching the visual redesign."""
-        clip_x = self.frameToProjectedX(clip.start_frame)
-        clip_w = self.frameToProjectedX(clip.duration_frames)
+        clip_x = self.tickToProjectedX(clip.start_tick)
+        clip_w = self.tickToProjectedX(clip.duration_ticks)
         clip_h = track_h - 2
         
         # SHARED DIMENSIONS WITH PAINTER
@@ -238,8 +239,8 @@ class SimpleTimeline(QWidget):
 
     def _handle_clip_click(self, event, clip):
         """Handle clicking directly on a clip (Selection, FX, PX)."""
-        clip_x = self.frameToProjectedX(clip.start_frame)
-        clip_w = self.frameToProjectedX(clip.duration_frames)
+        clip_x = self.tickToProjectedX(clip.start_tick)
+        clip_w = self.tickToProjectedX(clip.duration_ticks)
         track_y = self._get_track_y_positions()[clip.track_index]
         
         # Match dimensions in TimelinePainter
@@ -314,8 +315,8 @@ class SimpleTimeline(QWidget):
         if hover_track_idx != -1:
             for clip in self.model.clips:
                 if clip.track_index == hover_track_idx:
-                    clip_x = self.frameToProjectedX(clip.start_frame)
-                    clip_w = self.frameToProjectedX(clip.duration_frames)
+                    clip_x = self.tickToProjectedX(clip.start_tick)
+                    clip_w = self.tickToProjectedX(clip.duration_ticks)
                     # SHARED DIMENSIONS
                     Dim = TimelinePainter.Dimensions
                     cut_size = Dim.CHAMFER_SIZE
@@ -404,34 +405,43 @@ class SimpleTimeline(QWidget):
 
     def _drag_trim_right(self, event):
         clip = self.dragging_clip
-        target_frame = self.screenXToFrame(event.x())
-        new_duration = int(target_frame - clip.start_frame)
-        new_duration = max(5, new_duration)
+        target_tick = self.screenXToTick(event.x())
+        new_duration = int(target_tick - clip.start_tick)
+        
+        tpf = TICKS_PER_SECOND / self.get_fps()
+        new_duration = max(tpf * 5, new_duration)
+        
+        # Quantize to frame boundary
+        new_duration = self.model.quantize(new_duration, self.get_fps())
         
         if clip.source_duration_frames > 0:
-            max_d = clip.source_duration_frames - getattr(clip, 'source_offset_frames', 0)
+            # Calculate source duration in ticks
+            max_d_ticks = int(clip.source_duration_frames * (TICKS_PER_SECOND / clip.source_fps))
+            max_d = max_d_ticks - clip.source_offset_ticks
             new_duration = min(new_duration, max_d)
         
-        clip.duration_frames = new_duration
+        clip.duration_ticks = new_duration
         self.structure_changed.emit()
 
     def _drag_trim_left(self, event):
         clip = self.dragging_clip
-        orig_end = clip.start_frame + clip.duration_frames
-        target_start = self.screenXToFrame(event.x())
+        orig_end = clip.start_tick + clip.duration_ticks
+        target_start = self.screenXToTick(event.x())
         
-        target_start = max(0, min(target_start, orig_end - 5))
-        delta_frames = int(target_start - clip.start_frame)
+        tpf = TICKS_PER_SECOND / self.get_fps()
+        target_start = max(0, min(target_start, orig_end - tpf * 5))
+        target_start = self.model.quantize(target_start, self.get_fps())
+        delta_ticks = int(target_start - clip.start_tick)
         
         if clip.source_duration_frames > 0:
-            current_offset = getattr(clip, 'source_offset_frames', 0)
-            if current_offset + delta_frames < 0:
-                delta_frames = -current_offset
-                target_start = clip.start_frame + delta_frames
+            current_offset = clip.source_offset_ticks
+            if current_offset + delta_ticks < 0:
+                delta_ticks = -current_offset
+                target_start = clip.start_tick + delta_ticks
         
-        clip.start_frame = int(target_start)
-        clip.duration_frames -= delta_frames
-        clip.source_offset_frames = getattr(clip, 'source_offset_frames', 0) + delta_frames
+        clip.start_tick = int(target_start)
+        clip.duration_ticks -= delta_ticks
+        clip.source_offset_ticks += delta_ticks
         self.structure_changed.emit()
 
     def _drag_opacity(self, event):
@@ -450,21 +460,23 @@ class SimpleTimeline(QWidget):
 
     def _drag_fade_in(self, event):
         clip = self.dragging_clip
-        new_frames = self.screenXToFrame(event.x()) - clip.start_frame
-        clip.fade_in_frames = max(0, min(clip.duration_frames, int(new_frames)))
+        new_ticks = self.screenXToTick(event.x()) - clip.start_tick
+        clip.fade_in_ticks = max(0, min(clip.duration_ticks, int(new_ticks)))
         self.update()
 
     def _drag_fade_out(self, event):
         clip = self.dragging_clip
-        clip_end_x = self.frameToProjectedX(clip.start_frame + clip.duration_frames)
-        dist_frames = self.screenXToFrame(clip_end_x) - self.screenXToFrame(event.x())
-        clip.fade_out_frames = max(0, min(clip.duration_frames, int(dist_frames)))
+        clip_end_x = self.tickToProjectedX(clip.start_tick + clip.duration_ticks)
+        dist_ticks = self.screenXToTick(clip_end_x) - self.screenXToTick(event.x())
+        clip.fade_out_ticks = max(0, min(clip.duration_ticks, int(dist_ticks)))
         self.update()
 
     def _drag_clip_move(self, event):
         new_x = event.x() - self.drag_offset_x
-        new_frame = max(0, int(self.screenXToFrame(new_x)))
-        self.dragging_clip.start_frame = new_frame
+        new_tick = max(0, int(self.screenXToTick(new_x)))
+        # Optional: Snap to frame boundary
+        new_tick = self.model.quantize(new_tick, self.get_fps())
+        self.dragging_clip.start_tick = new_tick
         
         # Track detection
         track_y_positions = self._get_track_y_positions()
@@ -513,10 +525,10 @@ class SimpleTimeline(QWidget):
         track_clips = [c for c in self.model.clips if c.track_index == dropped_clip.track_index and c != dropped_clip]
         
         for other in track_clips:
-            start_a = dropped_clip.start_frame
-            end_a = dropped_clip.start_frame + dropped_clip.duration_frames
-            start_b = other.start_frame
-            end_b = other.start_frame + other.duration_frames
+            start_a = dropped_clip.start_tick
+            end_a = dropped_clip.start_tick + dropped_clip.duration_ticks
+            start_b = other.start_tick
+            end_b = other.start_tick + other.duration_ticks
             
             if start_a < end_b and end_a > start_b:
                  intersect_start = max(start_a, start_b)
@@ -525,24 +537,24 @@ class SimpleTimeline(QWidget):
             
                  if overlap > 0:
                     if start_a > start_b:
-                        other.fade_out_frames = overlap
-                        dropped_clip.fade_in_frames = overlap
-                        print(f"Auto-Crossfade: {overlap} frames")
+                        other.fade_out_ticks = overlap
+                        dropped_clip.fade_in_ticks = overlap
+                        print(f"Auto-Crossfade: {overlap} ticks")
                     elif start_a < start_b:
-                        dropped_clip.fade_out_frames = overlap
-                        other.fade_in_frames = overlap
-                        print(f"Auto-Crossfade: {overlap} frames")
+                        dropped_clip.fade_out_ticks = overlap
+                        other.fade_in_ticks = overlap
+                        print(f"Auto-Crossfade: {overlap} ticks")
 
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts."""
-        if event.key() == Qt.Key_Space:
-            self.play_pause_requested.emit()
-        elif event.key() == Qt.Key_Left:
-            new_frame = max(0, self.model.blueline.playhead_frame - 1)
-            self.update_playhead_position(new_frame)
+        if event.key() == Qt.Key_Left:
+            tpf = TICKS_PER_SECOND / self.get_fps()
+            new_tick = max(0, self.model.blueline.playhead_tick - tpf)
+            self.update_playhead_position(new_tick)
         elif event.key() == Qt.Key_Right:
-            new_frame = self.model.blueline.playhead_frame + 1
-            self.update_playhead_position(new_frame)
+            tpf = TICKS_PER_SECOND / self.get_fps()
+            new_tick = self.model.blueline.playhead_tick + tpf
+            self.update_playhead_position(new_tick)
         elif event.key() == Qt.Key_Delete or event.key() == Qt.Key_Backspace:
             self.delete_clip(None)
         elif event.key() == Qt.Key_Up:
@@ -593,7 +605,7 @@ class SimpleTimeline(QWidget):
         urls = event.mimeData().urls()
         if not urls: return
         
-        start_frame = int(self.screenXToFrame(event.pos().x()))
+        start_tick = self.screenXToTick(event.pos().x())
         track_idx = -1
         current_y = 0
         for i, height in enumerate(self.model.track_heights):
@@ -607,8 +619,8 @@ class SimpleTimeline(QWidget):
             for url in urls:
                 path = url.toLocalFile()
                 if path:
-                    app.import_media(path, start_frame, track_idx)
-                    start_frame += 150
+                    app.import_media(path, start_tick, track_idx)
+                    start_tick += TICKS_PER_SECOND * 5 # Offset subsequent drops
         self.update()
 
     def _handle_effect_drop(self, event):
@@ -657,13 +669,17 @@ class SimpleTimeline(QWidget):
         TOLERANCE_X = 2
         for clip in self.model.clips:
             if clip.track_index == track_idx:
-                clip_x = self.frameToProjectedX(clip.start_frame)
-                clip_w = self.frameToProjectedX(clip.duration_frames)
+                clip_x = self.tickToProjectedX(clip.start_tick)
+                clip_w = self.tickToProjectedX(clip.duration_ticks)
                 if clip_x - TOLERANCE_X <= x <= clip_x + clip_w + TOLERANCE_X:
                     return clip
         
         return None
     
+    def tickToProjectedX(self, tick):
+        """Converts project ticks to absolute screen pixels."""
+        return (tick / TICKS_PER_SECOND) * self.pixels_per_second
+
     def timeToProjectedX(self, time_seconds):
         return time_seconds * self.pixels_per_second
 
@@ -675,27 +691,32 @@ class SimpleTimeline(QWidget):
 
     def screenXToFrame(self, screen_x):
         return (screen_x / self.pixels_per_second) * self.get_fps()
+    
+    def screenXToTick(self, screen_x):
+        """Converts absolute screen pixels to project ticks."""
+        return int((screen_x / self.pixels_per_second) * TICKS_PER_SECOND)
 
     def timeToScreen(self, time_in_seconds):
         """DEPRECATED: Use timeToProjectedX for clarity."""
         return self.timeToProjectedX(time_in_seconds)
 
-    def frameToScreen(self, frame_index):
-        """DEPRECATED: Use frameToProjectedX for clarity."""
-        return self.frameToProjectedX(frame_index)
-
     def update_playhead_to_x(self, screen_x):
-        time_seconds = max(0, self.screenXToTime(screen_x))
-        frame = time_seconds * self.get_fps()
-        self.update_playhead_position(frame, forced=True)
+        """Updates playhead based on screen pixel position."""
+        tick = max(0, self.screenXToTick(screen_x))
+        self.update_playhead_position(tick, forced=True)
     
-    def update_playhead_position(self, frame_index, forced=True):
-        self.model.blueline.set_playhead_frame(frame_index)
-        time_seconds = frame_index / self.get_fps()
-        tc = self.model.format_timecode(frame_index, self.get_fps())
+    def update_playhead_position(self, tick, forced=True):
+        """Standard update for playhead using TICKS."""
+        self.model.blueline.set_playhead_tick(tick)
+        
+        time_seconds = tick / TICKS_PER_SECOND
+        fps = self.get_fps()
+        frame_index = (tick / TICKS_PER_SECOND) * fps
+        tc = self.model.format_timecode(tick, fps)
+        
         self.time_updated.emit(time_seconds, int(frame_index), tc, forced)
         self.update()
-        return self.frameToProjectedX(frame_index)
+        return self.tickToProjectedX(tick)
     
     def get_scroll_area_context(self):
         from PySide6.QtWidgets import QScrollArea
@@ -736,14 +757,14 @@ class SimpleTimeline(QWidget):
             self.update()
         
         # Fade Region Detection
-        clip_x = self.frameToProjectedX(clip.start_frame)
-        clip_w = self.frameToProjectedX(clip.duration_frames)
+        clip_x = self.tickToProjectedX(clip.start_tick)
+        clip_w = self.tickToProjectedX(clip.duration_ticks)
         rel_x = pos.x() - clip_x
         
-        fade_in_w = self.frameToProjectedX(clip.fade_in_frames)
+        fade_in_w = self.tickToProjectedX(clip.fade_in_ticks)
         is_fade_in = 0 <= rel_x <= fade_in_w and fade_in_w > 0
         
-        fade_out_w = self.frameToProjectedX(clip.fade_out_frames)
+        fade_out_w = self.tickToProjectedX(clip.fade_out_ticks)
         is_fade_out = (clip_w - fade_out_w) <= rel_x <= clip_w and fade_out_w > 0
         
         if is_fade_in or is_fade_out:
@@ -814,23 +835,24 @@ class SimpleTimeline(QWidget):
 
     def split_clip_at_pos(self, clip, pos):
         if not clip: return
-        split_frame = self.screenXToFrame(pos.x())
-        self.split_clip(clip, split_frame)
+        split_tick = self.screenXToTick(pos.x())
+        self.split_clip(clip, split_tick)
 
-    def split_clip(self, clip, split_frame):
-        if not clip or split_frame <= clip.start_frame or split_frame >= (clip.start_frame + clip.duration_frames):
+    def split_clip(self, clip, split_tick):
+        if not clip or split_tick <= clip.start_tick or split_tick >= (clip.start_tick + clip.duration_ticks):
             return
-        offset = int(split_frame - clip.start_frame)
-        if offset < 2 or (clip.duration_frames - offset) < 2: return
+        offset = int(split_tick - clip.start_tick)
+        tpf = TICKS_PER_SECOND / self.get_fps()
+        if offset < tpf * 2 or (clip.duration_ticks - offset) < tpf * 2: return
         
         new_clip = clip.copy()
-        clip.duration_frames = offset
-        if clip.fade_out_frames > clip.duration_frames: clip.fade_out_frames = clip.duration_frames
+        clip.duration_ticks = offset
+        if clip.fade_out_ticks > clip.duration_ticks: clip.fade_out_ticks = clip.duration_ticks
         
-        new_clip.start_frame = clip.start_frame + offset
-        new_clip.duration_frames -= offset
-        new_clip.source_offset_frames += offset
-        if new_clip.fade_in_frames > new_clip.duration_frames: new_clip.fade_in_frames = new_clip.duration_frames
+        new_clip.start_tick = clip.start_tick + offset
+        new_clip.duration_ticks -= offset
+        new_clip.source_offset_ticks += offset
+        if new_clip.fade_in_ticks > new_clip.duration_ticks: new_clip.fade_in_ticks = new_clip.duration_ticks
         
         for c in self.model.clips: c.selected = False
         new_clip.selected = True
@@ -839,8 +861,8 @@ class SimpleTimeline(QWidget):
         self.update()
 
     def zoom_to_fit(self, animate=True):
-        max_frame = self.model.get_max_frame()
-        if max_frame <= 0: return
+        max_tick = self.model.get_max_tick()
+        if max_tick <= 0: return
         
         scroll_area = self.get_scroll_area_context()
         if scroll_area:
@@ -851,7 +873,7 @@ class SimpleTimeline(QWidget):
             h_scroll = None
         
         fps = self.get_fps()
-        duration_seconds = max_frame / fps
+        duration_seconds = max_tick / TICKS_PER_SECOND
         if duration_seconds > 0:
             target_pps = (viewport_width * 0.1) / duration_seconds
             target_pps = max(10, min(500, target_pps))

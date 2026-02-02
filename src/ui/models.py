@@ -1,6 +1,12 @@
-from enum import Enum
-from dataclasses import dataclass, field
 from typing import List, Optional
+from enum import Enum
+from dataclasses import dataclass
+
+# 1 Tick = 1/60000th of a second
+# This ensures zero floating point drift and exact temporal determinism.
+TICKS_PER_SECOND = 60000
+TICKS_PER_FRAME = 1000 # Default for 60fps reference
+
 
 class TrackType(Enum):
     """Enumeration of supported timeline track domains."""
@@ -36,7 +42,7 @@ class TimelineMarker:
     """
     A named point in absolute time.
     """
-    frame: int
+    tick: int
     name: str = ""
     color: str = "#FF9900" # Orange default
 
@@ -79,8 +85,8 @@ class TimelineRegion:
     """
     A named time range.
     """
-    start_frame: int
-    duration_frames: int
+    start_tick: int
+    duration_ticks: int
     name: str = ""
     color: str = "#00AAFF" # Blue default
 
@@ -89,10 +95,10 @@ class TimelineClip:
     Representation of a media segment on the timeline.
     Holds spatial (track), temporal, and aesthetic (opacity/fade) properties.
     """
-    def __init__(self, name: str, start_frame: int, duration_frames: int, track_index: int):
+    def __init__(self, name: str, start_tick: int, duration_ticks: int, track_index: int):
         self.name = name
-        self.start_frame = start_frame
-        self.duration_frames = duration_frames
+        self.start_tick = int(start_tick)
+        self.duration_ticks = int(duration_ticks)
         self.track_index = track_index
         # Status: 0=None, 1=Generating, 2=Ready, 3=Error
         self.proxy_status = 0 
@@ -100,18 +106,18 @@ class TimelineClip:
         self.use_proxy = False
         
         # Source Mapping
-        self.source_offset_frames = 0
+        self.source_offset_ticks = 0
         self.media_source_id = None
         self.file_path = None
         self.proxy_path = None
         self.proxy_status = ProxyStatus.NONE
         self.use_proxy = False
         
-        # Aesthetic Envelopes
+        # Aesthetic Envelopes (Determinist Ticks)
         self.start_opacity = 1.0
         self.end_opacity = 1.0
-        self.fade_in_frames = 0
-        self.fade_out_frames = 0
+        self.fade_in_ticks = 0
+        self.fade_out_ticks = 0
         self.fade_in_type = FadeType.LINEAR
         self.fade_out_type = FadeType.LINEAR
         # Keyframe nodes: list of [frame_offset, value, curve_type]
@@ -126,15 +132,14 @@ class TimelineClip:
         self.selected = False
         self.is_fx_active = False # Indicator for contextual panels (FX/Props)
         
-        # Audio Analysis Cache (Vegas Style)
-        self.waveform = []
-        self.waveform_computing = False
+        # Audio Analysis Cache (Removed)
+        pass
         
         # Video Analysis Cache
         self.thumbnails = []
         self.thumbnails_computing = False
         
-        # Trimming Limits
+        # Trimming Limits (In Native Source Frames)
         self.source_duration_frames = -1 # -1 for images, >0 for video/audio
         
         # Effects (OFX Plugins)
@@ -153,15 +158,15 @@ class TimelineClip:
         """Serializes the clip state to a dictionary for JSON storage."""
         return {
             "name": self.name,
-            "start_frame": self.start_frame,
-            "duration_frames": self.duration_frames,
+            "start_tick": self.start_tick,
+            "duration_ticks": self.duration_ticks,
             "track_index": self.track_index,
-            "source_offset_frames": self.source_offset_frames,
+            "source_offset_ticks": self.source_offset_ticks,
             "file_path": self.file_path,
             "start_opacity": self.start_opacity,
             "end_opacity": self.end_opacity,
-            "fade_in_frames": self.fade_in_frames,
-            "fade_out_frames": self.fade_out_frames,
+            "fade_in_ticks": self.fade_in_ticks,
+            "fade_out_ticks": self.fade_out_ticks,
             "fade_in_type": self.fade_in_type.value,
             "fade_out_type": self.fade_out_type.value,
             "opacity_nodes": self.opacity_nodes,
@@ -178,18 +183,22 @@ class TimelineClip:
     @classmethod
     def from_dict(cls, data: dict) -> 'TimelineClip':
         """Creates a TimelineClip instance from a dictionary."""
+        # Check for legacy frame-based keys for backward compatibility
+        start = data.get("start_tick", data.get("start_frame", 0) * TICKS_PER_FRAME)
+        dur = data.get("duration_ticks", data.get("duration_frames", 30) * TICKS_PER_FRAME)
+        
         clip = cls(
             data["name"], 
-            data["start_frame"], 
-            data["duration_frames"], 
+            start, 
+            dur, 
             data["track_index"]
         )
-        clip.source_offset_frames = data.get("source_offset_frames", 0)
+        clip.source_offset_ticks = data.get("source_offset_ticks", data.get("source_offset_frames", 0) * TICKS_PER_FRAME)
         clip.file_path = data.get("file_path")
         clip.start_opacity = data.get("start_opacity", 1.0)
         clip.end_opacity = data.get("end_opacity", 1.0)
-        clip.fade_in_frames = data.get("fade_in_frames", 0)
-        clip.fade_out_frames = data.get("fade_out_frames", 0)
+        clip.fade_in_ticks = data.get("fade_in_ticks", data.get("fade_in_frames", 0) * TICKS_PER_FRAME)
+        clip.fade_out_ticks = data.get("fade_out_ticks", data.get("fade_out_frames", 0) * TICKS_PER_FRAME)
         clip.fade_in_type = FadeType(data.get("fade_in_type", 0))
         clip.fade_out_type = FadeType(data.get("fade_out_type", 0))
         clip.opacity_nodes = data.get("opacity_nodes", [])
@@ -207,14 +216,14 @@ class TimelineClip:
 
     def copy(self) -> 'TimelineClip':
         """Deep copy of the clip for split or duplication operations."""
-        new_clip = TimelineClip(self.name, self.start_frame, self.duration_frames, self.track_index)
+        new_clip = TimelineClip(self.name, self.start_tick, self.duration_ticks, self.track_index)
         new_clip.start_opacity = self.start_opacity
         new_clip.end_opacity = self.end_opacity
-        new_clip.fade_in_frames = self.fade_in_frames
-        new_clip.fade_out_frames = self.fade_out_frames
+        new_clip.fade_in_ticks = self.fade_in_ticks
+        new_clip.fade_out_ticks = self.fade_out_ticks
         new_clip.fade_in_type = self.fade_in_type
         new_clip.fade_out_type = self.fade_out_type
-        new_clip.source_offset_frames = self.source_offset_frames
+        new_clip.source_offset_ticks = self.source_offset_ticks
         new_clip.media_source_id = self.media_source_id
         new_clip.file_path = self.file_path
         new_clip.proxy_path = self.proxy_path
@@ -224,8 +233,6 @@ class TimelineClip:
         new_clip.opacity_level = self.opacity_level
         new_clip.selected = self.selected
         new_clip.linked_to = self.linked_to
-        new_clip.waveform = self.waveform[:]
-        new_clip.waveform_computing = self.waveform_computing
         new_clip.thumbnails = self.thumbnails[:]
         new_clip.thumbnails_computing = self.thumbnails_computing
         new_clip.effects = [e.copy() for e in self.effects]
@@ -248,16 +255,25 @@ class TimelineClip:
 class BlueLine:
     """
     Represents the project-wide master temporal controller (The Playhead).
-    Handles playback state and current cursor position.
+    Handles playback state and current cursor position in integer ticks.
     """
     def __init__(self):
-        self.playhead_frame = 0.0
+        self.playhead_tick = 0
         self.playing = False
         self.color = "#00aaff" # Signature Rocky Blue
         
+    def set_playhead_tick(self, tick: int):
+        """Sets the precise absolute tick."""
+        self.playhead_tick = max(0, int(tick))
+    
     def set_playhead_frame(self, frame: float):
-        """Sets the precise absolute frame index."""
-        self.playhead_frame = max(0.0, float(frame))
+        """Helper to set playhead via frame (converts to ticks)."""
+        self.set_playhead_tick(int(frame * TICKS_PER_FRAME))
+    
+    @property
+    def playhead_frame(self) -> float:
+        """Legacy access for UI rendering (Now returning absolute seconds)."""
+        return float(self.playhead_tick) / TICKS_PER_SECOND
 
 class TimelineModel:
     """
@@ -337,17 +353,29 @@ class TimelineModel:
         model.layout_revision += 1
         return model
 
-    def get_max_frame(self) -> int:
-        """Calculates the end boundary of the last clip in the project."""
-        max_f = 0
+    def get_max_tick(self) -> int:
+        """Calculates the end boundary of the last clip in the project in ticks."""
+        max_t = 0
         for clip in self.clips:
-            end = clip.start_frame + clip.duration_frames
-            if end > max_f:
-                max_f = end
-        return int(max_f)
+            end = clip.start_tick + clip.duration_ticks
+            if end > max_t:
+                max_t = end
+        return int(max_t)
+
+    def get_max_frame(self) -> int:
+        """Helper for UI height calculation."""
+        return self.get_max_tick() // TICKS_PER_FRAME
 
     @staticmethod
-    def format_timecode(frame: float, fps: float) -> str:
+    def format_timecode(tick: int, fps: float) -> str:
         """Standard SMPTE-like timecode formatting delegated to C++ core."""
         import rocky_core
-        return rocky_core.RockyEngine.format_timecode(frame, fps)
+        return rocky_core.RockyEngine.format_timecode(int(tick), fps)
+
+    @staticmethod
+    def quantize(tick: int, fps: float) -> int:
+        """Snaps a raw tick to the nearest frame boundary."""
+        if fps <= 0: return tick
+        # Calculate Ticks Per Frame for this specific project FPS
+        tpf = TICKS_PER_SECOND / fps
+        return int(round(tick / tpf) * tpf)

@@ -6,7 +6,7 @@ Extracted for optimization and separation of concerns.
 from PySide6.QtCore import Qt, QRectF, QPointF, QLineF
 from PySide6.QtGui import QPainter, QColor, QPen, QImage, QPainterPath
 import math
-from ..models import FadeType, TrackType, ProxyStatus
+from ..models import FadeType, TrackType, ProxyStatus, TICKS_PER_SECOND
 from .. import design_tokens as dt
 
 class TimelinePainter:
@@ -59,6 +59,9 @@ class TimelinePainter:
         base_img_path = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")), "img")
         self.img_px = QImage(os.path.join(base_img_path, "px.png"))
         self.img_inf = QImage(os.path.join(base_img_path, "inf.png"))
+        
+        # Performance Cache
+        pass
 
     def paint(self, event):
         """Main paint method called from SimpleTimeline.paintEvent."""
@@ -117,13 +120,13 @@ class TimelinePainter:
             painter.setPen(pen_minor)
             for i in range(1, divs):
                 t_minor = t_major + (i * minor_step)
-                x_minor = self.timeline.timeToProjectedX(t_minor)
+                x_minor = self.timeline.tickToProjectedX(int(t_minor * TICKS_PER_SECOND))
                 if rect.left() <= x_minor <= rect.right():
                     painter.drawLine(QLineF(x_minor, 0, x_minor, height))
             
             # 2. Draw Major Line
             painter.setPen(pen_major)
-            x_major = self.timeline.timeToProjectedX(t_major)
+            x_major = self.timeline.tickToProjectedX(int(t_major * TICKS_PER_SECOND))
             if rect.left() <= x_major <= rect.right():
                 painter.drawLine(QLineF(x_major, 0, x_major, height))
             
@@ -156,9 +159,9 @@ class TimelinePainter:
             if clip.track_index >= len(track_y_positions):
                 continue
             
-            # [VEGAS PRINCIPLE] Precision Projection
-            clip_x = self.timeline.frameToProjectedX(clip.start_frame)
-            clip_w = self.timeline.frameToProjectedX(clip.duration_frames)
+            # [VEGAS PRINCIPLE] Precision Projection (Tick-Engine)
+            clip_x = self.timeline.tickToProjectedX(clip.start_tick)
+            clip_w = self.timeline.tickToProjectedX(clip.duration_ticks)
             
             # CULLING (Precision Check)
             if clip_x + clip_w < visible_rect.left() or clip_x > visible_rect.right():
@@ -183,7 +186,8 @@ class TimelinePainter:
                  header_col = header_col.lighter(130)
             
             # 1. Body & Header Path (Proprietary Chamfer Shape)
-            cut_size = self.Dimensions.CHAMFER_SIZE
+            # ADAPTIVE: Cap chamfer size to avoid path inversion on tiny clips
+            cut_size = min(self.Dimensions.CHAMFER_SIZE, clip_w / 2.0)
             clip_path = QPainterPath()
             clip_path.moveTo(clip_x, track_y + 1 + clip_h) # Bottom-left
             clip_path.lineTo(clip_x + clip_w, track_y + 1 + clip_h) # Bottom-right
@@ -214,31 +218,31 @@ class TimelinePainter:
                     self._draw_thumbnail(painter, clip, clip_x, content_y, clip_w, content_h, visible_rect)
                     painter.restore()
             else:
-                if hasattr(clip, 'waveform') and clip.waveform:
-                    self._draw_waveform(painter, clip.waveform, clip_x, content_y, clip_w, content_h, visible_rect)
-                elif getattr(clip, 'waveform_computing', False):
-                    painter.setPen(QColor(255, 255, 255, 100))
-                    painter.drawText(int(clip_x) + 5, int(track_y) + 30, "Computing peaks...")
+                pass
             
-            # 3. Text
-            painter.setPen(self.Palette.TEXT_PRIMARY)
-            font = painter.font()
-            font.setPointSize(9) 
-            font.setBold(False)
-            painter.setFont(font)
-            
-            # Estimate large button area to avoid overlap
-            btn_w = 28 
-            
-            # Offset text to avoid chamfer and large buttons
-            text_rect = rect_header.adjusted(cut_size + 4, 0, - (btn_w * 2 + 20), 0)
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, clip.name)
-            
-            # 4. Envelopes (Opacity/Fades)
-            self._draw_clip_envelopes(painter, clip, clip_x, clip_w, track_y, clip_h)
-            
-            # 5. Buttons (FX, PX)
-            self._draw_clip_buttons(painter, clip, clip_x, clip_w, track_y, cut_size)
+            # 3. Text & Buttons
+            if clip_w > 40:
+                painter.setPen(self.Palette.TEXT_PRIMARY)
+                font = painter.font()
+                font.setPointSize(9) 
+                font.setBold(False)
+                painter.setFont(font)
+                
+                # Estimate large button area to avoid overlap
+                btn_w = 28 
+                
+                # Offset text to avoid chamfer and large buttons
+                text_rect = rect_header.adjusted(cut_size + 4, 0, - (btn_w * 2 + 20), 0)
+                painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, clip.name)
+                
+                # 4. Envelopes (Opacity/Fades) - Only show if useful
+                self._draw_clip_envelopes(painter, clip, clip_x, clip_w, track_y, clip_h)
+                
+                # 5. Buttons (FX, PX)
+                self._draw_clip_buttons(painter, clip, clip_x, clip_w, track_y, cut_size)
+            else:
+                # For tiny clips, just a solid vertical line/block
+                pass
             
             # 6. Selection Border
             if clip.selected:
@@ -255,8 +259,8 @@ class TimelinePainter:
         opacity_level = getattr(clip, 'opacity_level', 1.0)
         target_y = body_start_y + (1.0 - opacity_level) * body_height
         
-        fade_in_w = self.timeline.frameToProjectedX(clip.fade_in_frames)
-        fade_out_w = self.timeline.frameToProjectedX(clip.fade_out_frames)
+        fade_in_w = self.timeline.tickToProjectedX(clip.fade_in_ticks)
+        fade_out_w = self.timeline.tickToProjectedX(clip.fade_out_ticks)
         
         envelope = QPainterPath()
         p_start_fi = QPointF(clip_x, body_end_y)
@@ -339,8 +343,6 @@ class TimelinePainter:
         path_tr.closeSubpath()
         painter.fillPath(path_tr, COLOR_FADE_HANDLE)
 
-
-
     def _draw_clip_buttons(self, painter, clip, clip_x, clip_w, track_y, cut_size):
         """Draws FX and PX buttons using images on the clip header."""
         button_w = self.Dimensions.BUTTON_SIZE
@@ -405,50 +407,6 @@ class TimelinePainter:
         # SUB Button removed as per simplified design
 
 
-
-    def _draw_waveform(self, painter, peaks, x, y, w, h, visible_rect):
-        """[VEGAS REDESIGN] Stereo Waveform Drawing (L/R Channels)."""
-        if not peaks or w < 1:
-            return
-            
-        # Split height for stereo display
-        h_per_ch = h / 2.0
-        mid_y_l = y + (h_per_ch / 2.0)
-        mid_y_r = y + h_per_ch + (h_per_ch / 2.0)
-        
-        # Interleaved peaks: L, R, L, R...
-        num_logical_points = len(peaks) // 2
-        
-        # Determine strict drawing boundary: Intersect clip with viewport
-        draw_start_x = max(int(x), visible_rect.left())
-        draw_end_x = min(int(x + w), visible_rect.right())
-        
-        if draw_start_x >= draw_end_x:
-            return
-
-        painter.setPen(QPen(QColor(255, 255, 255, 140), 1))
-        ppp = num_logical_points / float(w)
-        
-        # Loop only over the visible pixels
-        for px in range(draw_start_x, draw_end_x):
-            # Relative pixel index inside clip
-            i = px - x
-            p_idx = int(i * ppp)
-            if p_idx >= num_logical_points: break
-            
-            # --- CHANNEL L (TOP) ---
-            val_l = peaks[p_idx * 2]
-            if val_l > 0.005:
-                # Vertical mirror effect per channel
-                line_h_l = val_l * (h_per_ch / 2.0) * 0.95
-                painter.drawLine(QLineF(px, mid_y_l - line_h_l, px, mid_y_l + line_h_l))
-
-            # --- CHANNEL R (BOTTOM) ---
-            val_r = peaks[p_idx * 2 + 1]
-            if val_r > 0.005:
-                line_h_r = val_r * (h_per_ch / 2.0) * 0.95
-                painter.drawLine(QLineF(px, mid_y_r - line_h_r, px, mid_y_r + line_h_r))
-
     def _draw_thumbnail(self, painter, clip, x, y, w, h, visible_rect):
         """Draws thumbnails with viewport culling."""
         if not clip.thumbnails: return
@@ -457,11 +415,9 @@ class TimelinePainter:
         thumb_w = int(thumb_h * 1.77)
         
         # Only draw if the thumbnail position overlaps with viewport
-        # Start thumb
         if x + thumb_w > visible_rect.left() and x < visible_rect.right():
              self._paint_thumb(painter, clip.thumbnails[0], x, y, thumb_w, thumb_h)
         
-        # End thumb
         end_x = x + w - thumb_w
         if end_x + thumb_w > visible_rect.left() and end_x < visible_rect.right() and w > thumb_w * 2:
              self._paint_thumb(painter, clip.thumbnails[2], end_x, y, thumb_w, thumb_h)
@@ -476,14 +432,10 @@ class TimelinePainter:
         except: pass
 
     def _draw_playhead(self, painter):
-        """Draw playhead using absolute time projection."""
-        ph_x = self.timeline.frameToProjectedX(self.timeline.model.blueline.playhead_frame)
-        
-        # Consistent Precision Drawing
+        """Draw playhead using absolute Tick projection."""
+        ph_x = int(self.timeline.tickToProjectedX(self.timeline.model.blueline.playhead_tick))
         line = QLineF(ph_x, 0, ph_x, self.timeline.height())
-        
         painter.setPen(QPen(self.Palette.PLAYHEAD_BODY, 3))
         painter.drawLine(line)
-        
         painter.setPen(QPen(self.Palette.PLAYHEAD_LINE, 1))
         painter.drawLine(line)

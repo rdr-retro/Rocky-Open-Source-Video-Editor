@@ -32,20 +32,20 @@ import rocky_core
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter, 
                              QApplication, QScrollArea, QFrame, QMainWindow, QLabel, QFileDialog, QProgressDialog, QMessageBox)
-from PySide6.QtGui import QImage, QPixmap, QIcon, QPainter, QPainterPath, QPen, QColor
+from PySide6.QtGui import QImage, QPixmap, QIcon, QPainter, QPainterPath, QPen, QColor, QShortcut
 import subprocess
 import json
 from PySide6.QtCore import Qt, QTimer, QIODevice, QByteArray, QMutex, QMutexLocker, QRectF, QThread, Signal
 from PySide6.QtMultimedia import QAudioFormat, QAudioOutput, QAudioSource, QAudioSink
 import numpy as np
-
+from .models import TimelineModel, TrackType, TICKS_PER_FRAME, TICKS_PER_SECOND
 from .timeline.simple_timeline import SimpleTimeline
-from .models import TimelineModel, TrackType
 from .sidebar import SidebarPanel
 from .ruler import TimelineRuler
 from .master_meter import MasterMeterPanel
 from .viewer import ViewerPanel
 from .toolbar import RockyToolbar
+from ..infrastructure.debug.probe import PROBE
 from .settings_dialog import SettingsDialog
 from .styles import MODERN_LABEL
 from .asset_tabs import AssetTabsPanel
@@ -54,7 +54,6 @@ from . import design_tokens as dt
 from .panels import RockyPanel # New Panel System
  
 from ..infrastructure.workers.import_worker import MediaImportWorker 
-from ..infrastructure.workers.waveform import WaveformWorker
 from ..infrastructure.workers.thumbnail import ThumbnailWorker 
 from ..infrastructure.workers.proxy_gen import ProxyWorker 
 from .welcome_screen import WelcomeScreen
@@ -72,8 +71,10 @@ class AudioPlayer(QIODevice):
         super().__init__()
         self.sample_rate = sample_rate
         self.channels = channels
-        self.buffer = bytearray()
-        self.mutex = QMutex()
+        # Initialize High-Performance Circular Buffer (C++ Lock-Free)
+        # 524,288 samples = ~6 seconds of stereo audio (Max safety on Mac M4)
+        self.ring_buffer = rocky_core.AudioRingBuffer(524288) 
+        self.mutex = QMutex() 
         
         format = QAudioFormat()
         format.setSampleRate(sample_rate)
@@ -82,8 +83,9 @@ class AudioPlayer(QIODevice):
         
         self.audio_output = QAudioOutput()
         self.sink = QAudioSink(format)
-        # 100ms buffer approx
-        self.sink.setBufferSize(int(sample_rate * channels * 4 * 0.1))
+        # 1000ms buffer approx (Increased for Mac M-Series Safety)
+        # Prevents glitches when the UI thread or Worker is momentarily busy.
+        self.sink.setBufferSize(int(sample_rate * channels * 4 * 1.0))
         
         self.open(QIODevice.ReadOnly)
         self.sink.start(self)
@@ -91,47 +93,47 @@ class AudioPlayer(QIODevice):
 
     def write_samples(self, samples_np):
         if samples_np is not None:
-            locker = QMutexLocker(self.mutex)
-            self.buffer.extend(samples_np.tobytes())
+            # OPTIMIZATION: Calculate Levels HERE (Worker Thread)
+            try:
+                if samples_np.size >= 2:
+                    l_peak = np.max(np.abs(samples_np[0::2]))
+                    r_peak = np.max(np.abs(samples_np[1::2]))
+                    self.level_updated.emit(float(l_peak), float(r_peak))
+            except:
+                pass
+
+            # NATIVE WRITE: O(1) Append to Ring Buffer
+            # No .tobytes() call here to avoid extra copy if possible
+            # however, write() bindings will handle the numpy array.
+            self.ring_buffer.write(samples_np)
 
     def clear_buffer(self):
-        locker = QMutexLocker(self.mutex)
-        self.buffer.clear()
+        self.ring_buffer.clear()
         
     def get_buffer_duration_ms(self):
-        # 4 bytes per sample (float32) * 2 channels = 8 bytes per stereo sample
-        locker = QMutexLocker(self.mutex)
-        count = len(self.buffer) // 8
-        return (count / self.sample_rate) * 1000.0
+        # 8 bytes per stereo sample (2 * float32)
+        count = self.ring_buffer.get_available_read()
+        
+        # PROBE: Monitor buffer health
+        # ONLY report starvation if we are actually supposed to be playing
+        # This prevents false positives during startup or pause.
+        if count == 0 and getattr(self, 'is_playing_safety_flag', False):
+            PROBE.log_buffer_state(count, self.ring_buffer.get_available_write(), 524288)
+        
+        return (count / (self.sample_rate * 2)) * 1000.0
 
     def readData(self, maxlen):
-        locker = QMutexLocker(self.mutex)
-        if not self.buffer:
-            # Si no hay datos, devolvemos silencio (bytes nulos) para evitar el error de PyQt
-            return b"\x00" * maxlen
+        # NATIVE READ: O(1) Pop from Ring Buffer
+        # Returns bytes directly for the Qt audio thread
+        data = self.ring_buffer.read_bytes(maxlen)
         
-        actual = min(len(self.buffer), maxlen)
-        chunk_bytes = bytes(self.buffer[:actual])
-        del self.buffer[:actual] # Much faster than slicing for bytearray
-
-
-        # Live Level Detection for Meters
-        try:
-            samples = np.frombuffer(chunk_bytes, dtype=np.float32)
-            if samples.size >= 2:
-                # Interleaved stereo peaks
-                l_peak = np.max(np.abs(samples[0::2]))
-                r_peak = np.max(np.abs(samples[1::2]))
-                self.level_updated.emit(float(l_peak), float(r_peak))
-        except Exception as e:
-            # Prevent console spam if it fails repeatedly, but log it at least once or distinctively
-            print(f"Audio Level Analysis Error: {e}", flush=True)
-
-        return chunk_bytes
+        if not data:
+            return b"\x00" * maxlen
+            
+        return data
 
     def bytesAvailable(self):
-        locker = QMutexLocker(self.mutex)
-        return len(self.buffer) + super().bytesAvailable()
+        return (self.ring_buffer.get_available_read() * 4) + super().bytesAvailable()
 
     def get_processed_us(self):
         """Returns the hardware audio clock time in microseconds."""
@@ -167,58 +169,52 @@ class AudioWorker(QThread):
             # Use shared playback rate
             rate = getattr(self.model.blueline, 'playback_rate', 1.0)
             
-            # Reducimos drásticamente el buffer para reaccionar rápido (Objetivo: 300ms)
-            if current_buffer_ms < 150:
-                missing_ms = 300 - current_buffer_ms
+            # ULTRA-AGGRESSIVE pre-buffering for Mac M4 / Professional Latency
+            # Maintain a healthy ~2.5s safety net at all times.
+            if current_buffer_ms < 1800:
+                missing_ms = 2500 - current_buffer_ms
                 missing_duration = missing_ms / 1000.0 # Physical time to fill
                 
                 try:
                     if not hasattr(self.model, 'audio_samples_rendered'):
                         self.model.audio_samples_rendered = 0
                         
-                    render_start_time = self.model.audio_samples_rendered / 44100.0
+                    # OPTIMIZED: Native C++ Playback Batch
+                    # Moves all math, rendering, and resampling to C++ to avoid GIL blocks.
+                    # returns: (audio_data_numpy, samples_consumed_on_timeline)
+                    audio_final, consumed = self.engine.get_playback_batch(
+                        self.model.audio_samples_rendered,
+                        missing_duration,
+                        rate
+                    )
                     
-                    # SCALE timeline duration by rate
-                    # If we need 0.5s of real audio but playing at 2x, we need 1.0s of content
-                    content_duration = missing_duration * rate
-                    
-                    if content_duration > 0:
-                        # CRITICAL FIX: We do NOT use the Python locker here.
-                        # The C++ RockyEngine HAS its own internal std::mutex for render_audio.
-                        # Using the Python engine_lock here causes deadlocks with the GIL 
-                        # because render_audio releases the GIL internally.
-                        audio_content = self.engine.render_audio(render_start_time, content_duration)
+                    if audio_final is not None and audio_final.size > 0:
+                        # PROBE: Trace continuity
+                        # 'consumed' is the number of frames (L+R pairs)
+                        PROBE.log_audio_request(self.model.audio_samples_rendered, consumed, rate)
                         
-                        if audio_content is not None and audio_content.size > 0:
-                            # Resample timeline content to fit physical time
-                            target_sample_count = int(missing_duration * 44100)
-                            
-                            if rate != 1.0:
-                                audio_final = self._resample_stereo(audio_content, target_sample_count)
-                            else:
-                                audio_final = audio_content
-                            
-                            self.player.write_samples(audio_final)
-                            # Update tracking based on TIMELINE time consumed
-                            self.model.audio_samples_rendered += int(content_duration * 44100)
+                        self.player.write_samples(audio_final)
+                        self.model.audio_samples_rendered += consumed
                     else:
-                        # If rate is 0, we just wait
                         pass
                         
                 except Exception as e:
                     print(f"AudioWorker Error: {e}")
             
-            self.msleep(20)
+            self.msleep(2) # 500Hz Check rate (Extreme reaction speed)
         
 
     def start_playback(self, start_time, fps, rate=1.0):
         self.fps = fps
         self.player.clear_buffer()
-        # Convertimos el tiempo inicial a muestras exactas
+        # Convert start_time (seconds) to samples
         self.model.audio_samples_rendered = int(start_time * 44100)
         
-        # Pre-buffer inicial muy potente (1.2s) para garantizar arranque suave
-        initial = self.engine.render_audio(start_time, 1.2)
+        # Pre-buffer using TICKS (2.0 seconds worth)
+        start_tick = int(start_time * TICKS_PER_SECOND)
+        dur_ticks = int(2.0 * TICKS_PER_SECOND)
+        
+        initial = self.engine.render_audio(start_tick, dur_ticks)
         self.player.write_samples(initial)
 
         self.model.audio_samples_rendered += (initial.size // 2)
@@ -241,14 +237,20 @@ class VideoWorker(QThread):
         self.engine_lock = engine_lock
         self.running = False
         self._target_timestamp = -1.0
+        self._target_res = None
         self._mutex = QMutex()
         self._has_new_request = False
 
-    def request_frame(self, timestamp):
-        """Asynchronously requests a frame for the given timestamp."""
+    def request_frame(self, tick):
+        """Asynchronously requests a frame for the given tick."""
         locker = QMutexLocker(self._mutex)
-        self._target_timestamp = timestamp
+        self._target_timestamp = tick # Renamed logic but variable kept
         self._has_new_request = True
+
+    def request_resolution(self, w, h):
+        """Asynchronously requests a resolution change."""
+        locker = QMutexLocker(self._mutex)
+        self._target_res = (w, h)
 
     def run(self):
         self.running = True
@@ -256,18 +258,28 @@ class VideoWorker(QThread):
         
         while self.running and not self.isInterruptionRequested():
             timestamp = -1.0
+            new_res = None
             locker = QMutexLocker(self._mutex)
             if self._has_new_request:
                 timestamp = self._target_timestamp
                 self._has_new_request = False
+            if self._target_res:
+                new_res = self._target_res
+                self._target_res = None
             del locker
+
+            if new_res:
+                locker = QMutexLocker(self.engine_lock)
+                self.engine.set_resolution(new_res[0], new_res[1])
+                del locker
 
             if timestamp != -1.0 and timestamp != last_processed:
                 try:
-                    # HEAVY OPERATION: Evaluate project state at this timestamp
+                    # HEAVY OPERATION: Evaluate project state at this TICK
                     # This involves FFmpeg decoding and C++ compositing.
                     locker = QMutexLocker(self.engine_lock)
-                    frame = self.engine.evaluate(timestamp)
+                    # Force integer tick
+                    frame = self.engine.evaluate(int(timestamp))
                     del locker
                     
                     self.frame_ready.emit(frame)
@@ -318,9 +330,12 @@ class RenderWorker(QThread):
             self.engine.set_resolution(self.width, self.height)
             if locker: del locker
             
-            # 2. Render Audio (Rápido)
-            duration = self.total_frames / self.fps
-            audio_samples = self.engine.render_audio(0, duration)
+            # 2. Render Audio (Fast)
+            # Use Ticks for calculations
+            ticks_per_frame = TICKS_PER_SECOND / self.fps
+            total_duration_ticks = int(self.total_frames * ticks_per_frame)
+            
+            audio_samples = self.engine.render_audio(0, total_duration_ticks)
             with open(audio_temp_path, 'wb') as f:
                 f.write(audio_samples.tobytes())
                 
@@ -388,13 +403,16 @@ class RenderWorker(QThread):
                 )
             
                 # 4. Renderizar Video Frame a Frame
+                # Calculate ticks once
+                tpf = TICKS_PER_SECOND / self.fps
+                
                 for i in range(self.total_frames):
                     if self.isInterruptionRequested():
                         process.terminate()
                         break
                         
-                    timestamp = i / self.fps
-                    frame_data = self.engine.evaluate(timestamp)
+                    tick = int(i * tpf)
+                    frame_data = self.engine.evaluate(tick)
                     
                     try:
                         raw_bytes = frame_data.tobytes()
@@ -581,9 +599,9 @@ class RockyApp(QMainWindow):
         """Called when the window is shown. Safe place to start threads and splash."""
         super().showEvent(event)
         if hasattr(self, 'audio_worker') and not self.audio_worker.isRunning():
-            self.audio_worker.start(QThread.HighPriority)
+            self.audio_worker.start(QThread.Priority.TimeCriticalPriority)
         if hasattr(self, 'video_worker') and not self.video_worker.isRunning():
-            self.video_worker.start(QThread.HighPriority)
+            self.video_worker.start(QThread.Priority.HighPriority)
             
         # Show Welcome Screen on Startup (with slight delay for stable geometry)
         QTimer.singleShot(100, self._show_welcome_screen)
@@ -842,6 +860,18 @@ class RockyApp(QMainWindow):
         self.toolbar.action_rot_cw.triggered.connect(lambda: self.rotate_selection(90))
         self.toolbar.action_rot_ccw.triggered.connect(lambda: self.rotate_selection(-90))
         self.toolbar.action_rot_180.triggered.connect(lambda: self.rotate_selection(180))
+    
+        # Zoom Actions
+        self.toolbar.action_zoom_in.triggered.connect(self.on_zoom_in)
+        self.toolbar.action_zoom_out.triggered.connect(self.on_zoom_out)
+        self.toolbar.action_zoom_fit.triggered.connect(self.on_zoom_fit)
+        
+        # Tools
+        self.toolbar.action_audit.triggered.connect(self.on_run_audit)
+        
+        # 1.6 Global Shortcuts
+        self.play_shortcut = QShortcut(Qt.Key_Space, self)
+        self.play_shortcut.activated.connect(self.toggle_play)
         
         # 2. Playback Engine Timer
         self.playback_timer = QTimer(self)
@@ -1052,22 +1082,21 @@ class RockyApp(QMainWindow):
             if file_path.lower().endswith('.rocky'):
                 self.load_project(file_path)
             else:
-                start_frame = self.model.blueline.playhead_frame
-                self.import_media(file_path, start_frame)
+                start_tick = self.model.blueline.playhead_tick
+                self.import_media(file_path, start_tick)
                 self.status_label.setText(f"Importado: {os.path.basename(file_path)}")
 
-    def import_media(self, file_path, start_frame, preferred_track_idx=-1):
+    def import_media(self, file_path, start_tick, preferred_track_idx=-1):
         """
-        Starts the asynchronous media import process.
+        Starts the asynchronous media import process with Tick precision.
         """
         self.status_label.setText(f"Probing media: {os.path.basename(file_path)}...")
         
         worker = MediaImportWorker(file_path, self.get_fps())
         
-        # We need to pass the state (start_frame, preferred_track_idx) to the finish method
-        # We can use a lambda or partial to "bind" these values
-        # Worker emits: path, duration, source, width, height, rotation, fps
-        worker.finished.connect(lambda path, dur, src, w, h, r, f: self._finish_import_logic(path, dur, src, w, h, r, f, start_frame, preferred_track_idx))
+        # We need to pass the state (start_tick, preferred_track_idx) to the finish method
+        # Worker emits: path, dur_ticks, source, width, height, rotation, fps
+        worker.finished.connect(lambda path, dur, src, w, h, r, f: self._finish_import_logic(path, dur, src, w, h, r, f, start_tick, preferred_track_idx))
         worker.error.connect(self._on_import_error)
         
         self._active_workers.append(worker)
@@ -1079,7 +1108,7 @@ class RockyApp(QMainWindow):
         self.status_label.setText(f"Error importando {os.path.basename(path)}")
         QMessageBox.warning(self, "Error de Importación", f"No se pudo cargar {path}:\n{message}")
 
-    def _finish_import_logic(self, file_path, duration, source, width, height, rotation, fps, start_frame, preferred_track_idx):
+    def _finish_import_logic(self, file_path, project_duration_ticks, source, width, height, rotation, source_fps, start_tick, preferred_track_idx):
         """
         Completes the import process once metadata is available from the background thread.
         ULTRA-FAST: Avoids blocking calls on the UI thread.
@@ -1103,8 +1132,11 @@ class RockyApp(QMainWindow):
         # Check if project was empty before this import to trigger auto-zoom/resolution-match
         was_empty = (len(self.model.clips) == 0)
         
+        is_audio = ext in ["mp3", "wav", "aac", "m4a", "flac"]
+        
         # SMART PROVISIONING: Ask to match resolution on first import
-        if was_empty and width > 0 and height > 0:
+        # FIX: Only trigger for non-audio media with a reasonable minimum resolution (ignore thumbnails/album art)
+        if was_empty and not is_audio and width > 300 and height > 300:
             msg = QMessageBox()
             msg.setWindowTitle("Configuración de Proyecto")
             
@@ -1194,18 +1226,20 @@ class RockyApp(QMainWindow):
                 if was_empty:
                     self.on_resolution_changed(1920, 1080)
         
-        is_audio = ext in ["mp3", "wav", "aac", "m4a", "flac"]
         is_image = ext in ["jpg", "jpeg", "png", "gif", "bmp", "webp"]
         is_video = not is_audio and not is_image
         
-        fps = self.get_fps()
-        # duration and source_duration are passed from worker (in frames)
-        source_duration = duration if not is_image else -1
+        project_fps = self.get_fps()
+        from .models import TICKS_PER_FRAME
+        
+        # Calculate NATIVE Source frames for technical metadata (Vegas Style)
+        # Note: We keep technical metadata in native frames for engine decoding.
+        native_source_frames = int((project_duration_ticks / TICKS_PER_SECOND) * source_fps) if not is_image else -1
         
         if is_image:
-           # Default 30s for images if type is image
-           duration = int(30 * fps)
-           source_duration = -1
+           # Default 30s for images
+           project_duration_ticks = int(30 * TICKS_PER_SECOND)
+           native_source_frames = -1
 
         if is_video:
             # 1. Video Track
@@ -1218,15 +1252,15 @@ class RockyApp(QMainWindow):
                 self.add_track(TrackType.VIDEO)
                 v_track = len(self.model.track_types) - 1
             
-            v_clip = TimelineClip(file_name, start_frame, duration, v_track)
+            v_clip = TimelineClip(file_name, start_tick, project_duration_ticks, v_track)
             v_clip.file_path = file_path
-            v_clip.source_duration_frames = source_duration
+            v_clip.source_duration_frames = native_source_frames
             
             # --- METADATA CACHE (Instant UI Optimization) ---
             v_clip.source_width = width
             v_clip.source_height = height
             v_clip.source_rotation = rotation
-            v_clip.source_fps = fps
+            v_clip.source_fps = source_fps
             
             # DEFERRED SOURCE LOADING: Avoid blocking UI thread
             # We schedule the heavy load for the NEXT event loop cycle
@@ -1289,10 +1323,10 @@ class RockyApp(QMainWindow):
             self.add_track(TrackType.AUDIO)
             a_track = len(self.model.track_types) - 1
             
-            a_clip = TimelineClip(f"[Audio] {file_name}", start_frame, duration, a_track)
+            a_clip = TimelineClip(f"[Audio] {file_name}", start_tick, project_duration_ticks, a_track)
             a_clip.file_path = file_path
-            a_clip.source_duration_frames = source_duration
-            a_clip.source_fps = fps
+            a_clip.source_duration_frames = native_source_frames
+            a_clip.source_fps = source_fps
             
             v_clip.linked_to = a_clip
             a_clip.linked_to = v_clip
@@ -1301,7 +1335,6 @@ class RockyApp(QMainWindow):
             self.model.add_clip(a_clip)
             
             # Trigger background workers (Async by nature)
-            self._start_waveform_analysis(a_clip)
             self._start_thumbnail_analysis(v_clip)
             self._trigger_proxy_generation(v_clip)
             
@@ -1316,22 +1349,20 @@ class RockyApp(QMainWindow):
                 self.add_track(required_type)
                 t_idx = len(self.model.track_types) - 1
             
-            clip = TimelineClip(file_name, start_frame, duration, t_idx)
+            clip = TimelineClip(file_name, start_tick, project_duration_ticks, t_idx)
             clip.file_path = file_path
-            clip.source_duration_frames = source_duration
+            clip.source_duration_frames = native_source_frames
             clip.source_width = width
             clip.source_height = height
             clip.source_rotation = rotation
-            clip.source_fps = fps
+            clip.source_fps = source_fps
             
             if file_path not in self.media_source_cache:
                 QTimer.singleShot(0, lambda: self._instantiate_source(file_path))
                 
             self.model.add_clip(clip)
             
-            if is_audio:
-                self._start_waveform_analysis(clip)
-            else:
+            if not is_audio:
                 self._start_thumbnail_analysis(clip)
         
         self.timeline_widget.update()
@@ -1405,9 +1436,7 @@ class RockyApp(QMainWindow):
                 if clip.file_path and os.path.exists(clip.file_path):
                     ext = clip.file_path.lower().split('.')[-1]
                     is_audio = ext in ["mp3", "wav", "aac", "m4a", "flac"]
-                    if is_audio:
-                        self._start_waveform_analysis(clip)
-                    else:
+                    if not is_audio:
                         self._start_thumbnail_analysis(clip)
                         self._trigger_proxy_generation(clip)
             
@@ -1575,15 +1604,21 @@ class RockyApp(QMainWindow):
         if self.model.blueline.playing:
             self.playback_timer.setInterval(int(16 / max(0.1, self.playback_rate)))
             
+            # DIAGNOSTIC: Enable playback monitoring
+            self.audio_player.is_playing_safety_flag = True
+            
             active_fps = self.get_fps()
-            # Capturamos el estado inicial para el Reloj Maestro
-            self.playback_start_frame = self.model.blueline.playhead_frame
+            # Capturamos el estado inicial para el Reloj Maestro (Deterministic Ticks)
+            self.playback_start_tick = self.model.blueline.playhead_tick
             self.playback_start_audio_time = self.audio_player.get_processed_us()
             
-            start_time = self.model.blueline.playhead_frame / active_fps
+            start_time = self.model.blueline.playhead_tick / TICKS_PER_SECOND
             self.audio_worker.start_playback(start_time, active_fps, self.playback_rate)
         else:
             self.audio_worker.stop_playback()
+            
+            # DIAGNOSTIC: Disable playback monitoring
+            self.audio_player.is_playing_safety_flag = False
             
             # RESTAURAR ALTA CALIDAD al pausar
             locker = QMutexLocker(self.engine_lock)
@@ -1593,15 +1628,17 @@ class RockyApp(QMainWindow):
             del locker
             
             # Forzar un último frame en alta resolución
-            fps = self.get_fps()
-            self.video_worker.request_frame(self.model.blueline.playhead_frame / fps)
+            self.video_worker.request_frame(self.model.blueline.playhead_tick)
 
             # Vegas Style: Return to start position on stop
-            if hasattr(self, 'playback_start_frame'):
-                self.model.blueline.set_playhead_frame(self.playback_start_frame)
+            if hasattr(self, 'playback_start_tick'):
+                tick = self.playback_start_tick
+                self.model.blueline.set_playhead_tick(tick)
+                
                 fps = self.get_fps()
-                tc = self.model.format_timecode(self.playback_start_frame, fps)
-                self.on_time_changed(self.playback_start_frame / fps, int(self.playback_start_frame), tc, True)
+                frame_index = tick / (TICKS_PER_SECOND / fps)
+                tc = self.model.format_timecode(tick, fps)
+                self.on_time_changed(tick / TICKS_PER_SECOND, int(frame_index), tc, True, tick=tick)
                 self.timeline_widget.update()
 
 
@@ -1612,7 +1649,6 @@ class RockyApp(QMainWindow):
         
         if self.model.blueline.playing:
             # Re-anclamos el reloj maestro para evitar saltos al cambiar la velocidad
-            active_fps = self.get_fps()
             
             # Use Audio Clock for accurate elapsed time
             current_audio = self.audio_player.get_processed_us()
@@ -1620,15 +1656,15 @@ class RockyApp(QMainWindow):
             if elapsed_us < 0: elapsed_us = 0
             elapsed_real_time = elapsed_us / 1_000_000.0
             
-            current_frame = self.playback_start_frame + (elapsed_real_time * active_fps * self.playback_rate)
+            current_tick = self.playback_start_tick + int(elapsed_real_time * TICKS_PER_SECOND * self.playback_rate)
             
-            self.playback_start_frame = current_frame
+            self.playback_start_tick = current_tick
             self.playback_start_audio_time = self.audio_player.get_processed_us()
             
             # IMMEDIATELY clear the audio buffer to apply the new rate without lag
             self.audio_player.clear_buffer()
             # Reset the rendered samples tracker to current timeline position so worker starts fresh
-            self.model.audio_samples_rendered = int((current_frame / active_fps) * 44100)
+            self.model.audio_samples_rendered = int((current_tick / TICKS_PER_SECOND) * 44100)
         
         self.playback_rate = new_rate
         self.model.blueline.playback_rate = new_rate
@@ -1646,9 +1682,9 @@ class RockyApp(QMainWindow):
             return
 
         active_fps = self.get_fps()
+        # TICKS_PER_SECOND is our constant master clock
         
         # RELOJ MAESTRO: Calculamos el tiempo transcurrido REAL basado en el AUDIO
-        # Esto previene el desincronismo (Drift). Si el audio se adelanta/atrasa, el video lo sigue.
         try:
             current_audio_time = self.audio_player.get_processed_us()
             elapsed_us = current_audio_time - self.playback_start_audio_time
@@ -1657,13 +1693,20 @@ class RockyApp(QMainWindow):
         except:
              elapsed_real_time = 0
              
-        current_frame = self.playback_start_frame + (elapsed_real_time * active_fps * self.playback_rate)
+        current_tick = self.playback_start_tick + int(elapsed_real_time * TICKS_PER_SECOND * self.playback_rate)
+
+        # 0. CLAMP MONOTÓNICO: Evita el efecto "CD Rayado" si el reloj del hardware fluctúa
+        # El tiempo de la línea de tiempo NUNCA debe retroceder durante la reproducción normal.
+        last_tick = getattr(self, '_last_playback_tick', -1)
+        if current_tick < last_tick and self.playback_rate > 0:
+            current_tick = last_tick
+        self._last_playback_tick = current_tick
 
         # 1. Synchronize UI (Playhead and Timeline)
         playhead_screen_x = None
         for timeline in self.timeline_registry:
             try:
-                x = timeline.update_playhead_position(current_frame, forced=False)
+                x = timeline.update_playhead_position(current_tick, forced=False)
                 if playhead_screen_x is None:
                     playhead_screen_x = x
             except:
@@ -1673,7 +1716,10 @@ class RockyApp(QMainWindow):
             self.auto_scroll_playhead(playhead_screen_x)
         
         # 2. Synchronize Engine (Atomic Evaluation)
-        engine_timestamp = current_frame / active_fps
+        # Force tick eval
+        self.video_worker.request_frame(int(current_tick))
+        
+        self.model.blueline.set_playhead_tick(current_tick)
         
         # OPTIMIZACIÓN DE RESOLUCIÓN DINÁMICA:
         # Ajustamos el motor para renderizar exactamente lo que se ve en el visor.
@@ -1687,16 +1733,12 @@ class RockyApp(QMainWindow):
                 if target_w > 0 and target_h > 0:
                     # Debounce resolution changes to avoid overhead
                     if not hasattr(self, '_last_engine_w') or abs(self._last_engine_w - target_w) > 32:
-                        locker = QMutexLocker(self.engine_lock)
-                        self.engine.set_resolution(target_w, target_h)
+                        self.video_worker.request_resolution(target_w, target_h)
                         self._last_engine_w = target_w
                         self._last_engine_h = target_h
-                        del locker
 
-        # ASYNC EVALUATION: No bloqueamos el hilo de la UI
-        self.video_worker.request_frame(engine_timestamp)
 
-    def on_time_changed(self, timestamp, frame_index, timecode, forced):
+    def on_time_changed(self, timestamp, frame_index, timecode, forced, tick=None):
         """
         Synchronizes the UI state when the playhead is manually moved.
         """
@@ -1713,8 +1755,12 @@ class RockyApp(QMainWindow):
         
         # If seek is forced while playing (manual seek during playback), update start reference
         if forced and self.model.blueline.playing:
-             self.playback_start_frame = frame_index
+             self.playback_start_tick = tick if tick is not None else int(timestamp * TICKS_PER_SECOND)
              self.playback_start_audio_time = self.audio_player.get_processed_us()
+             
+             # RESET AUDIO WORKER: Flush buffer and relocate rendering cursor
+             self.audio_player.clear_buffer()
+             self.model.audio_samples_rendered = int(timestamp * 44100)
         
         # ASYNC EVALUATION: Usamos el worker para no bloquear el scroll/seek de la línea de tiempo
         if not self.model.blueline.playing:
@@ -1782,6 +1828,65 @@ class RockyApp(QMainWindow):
             if hasattr(viewer_panel, 'slider_rate'):
                 viewer_panel.slider_rate.valueChanged.connect(self.on_playback_rate_changed)
                 viewer_panel.slider_rate.sliderReleased.connect(self.on_playback_rate_released)
+
+    def on_zoom_in(self):
+        """Triggers zoom in on all active timelines."""
+        if hasattr(self, 'timeline_widget'):
+             self.timeline_widget.zoom_in()
+        # Also sync others if needed
+        for tl in self.timeline_registry:
+            if tl != self.timeline_widget:
+                tl.zoom_in()
+
+    def on_zoom_out(self):
+        """Triggers zoom out on all active timelines."""
+        if hasattr(self, 'timeline_widget'):
+             self.timeline_widget.zoom_out()
+        # Also sync others
+        for tl in self.timeline_registry:
+            if tl != self.timeline_widget:
+                tl.zoom_out()
+
+    def on_zoom_fit(self):
+        """Triggers Zoom to Fit on all active timelines."""
+        if hasattr(self, 'timeline_widget'):
+             self.timeline_widget.zoom_to_fit(animate=True)
+        for tl in self.timeline_registry:
+            if tl != self.timeline_widget:
+                tl.zoom_to_fit(animate=True)
+
+    def on_run_audit(self):
+        """Runs the Timeline Auditor validation suite with Repair option."""
+        from .audit import TimelineAuditor
+        auditor = TimelineAuditor(self.model, fps=self.get_fps())
+        report = auditor.run()
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Auditoría de Timeline")
+        msg.setText(report)
+        msg.setWindowIcon(self.windowIcon())
+        
+        # Determine icon based on issues
+        has_issues = "❌" in report or "⚠️" in report
+        
+        if has_issues:
+            msg.setIcon(QMessageBox.Warning)
+            btn_repair = msg.addButton("Reparar Automáticamente", QMessageBox.ActionRole)
+            msg.addButton("Cerrar", QMessageBox.RejectRole)
+            
+            msg.exec()
+            
+            if msg.clickedButton() == btn_repair:
+                count = auditor.repair()
+                QMessageBox.information(self, "Reparación Completa", f"Se han realizado {count} correcciones en la timeline.")
+                # Refresh everything
+                if self.timeline_widget:
+                    self.timeline_widget.update()
+        else:
+            msg.setIcon(QMessageBox.Information)
+            msg.addButton("Cerrar", QMessageBox.AcceptRole)
+            msg.exec()
+
 
     def on_rewind(self):
         """Handles rewind request from any viewer."""
@@ -2080,15 +2185,6 @@ class RockyApp(QMainWindow):
 
 
 
-    def _start_waveform_analysis(self, clip):
-        """Launches a background thread to calculate the real audio waveform."""
-        clip.waveform_computing = True
-        worker = WaveformWorker(clip, clip.file_path)
-        worker.finished.connect(self.on_waveform_finished)
-        # Built-in finished for safe cleanup
-        worker.finished.connect(lambda: self._safe_remove_worker(worker))
-        self._active_workers.append(worker)
-        worker.start()
 
     def _start_thumbnail_analysis(self, clip):
         """Launches a background thread to extract keyframe thumbnails."""
@@ -2100,11 +2196,6 @@ class RockyApp(QMainWindow):
         self._active_workers.append(worker)
         worker.start()
 
-    def on_waveform_finished(self, clip, peaks):
-        """Callback when the C++ engine finishes scanning the audio file."""
-        clip.waveform = peaks
-        clip.waveform_computing = False
-        self.timeline_widget.update()
         
         # Refresh FX dialog if open
         dlg = self.fx_dialogs.get(id(clip))
@@ -2247,14 +2338,15 @@ class RockyApp(QMainWindow):
             if use_proxies and clip.proxy_status == ProxyStatus.READY and clip.proxy_path:
                 path_to_use = clip.proxy_path
             
-            media_source = self._instantiate_source(path_to_use)
+            track_type = self.model.track_types[clip.track_index]
+            media_source = self._instantiate_source(path_to_use, track_type)
             
             cpp_clip = self.engine.add_clip(
                 clip.track_index,
                 clip.name,
-                int(clip.start_frame),
-                int(clip.duration_frames),
-                clip.source_offset_frames / active_fps,
+                int(clip.start_tick),
+                int(clip.duration_ticks),
+                int(clip.source_offset_ticks),
                 media_source
             )
             self.clip_map[clip] = cpp_clip
@@ -2284,8 +2376,8 @@ class RockyApp(QMainWindow):
                         cpp_effects_list.append(c_eff)
                 
                 cpp_clip.effects = cpp_effects_list
-            cpp_clip.fade_in_frames = int(clip.fade_in_frames)
-            cpp_clip.fade_out_frames = int(clip.fade_out_frames)
+            cpp_clip.fade_in_ticks = int(clip.fade_in_ticks)
+            cpp_clip.fade_out_ticks = int(clip.fade_out_ticks)
             cpp_clip.fade_in_type = rocky_core.FadeType(clip.fade_in_type.value)
             cpp_clip.fade_out_type = rocky_core.FadeType(clip.fade_out_type.value)
             
@@ -2329,7 +2421,7 @@ class RockyApp(QMainWindow):
         if was_playing:
             self.toggle_play()
 
-    def _instantiate_source(self, path):
+    def _instantiate_source(self, path, track_type=TrackType.VIDEO):
         """Helper to determine the correct C++ backend for a file path, using a cache."""
         if not path or not os.path.exists(path):
             return rocky_core.ColorSource(random.randint(50,200), 50, 100, 255)
@@ -2341,11 +2433,20 @@ class RockyApp(QMainWindow):
         lower_path = path.lower()
         image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp')
         
-        source = None
-        if lower_path.endswith(image_extensions):
-            source = rocky_core.ImageSource(path)
+        if track_type == TrackType.VIDEO:
+            if lower_path.endswith(image_extensions):
+                source = rocky_core.ImageSource(path)
+            else:
+                source = rocky_core.VideoSource(path)
         else:
-            source = rocky_core.VideoSource(path)
+            # Use High-Performance Native Audio for ALL audio-only tracks (Starvation Fix)
+            # This pre-loads the audio into memory for ultra-fast, jitter-free mixing.
+            audio_extensions = ('.wav', '.mp3', '.m4a', '.aac', '.ogg', '.flac')
+            if lower_path.endswith(audio_extensions):
+                source = rocky_core.NativeAudioSource(path)
+            else:
+                # Fallback for weird formats
+                source = rocky_core.VideoSource(path)
             
         self.media_source_cache[path] = source
         return source

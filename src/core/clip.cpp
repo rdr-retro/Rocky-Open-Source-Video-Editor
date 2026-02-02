@@ -1,8 +1,10 @@
 #include "clip.h"
+#include "common.h" // For TICKS_PER_SECOND
+#include <cmath>
 
-Clip::Clip(std::string n, long s, long d, double o,
+Clip::Clip(std::string n, long long s, long long d, long long o,
            std::shared_ptr<MediaSource> src, int ti)
-    : name(n), startFrame(s), durationFrames(d), sourceOffset(o), source(src),
+    : name(n), startTick(s), durationTicks(d), sourceOffsetTicks(o), source(src),
       trackIndex(ti) {}
 
 float Clip::getFadeValue(FadeType type, double t, bool isFadeIn) {
@@ -33,26 +35,27 @@ float Clip::getFadeValue(FadeType type, double t, bool isFadeIn) {
   return (float)(isFadeIn ? val : 1.0 - val);
 }
 
-float Clip::getOpacityAt(long absoluteFrame) {
-  long localFrame = absoluteFrame - startFrame;
+float Clip::getOpacityAt(long long absoluteTick) {
+  long long localTick = absoluteTick - startTick;
   float currentOpacity = opacity;
 
-  if (fadeInFrames > 0 && localFrame < fadeInFrames) {
-    double t = (double)localFrame / fadeInFrames;
+  if (fadeInTicks > 0 && localTick < fadeInTicks) {
+    double t = (double)localTick / fadeInTicks;
     currentOpacity *= getFadeValue(fadeInType, t, true);
-  } else if (fadeOutFrames > 0 &&
-             localFrame > (durationFrames - fadeOutFrames)) {
-    long fadeOutStart = durationFrames - fadeOutFrames;
-    double t = (double)(localFrame - fadeOutStart) / fadeOutFrames;
+  } else if (fadeOutTicks > 0 &&
+             localTick > (durationTicks - fadeOutTicks)) {
+    long long fadeOutStart = durationTicks - fadeOutTicks;
+    double t = (double)(localTick - fadeOutStart) / fadeOutTicks;
     currentOpacity *= getFadeValue(fadeOutType, t, false);
   }
 
   return std::max(0.0f, std::min(1.0f, currentOpacity));
 }
 
-Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
-  // 1. Calculate local time
-  double localTime = (double)(absoluteFrame - startFrame) / fps + sourceOffset;
+Frame Clip::render(long long tick, int w, int h, double fps) {
+  // 1. Calculate local time in SECONDS
+  // Using global constant TICKS_PER_SECOND (60000) for deterministic conversion
+  double localTime = (double)(tick - startTick + sourceOffsetTicks) / TICKS_PER_SECOND;
 
   // Support for looping
   double srcDur = source->getDuration();
@@ -63,9 +66,6 @@ Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
   }
 
   // 2. Fetch Source Frame (at NATIVE resolution)
-  // By fetching at native size, we avoid double-scaling or forced aspect-fit
-  // inside the source. The transform logic below will handle fitting it to the
-  // canvas.
   int nativeW = source->getWidth();
   int nativeH = source->getHeight();
   Frame f = source->getFrame(localTime, nativeW, nativeH);
@@ -73,10 +73,8 @@ Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
     return f;
 
   // 3. Apply Opacity Envelope
-  float finalAlphaMult = getOpacityAt(absoluteFrame);
+  float finalAlphaMult = getOpacityAt(tick);
   if (finalAlphaMult < 1.0f) {
-    // Optimization: Process 4 bytes at a time if possible?
-    // For now, simple loop for safety.
     size_t limit = f.data.size();
     uint8_t *ptr = f.data.data();
     for (size_t i = 3; i < limit; i += 4) {
@@ -84,23 +82,9 @@ Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
     }
   }
 
-  // 4. Transform Logic - THE FIX
-  // Canvas dimensions: w, h
+  // 4. Transform Logic
   Frame outFrame(w, h, 4);
-  // Clear to transparent
   std::fill(outFrame.data.begin(), outFrame.data.end(), 0);
-
-  // Coordinate Systems:
-  // Source Space: (0,0) is Top-Left of the source image. Width/Height =
-  // f.width, f.height. Dest Space:   (0,0) is Top-Left of the main canvas.
-  // Width/Height = w, h.
-
-  // User Params:
-  // transform.x, transform.y: OFFSET from the CENTER of the canvas.
-  //    (0,0) means the image center is at the canvas center.
-  //    (100,0) means the image center is 100px to the right.
-  // transform.rotation: Degrees clockwise.
-  // transform.scaleX/Y: Scaling factor.
 
   const double degToRad = M_PI / 180.0;
   double theta = transform.rotation * degToRad;
@@ -116,22 +100,13 @@ Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
   double srcCY = f.height * 0.5;
 
   // Target Center on Canvas
-  // CanvasCenter + Offset
   double dstCX = (w * 0.5) + transform.x;
   double dstCY = (h * 0.5) + transform.y;
 
-  // Inverse Mapping Loop
-  // We iterate over the DESTINATION pixels and find which SOURCE pixel maps to
-  // it.
-
-  // Optimization: Calculate Bounding Box to minimize loops
-  // Corners of the Scaled & Rotated Image in Dest Space
+  // Optimize bounding box logic calculation...
   double hw = srcCX * sx;
   double hh = srcCY * sy;
 
-  // 4 corners relative to (0,0) BEFORE rotation/translation
-  // Top-Left (-hw, -hh), Top-Right (hw, -hh), Bottom-Right (hw, hh),
-  // Bottom-Left (-hw, hh)
   double c_x[] = {-hw, hw, hw, -hw};
   double c_y[] = {-hh, -hh, hh, hh};
 
@@ -139,42 +114,30 @@ Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
   double minY = h, maxY = 0;
 
   for (int i = 0; i < 4; ++i) {
-    // Rotate and Translate
     double rx = c_x[i] * cos_t - c_y[i] * sin_t + dstCX;
     double ry = c_x[i] * sin_t + c_y[i] * cos_t + dstCY;
 
-    if (rx < minX)
-      minX = rx;
-    if (rx > maxX)
-      maxX = rx;
-    if (ry < minY)
-      minY = ry;
-    if (ry > maxY)
-      maxY = ry;
+    if (rx < minX) minX = rx;
+    if (rx > maxX) maxX = rx;
+    if (ry < minY) minY = ry;
+    if (ry > maxY) maxY = ry;
   }
 
-  // Clip to Canvas Bounds
   int startX = std::max(0, (int)std::floor(minX));
   int endX = std::min(w, (int)std::ceil(maxX) + 1);
   int startY = std::max(0, (int)std::floor(minY));
   int endY = std::min(h, (int)std::ceil(maxY) + 1);
 
-  // Parallelize Y loop? For now single thread is safer inside evaluate's async
-  // Precalculate safe bounds for source to avoid boundary checks inside inner
-  // loop
   int srcMaxX = f.width - 1;
   int srcMaxY = f.height - 1;
 
-  // Access pointers
   const uint32_t *srcData = reinterpret_cast<const uint32_t *>(f.data.data());
   uint32_t *dstData = reinterpret_cast<uint32_t *>(outFrame.data.data());
 
-  // Optimized calculation outside the pixel loop
   const double invSx = 1.0 / sx;
   const double invSy = 1.0 / sy;
 
   for (int y = startY; y < endY; ++y) {
-    // Pre-calculate Y-dependent components of the inverse transform
     double bY = y - dstCY;
     double rX_base = bY * sin_t;
     double rY_base = bY * cos_t;
@@ -183,7 +146,6 @@ Frame Clip::render(double time, int w, int h, double fps, long absoluteFrame) {
     for (int x = startX; x < endX; ++x) {
       double bX = x - dstCX;
 
-      // Inverse Rotate + Scale + Translate
       double rX = (bX * cos_t + rX_base) * invSx;
       double rY = (-bX * sin_t + rY_base) * invSy;
 

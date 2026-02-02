@@ -2,6 +2,31 @@
 #include <iostream>
 #include <chrono>
 #include <iomanip>
+#include <cstdarg> // For va_list
+
+extern "C" {
+    #include <libavutil/log.h>
+}
+
+// Custom FFmpeg Log Callback to suppress specific warnings
+static void quiet_log_callback(void* ptr, int level, const char* fmt, va_list vl) {
+    // 1. Format the message to inspect it
+    char line[1024];
+    va_list vl_copy;
+    va_copy(vl_copy, vl);
+    vsnprintf(line, sizeof(line), fmt, vl_copy);
+    va_end(vl_copy);
+
+    std::string msg(line);
+
+    // 2. SURGICAL FILTER: Drop "mp3float" timestamp warnings
+    if (msg.find("mp3float") != std::string::npos) return;
+    if (msg.find("discarded samples") != std::string::npos) return;
+    
+    // 3. Forward others to default handler
+    // Note: We deliberately use the default callback for everything else
+    av_log_default_callback(ptr, level, fmt, vl);
+}
 
 namespace rocky {
 
@@ -12,6 +37,10 @@ void Logger::init(const std::string& log_file_path) {
     if (!initialized_) {
         log_file_.open(log_file_path, std::ios::out | std::ios::app);
         initialized_ = true;
+        
+        // Register FFmpeg Filter
+        av_log_set_callback(quiet_log_callback);
+        
         info("Logger initialized: " + log_file_path);
     }
 }

@@ -264,7 +264,18 @@ class RockyToolbar(QFrame):
         self.action_render = btn_procesar.add_action("Renderizar")
         layout.addWidget(btn_procesar)
 
-        # 4. VENTANA
+        # 4. VER
+        btn_ver = ToolbarMenuButton("Ver", self)
+        self.action_zoom_in = btn_ver.add_action("Zoom In (+)", shortcut="Ctrl++")
+        self.action_zoom_out = btn_ver.add_action("Zoom Out (-)", shortcut="Ctrl+-")
+        self.action_zoom_fit = btn_ver.add_action("Ajustar a la Ventana", shortcut="Shift+Z")
+        btn_ver.menu.addSeparator()
+        self.action_audit = btn_ver.add_action("🔍 Ejecutar Auditoría")
+        btn_ver.menu.addSeparator()
+        btn_ver.add_action("Restablecer Zoom")
+        layout.addWidget(btn_ver)
+
+        # 5. VENTANA
         btn_ventana = ToolbarMenuButton("Ventana", self)
         btn_ventana.add_action("Timeline")
         btn_ventana.add_action("Visor")
