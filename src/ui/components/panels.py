@@ -673,7 +673,8 @@ class RockyPanel(QFrame):
             }}
         """)
         content_layout = QVBoxLayout(self.content_area)
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        # Add a bit of bottom padding for breathing room in all panels
+        content_layout.setContentsMargins(0, 0, 0, 6)
         content_layout.setSpacing(0)
         
         # SPECIAL CASE: Tools Panel lives IN THE HEADER

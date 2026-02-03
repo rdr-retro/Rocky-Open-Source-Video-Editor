@@ -364,28 +364,35 @@ class TimelinePainter:
                 global_proxy_on = main_window.toolbar.btn_proxy.isChecked()
         except: pass
 
-        px_active = (p_status == ProxyStatus.READY and getattr(clip, 'use_proxy', False) and global_proxy_on)
-        
+        # Logic: 
+        # - Orange: Generating
+        # - Green: Ready and Global Proxy is ON
+        # - White: Else
+        px_tint = None
+        if p_status == ProxyStatus.GENERATING:
+            px_tint = QColor(dt.ACCENT_WARNING)
+        elif p_status == ProxyStatus.READY and global_proxy_on:
+            px_tint = QColor(dt.ACCENT_SUCCESS)
+            
         # 2. Draw PX Button (Rightmost)
         px_x = clip_x + clip_w - button_w - cut_size - 4
         px_y = track_y + 1 + (self.Dimensions.HEADER_HEIGHT - button_h) / 2
         rect_px = QRectF(px_x, px_y, button_w, button_h)
         
         if not self.img_px.isNull():
-            if px_active:
-                # Proper Tinting: Create a copy and tint it green
-                # This avoids messing with the clip's background
+            if px_tint:
+                # Proper Tinting: Create a copy and tint it
                 tinted = self.img_px.copy()
                 tp = QPainter(tinted)
                 tp.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-                tp.fillRect(tinted.rect(), QColor(0, 255, 0)) # Clean Green
+                tp.fillRect(tinted.rect(), px_tint)
                 tp.end()
                 painter.drawImage(rect_px, tinted)
             else:
                 # Normal state: White image as is
                 painter.drawImage(rect_px, self.img_px)
         else:
-            painter.setPen(QColor(0, 255, 0) if px_active else self.Palette.BTN_TEXT_INACTIVE)
+            painter.setPen(px_tint if px_tint else self.Palette.BTN_TEXT_INACTIVE)
             painter.drawText(rect_px, Qt.AlignmentFlag.AlignCenter, "PX")
 
         # 3. Draw FX Button (Left of PX)
@@ -420,17 +427,34 @@ class TimelinePainter:
         thumb_h = h
         thumb_w = int(thumb_h * 1.77)
         
-        # Only draw if the thumbnail position overlaps with viewport
-        if x + thumb_w > visible_rect.left() and x < visible_rect.right():
-             self._paint_thumb(painter, clip.thumbnails[0], x, y, thumb_w, thumb_h)
-        
+        # Determine thumbnail positions (start, middle, end)
+        start_x = x
+        mid_x = x + (w - thumb_w) / 2
         end_x = x + w - thumb_w
-        if end_x + thumb_w > visible_rect.left() and end_x < visible_rect.right() and w > thumb_w * 2:
+        
+        # Only draw when there is enough space to avoid heavy overlap
+        draw_start = True
+        draw_end = w >= thumb_w * 2
+        draw_mid = w >= thumb_w * 3 and len(clip.thumbnails) > 1
+        
+        # Only draw if the thumbnail position overlaps with viewport
+        if draw_start and start_x + thumb_w > visible_rect.left() and start_x < visible_rect.right():
+             self._paint_thumb(painter, clip.thumbnails[0], start_x, y, thumb_w, thumb_h)
+        
+        if draw_mid and mid_x + thumb_w > visible_rect.left() and mid_x < visible_rect.right():
+             mid_idx = 1 if len(clip.thumbnails) > 1 else 0
+             self._paint_thumb(painter, clip.thumbnails[mid_idx], mid_x, y, thumb_w, thumb_h)
+        
+        if draw_end and end_x + thumb_w > visible_rect.left() and end_x < visible_rect.right() and len(clip.thumbnails) > 2:
              self._paint_thumb(painter, clip.thumbnails[2], end_x, y, thumb_w, thumb_h)
 
     def _paint_thumb(self, painter, thumb_data, x, y, w, h):
         """Internal helper for pixel data painting."""
         try:
+            if isinstance(thumb_data, QImage):
+                painter.drawImage(QRectF(x, y, w, h), thumb_data)
+                return
+            
             height, width, channel = thumb_data.shape
             bytes_per_line = 3 * width
             q_img = QImage(thumb_data.data, width, height, bytes_per_line, QImage.Format_RGB888)

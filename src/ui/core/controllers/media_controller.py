@@ -166,6 +166,7 @@ class MediaController:
 
         clip.proxy_status = ProxyStatus.GENERATING
         self.update_proxy_button_state()
+        self.mw.timeline_widget.update()
         
         worker = ProxyWorker(clip, clip.file_path)
         worker.finished.connect(lambda c, p, s: self._on_proxy_finished(c, p, s))

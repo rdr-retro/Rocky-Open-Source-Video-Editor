@@ -275,6 +275,12 @@ class RockyApp(QMainWindow):
         self.middle_section = self._create_middle_section()
         main_layout.addWidget(self.middle_section, stretch=1)
         
+        # Spacer between panels and status bar for visual breathing room
+        self._status_spacer = QFrame()
+        self._status_spacer.setFixedHeight(6)
+        self._status_spacer.setStyleSheet("background: transparent;")
+        main_layout.addWidget(self._status_spacer)
+        
         # 3. Status Bar
         self.status_bar = self._create_status_bar()
         main_layout.addWidget(self.status_bar)
@@ -334,7 +340,8 @@ class RockyApp(QMainWindow):
     def _create_status_bar(self):
         status_frame = QFrame()
         status_frame.setFixedHeight(25)
-        status_frame.setStyleSheet("background-color: #1e1e1e; border-top: 1px solid #333333;")
+        # Match the top toolbar look: transparent background, no border
+        status_frame.setStyleSheet("background-color: transparent; border: none;")
         layout = QHBoxLayout(status_frame)
         layout.setContentsMargins(10, 0, 10, 0)
         
@@ -1624,4 +1631,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
