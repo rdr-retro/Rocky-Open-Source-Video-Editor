@@ -60,7 +60,7 @@ class MediaImportWorker(QThread):
                         rot = temp_src.get_rotation()
                         
                         # Fallback Duration
-                        engine_dur = temp_src.get_duration_seconds()
+                        engine_dur = temp_src.get_duration()
                         if engine_dur > 0:
                             dur_sec = engine_dur
                             dur_ticks = int(dur_sec * 60000)

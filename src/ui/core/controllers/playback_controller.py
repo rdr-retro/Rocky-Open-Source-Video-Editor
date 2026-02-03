@@ -8,13 +8,22 @@ class PlaybackController:
         self.playback_timer.timeout.connect(self.on_playback_tick)
         self._last_playback_tick = -1
 
-    def toggle_play(self):
-        """Toggles the playback state. Restores hidden panels if needed."""
+    def toggle_play(self, return_to_start: bool = True):
+        """
+        Toggles the playback state. 
+        If stopping:
+          - If return_to_start is True, playhead returns to its position before playback (Stop).
+          - If return_to_start is False, playhead stays at current playback position (Pause).
+        """
         if hasattr(self.mw, 'middle_section') and self.mw.middle_section.isHidden():
             self.mw.middle_section.show()
             self.mw.status_label.setText("Interfaz restaurada")
 
-        self.mw.model.blueline.playing = not self.mw.model.blueline.playing
+        was_playing = self.mw.model.blueline.playing
+        self.mw.model.blueline.playing = not was_playing
+        
+        # Reset last tick to avoid jumps when starting from a new position
+        self._last_playback_tick = -1
         
         # Snap playback rate
         if 0.95 < self.mw.playback_rate < 1.05:
@@ -29,7 +38,6 @@ class PlaybackController:
             
             # Explicitly ensure we reset resolution for playback
             self.mw.set_preview_scaling(False)
-            
             self.mw.audio_player.is_playing_safety_flag = True
             
             active_fps = self.mw.get_fps()
@@ -45,19 +53,25 @@ class PlaybackController:
             
             # Restore High Quality
             self.mw.set_preview_scaling(False)
-            
             self.mw.video_worker.request_frame(self.mw.model.blueline.playhead_tick)
 
-            # Vegas Style
-            if hasattr(self.mw, 'playback_start_tick'):
-                tick = self.mw.playback_start_tick
-                self.mw.model.blueline.set_playhead_tick(tick)
-                
-                fps = self.mw.get_fps()
-                frame_index = tick / (TICKS_PER_SECOND / fps)
-                tc = self.mw.model.format_timecode(tick, fps)
-                self.mw.on_time_changed(tick / TICKS_PER_SECOND, int(frame_index), tc, True, tick=tick)
-                self.mw.timeline_widget.update()
+            # --- NAVIGATION LOGIC ---
+            # If we were playing and now we stopped, handle return-to-start logic
+            if was_playing:
+                if return_to_start and hasattr(self.mw, 'playback_start_tick'):
+                    # VEGAS STYLE: Stop and Return to start
+                    tick = self.mw.playback_start_tick
+                    self.mw.model.blueline.set_playhead_tick(tick)
+                    
+                    fps = self.mw.get_fps()
+                    frame_index = tick / (TICKS_PER_SECOND / fps)
+                    tc = self.mw.model.format_timecode(tick, fps)
+                    self.mw.on_time_changed(tick / TICKS_PER_SECOND, int(frame_index), tc, True, tick=tick)
+                    self.mw.timeline_widget.update()
+                else:
+                    # PAUSE STYLE: Stay at current position
+                    # We do nothing here as the playhead is already at the current_tick from last on_playback_tick
+                    pass
 
     def on_playback_rate_changed(self, value):
         new_rate = value / 100.0

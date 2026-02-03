@@ -4,6 +4,7 @@ import subprocess
 import json
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+from functools import lru_cache
 
 @dataclass
 class EncoderConfig:
@@ -219,7 +220,7 @@ class FFmpegUtils:
                 )
 
     @staticmethod
-    def get_proxy_command(input_path: str, output_path: str) -> List[str]:
+    def get_proxy_command(input_path: str, output_path: str, rotation: int = 0) -> List[str]:
         """
         Returns the optimal FFmpeg command for proxy generation.
         PRESERVES NATIVE ORIENTATION: Uses -noautorotate and maps metadata
@@ -228,11 +229,7 @@ class FFmpegUtils:
         ffmpeg = FFmpegUtils.get_ffmpeg_path()
         hw = FFmpegUtils.detect_hardware()
         
-        # 1. Gather input specs
-        specs = FFmpegUtils.get_media_specs(input_path)
-        rot = specs.get('rotation', 0)
-        
-        # 2. Base Command (Disable auto-rotation to keep original tag context)
+        # Base Command (Disable auto-rotation to keep original tag context)
         cmd = [ffmpeg, "-y", "-noautorotate", "-i", input_path]
 
         # 3. Scaling Strategy (Scale native dimensions to fit ~540 height)
@@ -284,86 +281,101 @@ class FFmpegUtils:
 
         # 5. CRITICAL: METADATA PERSISTENCE
         # Map all metadata and explicitly re-apply rotation tag in case it was lost
-        cmd.extend(["-map_metadata", "0", f"-metadata:s:v:0", f"rotate={rot}"])
+        cmd.extend(["-map_metadata", "0", f"-metadata:s:v:0", f"rotate={rotation}"])
         
         cmd.append(output_path)
         return cmd
     @staticmethod
+    @lru_cache(maxsize=128)
     def get_media_specs(file_path: str) -> dict:
         """
-        ULTRA-ROBUST Prober for all media types.
-        Returns common specs using FFprobe with Apple-specific tag support.
-        If FFprobe fails, returns width=0 to signal Engine Fallback.
+        DYNAMIC MULTI-STAGE Prober.
+        Attempts metadata extraction in 3 stages:
+        1. FAST (1.5s): No analysis. Works for 90% of files.
+        2. SAFE (3.0s): Moderate analysis (1MB).
+        3. DEEP (5.0s): Heavy analysis (5MB) for problematic 4K/HDR files.
         """
-        specs = {'width': 0, 'height': 0, 'fps': 30.0, 'rotation': 0, 'duration': 10.0}
-        
-        try:
-            ffp = FFmpegUtils.get_ffprobe_path()
-            cmd = [
-                ffp, '-v', 'error',
-                '-analyzeduration', '20M', '-probesize', '20M',
-                '-show_entries', 'stream=width,height,r_frame_rate,duration:format=duration:side_data=rotation',
-                '-of', 'json', file_path
-            ]
-            
-            # Increased to 15.0s to avoid Engine Fallback for heavy 4K files on Mac
-            output = subprocess.check_output(cmd, timeout=15.0).decode('utf-8')
-            data = json.loads(output)
-            
-            # 1. Get GLOBAL duration from format (most reliable for mixed media)
-            specs['duration'] = float(data.get('format', {}).get('duration', 0.0))
-            
-            # 2. Extract specific stream info if available
-            if 'streams' in data and data['streams']:
-                # Find maximum stream duration as safety fallback
-                max_s_dur = 0.0
-                for s in data['streams']:
-                    try:
+        stages = [
+            {'name': 'FAST', 'args': [], 'timeout': 1.5},
+            {'name': 'SAFE', 'args': ['-analyzeduration', '1M', '-probesize', '1M'], 'timeout': 3.0},
+            {'name': 'DEEP', 'args': ['-analyzeduration', '5M', '-probesize', '5M'], 'timeout': 5.0}
+        ]
+
+        ffp = FFmpegUtils.get_ffprobe_path()
+        last_error = "Unknown Error"
+
+        for stage in stages:
+            try:
+                cmd = [ffp, '-v', 'error'] + stage['args'] + [
+                    '-show_entries', 'stream=width,height,r_frame_rate,duration:format=duration:side_data=rotation',
+                    '-of', 'json', file_path
+                ]
+                
+                output = subprocess.check_output(cmd, timeout=stage['timeout']).decode('utf-8')
+                data = json.loads(output)
+                
+                # Validation: If we don't have at least a duration or a stream, the stage failed
+                has_duration = float(data.get('format', {}).get('duration', 0.0)) > 0
+                has_streams = 'streams' in data and len(data['streams']) > 0
+                
+                if not (has_duration or has_streams):
+                    continue
+
+                # SUCCESS: Parse and return
+                specs = {'width': 0, 'height': 0, 'fps': 30.0, 'rotation': 0, 'duration': 10.0}
+                specs['duration'] = float(data.get('format', {}).get('duration', 0.0))
+                
+                if has_streams:
+                    # Find maximum stream duration as safety fallback
+                    max_s_dur = 0.0
+                    for s in data['streams']:
                         sdur = float(s.get('duration', 0.0))
                         if sdur > max_s_dur: max_s_dur = sdur
-                    except: pass
-                
-                if specs['duration'] <= 0:
-                    specs['duration'] = max_s_dur
-                
-                # Prefer video stream for dimensions
-                target_stream = data['streams'][0]
-                for s in data['streams']:
-                    if s.get('codec_type') == 'video':
-                        target_stream = s
-                        break
-                
-                s = target_stream
-                specs['width'] = s.get('width', 0)
-                specs['height'] = s.get('height', 0)
-                
-                # If duration was 0 in format, check stream
-                if specs['duration'] <= 0:
-                    specs['duration'] = float(s.get('duration', 0.0))
-                
-                # FPS Robust parsing
-                rfps = s.get('r_frame_rate', '30/1')
-                try:
+                    
+                    if specs['duration'] <= 0:
+                        specs['duration'] = max_s_dur
+                    
+                    # Prefer video stream for dimensions
+                    target_stream = data['streams'][0]
+                    for s in data['streams']:
+                        if s.get('codec_type') == 'video':
+                            target_stream = s
+                            break
+                    
+                    s = target_stream
+                    specs['width'] = s.get('width', 0)
+                    specs['height'] = s.get('height', 0)
+                    
+                    if specs['duration'] <= 0:
+                        specs['duration'] = float(s.get('duration', 0.0))
+                    
+                    # FPS parsing
+                    rfps = s.get('r_frame_rate', '30/1')
                     if '/' in rfps:
                         num, den = map(int, rfps.split('/'))
                         specs['fps'] = num / den if den > 0 else 30.0
                     else:
                         specs['fps'] = float(rfps or 30.0)
-                except: specs['fps'] = 30.0
-                
-                # Rotation search
-                rot = 0
-                for sd in s.get('side_data', []):
-                    if 'rotation' in sd: rot = int(sd['rotation']); break
-                if rot == 0:
-                    rot = int(s.get('tags', {}).get('rotate', 0))
-                if rot == 0:
-                    rot = int(data.get('format', {}).get('tags', {}).get('rotate', 0))
-                
-                specs['rotation'] = rot
-                # Duration is now pre-handled at the top of the stream block
-                
-        except Exception as e:
-            print(f"INFO: FFprobe stage skipped for {os.path.basename(file_path)}: {e}")
-            
-        return specs
+                    
+                    # Rotation
+                    rot = 0
+                    for sd in s.get('side_data', []):
+                        if 'rotation' in sd: rot = int(sd['rotation']); break
+                    if rot == 0:
+                        rot = int(s.get('tags', {}).get('rotate', 0))
+                    if rot == 0:
+                        rot = int(data.get('format', {}).get('tags', {}).get('rotate', 0))
+                    specs['rotation'] = rot
+                    
+                return specs
+
+            except subprocess.TimeoutExpired:
+                last_error = f"Timeout in {stage['name']}"
+                continue
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+        # If all stages fail
+        print(f"INFO: All FFprobe stages failed for {os.path.basename(file_path)}: {last_error}")
+        return {'width': 0, 'height': 0, 'fps': 30.0, 'rotation': 0, 'duration': 0.0}

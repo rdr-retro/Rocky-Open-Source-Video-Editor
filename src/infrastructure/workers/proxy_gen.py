@@ -50,7 +50,8 @@ class ProxyWorker(QThread):
 
             # Generate Proxy using FFmpeg
             from ..ffmpeg_utils import FFmpegUtils
-            command = FFmpegUtils.get_proxy_command(self.source_path, proxy_path)
+            rot = getattr(self.clip, 'source_rotation', 0)
+            command = FFmpegUtils.get_proxy_command(self.source_path, proxy_path, rotation=rot)
             
             self._process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             _, stderr = self._process.communicate()

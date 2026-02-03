@@ -389,6 +389,8 @@ class RockyApp(QMainWindow):
         """Global key bindings for the application."""
         QShortcut(Qt.Key_Delete, self, self.delete_selection)
         QShortcut(Qt.Key_Space, self, self.toggle_play)
+        QShortcut(Qt.Key_Return, self, self.toggle_pause)
+        QShortcut(Qt.Key_Enter, self, self.toggle_pause)
         # Cinema Mode Shortcut
         QShortcut("Ctrl+Alt+C", self, self.toggle_cinema_mode)
 
@@ -851,10 +853,13 @@ class RockyApp(QMainWindow):
                 viewer_panel.set_project_resolution(self.p_width, self.p_height)
             
             # Connect standard controls if they exist
-            if hasattr(viewer_panel, 'btn_rewind'):
-                viewer_panel.btn_rewind.clicked.connect(lambda: self.on_rewind())
             if hasattr(viewer_panel, 'btn_play_pause'):
+                viewer_panel.btn_play_pause.setFocusPolicy(Qt.FocusPolicy.NoFocus)
                 viewer_panel.btn_play_pause.clicked.connect(self.toggle_play)
+            
+            if hasattr(viewer_panel, 'btn_rewind'):
+                viewer_panel.btn_rewind.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+                viewer_panel.btn_rewind.clicked.connect(lambda: self.on_rewind())
             if hasattr(viewer_panel, 'btn_fullscreen'):
                 viewer_panel.btn_fullscreen.clicked.connect(self._toggle_fullscreen_viewer)
             if hasattr(viewer_panel, 'slider_rate'):
@@ -1225,7 +1230,8 @@ class RockyApp(QMainWindow):
     def on_thumbnails_finished(self, clip, thumbs): self.media_ctrl.on_thumbnails_finished(clip, thumbs)
     def _on_proxy_finished(self, clip, proxy_path, success): self.media_ctrl._on_proxy_finished(clip, proxy_path, success)
     def update_proxy_button_state(self): self.media_ctrl.update_proxy_button_state()
-    def toggle_play(self): self.playback_ctrl.toggle_play()
+    def toggle_play(self): self.playback_ctrl.toggle_play(return_to_start=True)
+    def toggle_pause(self): self.playback_ctrl.toggle_play(return_to_start=False)
     def on_playback_rate_changed(self, value): self.playback_ctrl.on_playback_rate_changed(value)
     def on_playback_rate_released(self): self.playback_ctrl.on_playback_rate_released()
     def _instantiate_source(self, path, track_type=None): return self.media_ctrl.instantiate_source(path, track_type)

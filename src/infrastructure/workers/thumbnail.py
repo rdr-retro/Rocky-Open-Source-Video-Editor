@@ -31,9 +31,7 @@ class ThumbnailWorker(QThread):
                 src = rocky_core.VideoSource(self.file_path)
             
             # ORIENTATION AWARE THUMBS
-            from ..ffmpeg_utils import FFmpegUtils
-            specs = FFmpegUtils.get_media_specs(self.file_path)
-            rot = specs['rotation']
+            rot = getattr(self.clip, 'source_rotation', 0)
             
             tw, th = 160, 90
             if abs(rot) == 90 or abs(rot) == 270:
