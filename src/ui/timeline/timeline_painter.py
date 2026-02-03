@@ -62,6 +62,8 @@ class TimelinePainter:
         
         # Performance Cache
         self._waveform_cache = {} # Key: (clip_id, width, height), Value: QImage
+        self._peaks_cache = {} # Key: (clip_id, pps_bucket, path, start, dur, offset, buckets)
+        self._last_waveform_preview = {} # Key: clip_id, Value: dict with img + ratios
         self._last_pps = timeline.pixels_per_second
 
     def paint(self, event):
@@ -75,6 +77,11 @@ class TimelinePainter:
         visible_rect = event.rect()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        
+        # Invalidate waveform cache if zoom level changed
+        if abs(self.timeline.pixels_per_second - self._last_pps) > 0.001:
+            self.invalidate_cache()
+            self._last_pps = self.timeline.pixels_per_second
         
         try:
             # 1. BACKGROUND
@@ -223,7 +230,9 @@ class TimelinePainter:
                 if clip_w > 10:
                     painter.save()
                     painter.setClipPath(clip_path)
-                    self._draw_waveform(painter, clip, clip_x, content_y, clip_w, content_h, visible_rect)
+                    # During zoom/scroll interaction, skip waveform to keep UI fluid
+                    if not getattr(self.timeline, "_is_view_interacting", False):
+                        self._draw_waveform(painter, clip, clip_x, content_y, clip_w, content_h, visible_rect)
                     painter.restore()
             
             # 3. Text & Buttons
@@ -469,21 +478,34 @@ class TimelinePainter:
         
         if draw_x_start >= draw_x_end: return
         
-        visible_pixel_w = int(draw_x_end - draw_x_start)
+        draw_x_start_i = int(draw_x_start)
+        draw_x_end_i = int(draw_x_end)
+        visible_pixel_w = int(draw_x_end_i - draw_x_start_i)
         if visible_pixel_w <= 0: return
 
         # 2. Map screen region to clip-local time for C++ peak extraction
         clip_duration_sec = clip.duration_ticks / float(TICKS_PER_SECOND)
         source_clip_start_sec = clip.source_offset_ticks / float(TICKS_PER_SECOND)
         
-        start_ratio = (draw_x_start - x) / float(w)
-        width_ratio = (draw_x_end - draw_x_start) / float(w)
+        start_ratio = (draw_x_start_i - x) / float(w)
+        width_ratio = (draw_x_end_i - draw_x_start_i) / float(w)
         
         req_start_time = source_clip_start_sec + (start_ratio * clip_duration_sec)
         req_duration = width_ratio * clip_duration_sec
         
-        # Number of buckets = Exactly the number of pixels we will draw
-        num_buckets = visible_pixel_w
+        # Adaptive sampling: lower density while user is zooming/scrolling
+        step = 1
+        if getattr(self.timeline, "_is_view_interacting", False):
+            step = 3
+        if self.timeline.pixels_per_second > 300:
+            step = max(step, 2)
+        if visible_pixel_w > 1200:
+            step = max(step, 2)
+        if visible_pixel_w > 2000:
+            step = max(step, 4)
+        
+        # Number of buckets = pixels we will draw (downsampled when step > 1)
+        num_buckets = max(1, int(visible_pixel_w / step))
         
         try:
             # Find the editor instance to access the media cache
@@ -508,9 +530,56 @@ class TimelinePainter:
             if path_to_use not in editor.media_source_cache: return
             source = editor.media_source_cache[path_to_use]
             
-            # OPTIMIZED CALL: Request only visible peaks
-            peaks = source.get_peaks(req_start_time, req_duration, num_buckets)
-            if not peaks: return
+            # If user is actively zooming/scrolling, try to reuse last preview to avoid recompute
+            if getattr(self.timeline, "_is_view_interacting", False):
+                preview = self._last_waveform_preview.get(id(clip))
+                if preview:
+                    pr = preview
+                    # If the visible region hasn't changed much, reuse the cached image
+                    if abs(pr["start_ratio"] - start_ratio) < 0.03 and abs(pr["width_ratio"] - width_ratio) < 0.03:
+                        painter.drawImage(QRectF(draw_x_start_i, y, visible_pixel_w, h), pr["img"])
+                        return
+
+            # Cache key includes zoom, visible region, and clip timing state
+            cache_key = (
+                id(clip),
+                int(self.timeline.pixels_per_second * 10),
+                draw_x_start_i,
+                draw_x_end_i,
+                int(h),
+                int(clip.start_tick),
+                int(clip.duration_ticks),
+                int(clip.source_offset_ticks),
+                path_to_use,
+                step,
+            )
+            
+            cached = self._waveform_cache.get(cache_key)
+            if cached is not None:
+                painter.drawImage(QRectF(draw_x_start_i, y, visible_pixel_w, h), cached)
+                return
+            
+            # --- Peaks cache (full-clip at current zoom, capped) ---
+            max_buckets = 2000 if getattr(self.timeline, "_is_view_interacting", False) else 4000
+            full_buckets = max(1, min(int(w), max_buckets))
+            peaks_key = (
+                id(clip),
+                int(self.timeline.pixels_per_second * 10),
+                path_to_use,
+                int(clip.start_tick),
+                int(clip.duration_ticks),
+                int(clip.source_offset_ticks),
+                full_buckets,
+            )
+            
+            peaks = self._peaks_cache.get(peaks_key)
+            if peaks is None:
+                # Compute peaks for full clip duration once
+                peaks = source.get_peaks(source_clip_start_sec, clip_duration_sec, full_buckets)
+                if not peaks: return
+                if len(self._peaks_cache) > 40:
+                    self._peaks_cache.clear()
+                self._peaks_cache[peaks_key] = peaks
             
             # Colors from hondaaudio.py
             color_l = QColor("#00d4ff") # Cyan
@@ -519,29 +588,55 @@ class TimelinePainter:
             channel_h = h / 2
             scale = (channel_h / 2) * 0.8 # Waveform amplitude scale
             
-            # Draw L (Top half of content area)
-            painter.setPen(QPen(color_l, 1))
-            y_center_l = y + channel_h / 2
+            # Render to offscreen image for caching
+            img = QImage(visible_pixel_w, int(h), QImage.Format.Format_ARGB32_Premultiplied)
+            img.fill(Qt.GlobalColor.transparent)
+            ip = QPainter(img)
+            ip.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            
+            # Draw L (Top half)
+            ip.setPen(QPen(color_l, 1))
+            y_center_l = (channel_h / 2)
             for i in range(num_buckets):
-                px = draw_x_start + i
-                p_min = peaks[i*2]
-                p_max = peaks[i*2+1]
+                px = i * step
+                sample_ratio = (start_ratio + (px / float(w))) if w > 0 else 0.0
+                idx = int(sample_ratio * (full_buckets - 1))
+                idx = max(0, min(full_buckets - 1, idx))
+                p_min = peaks[idx*2]
+                p_max = peaks[idx*2+1]
                 
                 y0 = y_center_l - (p_max * scale)
                 y1 = y_center_l - (p_min * scale)
-                painter.drawLine(px, int(y0), px, int(y1))
+                ip.drawLine(px, int(y0), px, int(y1))
 
             # Draw R (Bottom half)
-            painter.setPen(QPen(color_r, 1))
-            y_center_r = y + channel_h + channel_h / 2
+            ip.setPen(QPen(color_r, 1))
+            y_center_r = channel_h + (channel_h / 2)
             for i in range(num_buckets):
-                px = draw_x_start + i
-                p_min = peaks[i*2]
-                p_max = peaks[i*2+1]
+                px = i * step
+                sample_ratio = (start_ratio + (px / float(w))) if w > 0 else 0.0
+                idx = int(sample_ratio * (full_buckets - 1))
+                idx = max(0, min(full_buckets - 1, idx))
+                p_min = peaks[idx*2]
+                p_max = peaks[idx*2+1]
                 
                 y0 = y_center_r - (p_max * scale)
                 y1 = y_center_r - (p_min * scale)
-                painter.drawLine(px, int(y0), px, int(y1))
+                ip.drawLine(px, int(y0), px, int(y1))
+            
+            ip.end()
+            
+            # Simple cache cap to avoid unbounded growth
+            if len(self._waveform_cache) > 120:
+                self._waveform_cache.clear()
+            self._waveform_cache[cache_key] = img
+            self._last_waveform_preview[id(clip)] = {
+                "img": img,
+                "start_ratio": start_ratio,
+                "width_ratio": width_ratio
+            }
+            
+            painter.drawImage(QRectF(draw_x_start_i, y, visible_pixel_w, h), img)
                 
         except Exception as e:
             pass
@@ -642,8 +737,12 @@ class TimelinePainter:
         if clip_id:
             keys_to_del = [k for k in self._waveform_cache.keys() if k[0] == clip_id]
             for k in keys_to_del: del self._waveform_cache[k]
+            if clip_id in self._last_waveform_preview:
+                del self._last_waveform_preview[clip_id]
         else:
             self._waveform_cache.clear()
+            self._peaks_cache.clear()
+            self._last_waveform_preview.clear()
 
     def _draw_playhead(self, painter):
         """Draw playhead using absolute Tick projection."""

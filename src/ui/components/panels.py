@@ -1478,6 +1478,11 @@ class RockyPanel(QFrame):
                 """)
                 t_layout.addWidget(timeline_scroll, 1)
                 
+                # Mark timeline as interacting during horizontal scroll for lighter rendering
+                timeline_scroll.horizontalScrollBar().valueChanged.connect(
+                    lambda _=None, t=timeline_widget: t.mark_view_interacting()
+                )
+                
                 # Add sidebar and timeline to splitter
                 splitter.addWidget(sidebar)
                 splitter.addWidget(timeline_container)

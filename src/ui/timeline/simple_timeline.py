@@ -46,6 +46,10 @@ class SimpleTimeline(QWidget):
         self.selected_clips = []
         self._is_scrubbing = False
         self._last_signal_time = 0
+        self._is_view_interacting = False
+        self._view_interact_timer = QTimer(self)
+        self._view_interact_timer.setSingleShot(True)
+        self._view_interact_timer.timeout.connect(self._clear_view_interaction)
         
         # Interaction Envelopes
         self.dragging_fade_in = False
@@ -142,6 +146,14 @@ class SimpleTimeline(QWidget):
     def paintEvent(self, event):
         """Delegate painting to TimelinePainter."""
         self.painter.paint(event)
+
+    def mark_view_interacting(self, cooldown_ms=120):
+        """Marks rapid view interaction (scroll/zoom) to enable lighter rendering."""
+        self._is_view_interacting = True
+        self._view_interact_timer.start(cooldown_ms)
+
+    def _clear_view_interaction(self):
+        self._is_view_interacting = False
     
     def mousePressEvent(self, event):
         """Handle mouse press - select clips, move playhead, or EDIT ENVELOPES."""
@@ -571,6 +583,7 @@ class SimpleTimeline(QWidget):
     def wheelEvent(self, event):
         """[VEGAS PRINCIPLE] Deterministic Zoom focused on absolute anchor time."""
         if event.modifiers() & Qt.ControlModifier:
+            self.mark_view_interacting()
             scroll_area = self.get_scroll_area_context()
             if not scroll_area: return
             h_scroll = scroll_area.horizontalScrollBar()
@@ -783,7 +796,7 @@ class SimpleTimeline(QWidget):
             menu.addSeparator()
 
         menu.addAction("Eliminar").triggered.connect(partial(self.delete_clip, clip))
-        menu.addAction("Dividir").triggered.connect(partial(self.split_clip_at_pos, clip, pos))
+        menu.addAction("Dividir").triggered.connect(partial(self.split_clip_at_playhead, clip))
         
         # Integración de Subtítulos
         menu.addSeparator()
@@ -847,6 +860,12 @@ class SimpleTimeline(QWidget):
     def split_clip_at_pos(self, clip, pos):
         if not clip: return
         split_tick = self.screenXToTick(pos.x())
+        self.split_clip(clip, split_tick)
+
+    def split_clip_at_playhead(self, clip):
+        """Split using the current playhead (timeline cursor) position."""
+        if not clip: return
+        split_tick = int(self.model.blueline.playhead_tick)
         self.split_clip(clip, split_tick)
 
     def split_clip(self, clip, split_tick):

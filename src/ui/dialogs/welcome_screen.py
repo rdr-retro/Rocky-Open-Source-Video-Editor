@@ -33,7 +33,7 @@ class WelcomeScreen(QDialog):
             #SplashCard {{
                 background-color: #1e1e1e;
                 border: 1px solid #333;
-                border-radius: 12px;
+                border-radius: 20px;
             }}
         """)
         
@@ -53,24 +53,16 @@ class WelcomeScreen(QDialog):
         self.img_label = QLabel()
         self.img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.img_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.img_label.setScaledContents(False)
+        self._welcome_pixmap = None
         
         # Resolve welcome.png path
         from ..core.utils import get_resource_path
         img_path = get_resource_path("welcome.png")
         
         if os.path.exists(img_path):
-            pixmap = QPixmap(img_path)
-            # Use KeepAspectRatioByExpanding to fill the width, then we'll crop/center
-            # This avoids horizontal stretching
-            scaled_pixmap = pixmap.scaled(600, 350, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
-            
-            # Crop to exactly 600x350 if it expanded vertically
-            if scaled_pixmap.height() > 350:
-                y_offset = (scaled_pixmap.height() - 350) // 2
-                scaled_pixmap = scaled_pixmap.copy(0, y_offset, 600, 350)
-            
-            self.img_label.setPixmap(scaled_pixmap)
-            self.img_label.setFixedSize(600, 350)
+            self._welcome_pixmap = QPixmap(img_path)
+            self._update_image()
         else:
             self.img_label.setText("Rocky Video Editor")
             self.img_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #888; background-color: #111;")
@@ -81,9 +73,7 @@ class WelcomeScreen(QDialog):
         # --- ROBUST ROUNDING MASK ---
         # Apply a mask to the container to ensure ALL child widgets (including image)
         # follow the 12px rounding without protrusions.
-        path = QPainterPath()
-        path.addRoundedRect(0, 0, 600, 500, 12, 12)
-        self.container.setMask(QRegion(path.toFillPolygon().toPolygon()))
+        self._update_container_mask()
         
         # --- BOTTOM SECTION: INFO ---
         self.info_area = QWidget()
@@ -141,6 +131,42 @@ class WelcomeScreen(QDialog):
         self.layout.addStretch()
         self.layout.addLayout(center_layout)
         self.layout.addStretch()
+
+    def _update_container_mask(self):
+        path = QPainterPath()
+        path.addRoundedRect(0, 0, self.container.width(), self.container.height(), 20, 20)
+        self.container.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+    def _update_image(self):
+        if not self._welcome_pixmap or self._welcome_pixmap.isNull():
+            return
+        
+        # Match image area to container width and 70% of height
+        target_w = self.container.width()
+        target_h = int(self.container.height() * 0.7)
+        if target_w <= 0 or target_h <= 0:
+            return
+        
+        self.img_label.setFixedSize(target_w, target_h)
+        
+        # Fill the area without stretching, crop from center if needed
+        scaled = self._welcome_pixmap.scaled(
+            target_w,
+            target_h,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        if scaled.width() != target_w or scaled.height() != target_h:
+            x_off = max(0, (scaled.width() - target_w) // 2)
+            y_off = max(0, (scaled.height() - target_h) // 2)
+            scaled = scaled.copy(x_off, y_off, target_w, target_h)
+        
+        self.img_label.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_container_mask()
+        self._update_image()
 
     def mousePressEvent(self, event):
         """Close if clicking outside the container."""
